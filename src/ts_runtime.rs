@@ -3,6 +3,41 @@
 //! This module provides a TypeScript/JavaScript runtime for plugins using deno_core.
 //! It enables native async/await support, solving the async command execution problem
 //! that existed with the Lua plugin system.
+//!
+//! # Core Concepts
+//!
+//! ## Buffers
+//! A buffer holds text content and may or may not be associated with a file.
+//! Each buffer has a unique numeric ID that persists for the editor session.
+//! Buffers track their content, modification state, cursor positions, and path.
+//! All text operations (insert, delete, read) use byte offsets, not character indices.
+//!
+//! ## Splits
+//! A split is a viewport pane that displays a buffer. The editor can have multiple
+//! splits arranged in a tree layout. Each split shows exactly one buffer, but the
+//! same buffer can be displayed in multiple splits. Use split IDs to control which
+//! pane displays which buffer.
+//!
+//! ## Virtual Buffers
+//! Special buffers created by plugins to display structured data like search results,
+//! diagnostics, or git logs. Virtual buffers support text properties (metadata attached
+//! to text ranges) that plugins can query when the user selects a line. Unlike normal
+//! buffers, virtual buffers are typically read-only and not backed by files.
+//!
+//! ## Text Properties
+//! Metadata attached to text ranges in virtual buffers. Each entry has text content
+//! and a properties object with arbitrary key-value pairs. Use getTextPropertiesAtCursor
+//! to retrieve properties at the cursor position (e.g., to get file/line info for "go to").
+//!
+//! ## Overlays
+//! Visual decorations applied to buffer text without modifying content. Overlays can
+//! change text color and add underlines. Use overlay IDs to manage them; prefix IDs
+//! enable batch removal (e.g., "lint:" prefix for all linter highlights).
+//!
+//! ## Modes
+//! Keybinding contexts that determine how keypresses are interpreted. Each buffer has
+//! a mode (e.g., "normal", "insert", "special"). Custom modes can inherit from parents
+//! and define buffer-local keybindings. Virtual buffers typically use custom modes.
 
 use crate::commands::Suggestion;
 use crate::event::BufferId;
@@ -114,7 +149,11 @@ struct TsRuntimeState {
     next_request_id: Rc<RefCell<u64>>,
 }
 
-/// Custom ops for the Fresh editor API
+/// Display a transient message in the editor's status bar
+///
+/// The message will be shown until the next status update or user action.
+/// Use for feedback on completed operations (e.g., "File saved", "2 matches found").
+/// @param message - Text to display; keep short (status bar has limited width)
 #[op2(fast)]
 fn op_fresh_set_status(state: &mut OpState, #[string] message: String) {
     if let Some(runtime_state) = state.try_borrow::<Rc<RefCell<TsRuntimeState>>>() {
@@ -126,11 +165,20 @@ fn op_fresh_set_status(state: &mut OpState, #[string] message: String) {
     tracing::info!("TypeScript plugin set_status: {}", message);
 }
 
+/// Log a debug message to the editor's trace output
+///
+/// Messages appear in stderr when running with RUST_LOG=debug.
+/// Useful for plugin development and troubleshooting.
+/// @param message - Debug message; include context like function name and relevant values
 #[op2(fast)]
 fn op_fresh_debug(#[string] message: String) {
     tracing::debug!("TypeScript plugin: {}", message);
 }
 
+/// Get the buffer ID of the focused editor pane
+///
+/// Returns 0 if no buffer is active (rare edge case).
+/// Use this ID with other buffer operations like getBufferText or insertText.
 #[op2(fast)]
 fn op_fresh_get_active_buffer_id(state: &mut OpState) -> u32 {
     if let Some(runtime_state) = state.try_borrow::<Rc<RefCell<TsRuntimeState>>>() {
@@ -142,6 +190,11 @@ fn op_fresh_get_active_buffer_id(state: &mut OpState) -> u32 {
     0
 }
 
+/// Get the byte offset of the primary cursor in the active buffer
+///
+/// Returns 0 if no cursor exists. For multi-cursor scenarios, use getAllCursors
+/// to get all cursor positions with selection info.
+/// Note: This is a byte offset, not a character index (UTF-8 matters).
 #[op2(fast)]
 fn op_fresh_get_cursor_position(state: &mut OpState) -> u32 {
     if let Some(runtime_state) = state.try_borrow::<Rc<RefCell<TsRuntimeState>>>() {
@@ -155,6 +208,12 @@ fn op_fresh_get_cursor_position(state: &mut OpState) -> u32 {
     0
 }
 
+/// Get the absolute file path for a buffer
+///
+/// Returns empty string for unsaved buffers or virtual buffers.
+/// The path is always absolute. Use this to determine file type,
+/// construct related paths, or display to the user.
+/// @param buffer_id - Target buffer ID
 #[op2]
 #[string]
 fn op_fresh_get_buffer_path(state: &mut OpState, buffer_id: u32) -> String {
@@ -171,6 +230,11 @@ fn op_fresh_get_buffer_path(state: &mut OpState, buffer_id: u32) -> String {
     String::new()
 }
 
+/// Get the total byte length of a buffer's content
+///
+/// Returns 0 if buffer doesn't exist. Use with getBufferText to read
+/// the full buffer: getBufferText(id, 0, getBufferLength(id)).
+/// @param buffer_id - Target buffer ID
 #[op2(fast)]
 fn op_fresh_get_buffer_length(state: &mut OpState, buffer_id: u32) -> u32 {
     if let Some(runtime_state) = state.try_borrow::<Rc<RefCell<TsRuntimeState>>>() {
@@ -184,6 +248,11 @@ fn op_fresh_get_buffer_length(state: &mut OpState, buffer_id: u32) -> u32 {
     0
 }
 
+/// Check if a buffer has been modified since last save
+///
+/// Returns false if buffer doesn't exist or has never been saved.
+/// Virtual buffers are never considered modified.
+/// @param buffer_id - Target buffer ID
 #[op2(fast)]
 fn op_fresh_is_buffer_modified(state: &mut OpState, buffer_id: u32) -> bool {
     if let Some(runtime_state) = state.try_borrow::<Rc<RefCell<TsRuntimeState>>>() {
@@ -197,6 +266,14 @@ fn op_fresh_is_buffer_modified(state: &mut OpState, buffer_id: u32) -> bool {
     false
 }
 
+/// Insert text at a byte position in a buffer
+///
+/// Text is inserted before the byte at position. Position must be valid
+/// (0 to buffer length). Insertion shifts all text after position.
+/// Operation is asynchronous; returns true if command was sent successfully.
+/// @param buffer_id - Target buffer ID
+/// @param position - Byte offset where text will be inserted (must be at char boundary)
+/// @param text - UTF-8 text to insert
 #[op2(fast)]
 fn op_fresh_insert_text(
     state: &mut OpState,
@@ -216,6 +293,14 @@ fn op_fresh_insert_text(
     false
 }
 
+/// Delete a byte range from a buffer
+///
+/// Deletes bytes from start (inclusive) to end (exclusive).
+/// Both positions must be at valid UTF-8 char boundaries.
+/// Operation is asynchronous; returns true if command was sent successfully.
+/// @param buffer_id - Target buffer ID
+/// @param start - Start byte offset (inclusive)
+/// @param end - End byte offset (exclusive)
 #[op2(fast)]
 fn op_fresh_delete_range(
     state: &mut OpState,
@@ -234,6 +319,19 @@ fn op_fresh_delete_range(
     false
 }
 
+/// Add a colored highlight overlay to text without modifying content
+///
+/// Overlays are visual decorations that persist until explicitly removed.
+/// Use prefixed IDs for easy batch removal (e.g., "spell:line42:word3").
+/// Multiple overlays can apply to the same range; colors blend.
+/// @param buffer_id - Target buffer ID
+/// @param overlay_id - Unique ID for removal; use prefixes for batching
+/// @param start - Start byte offset
+/// @param end - End byte offset
+/// @param r - Red (0-255)
+/// @param g - Green (0-255)
+/// @param b - Blue (0-255)
+/// @param underline - Add underline decoration
 #[op2(fast)]
 fn op_fresh_add_overlay(
     state: &mut OpState,
@@ -260,6 +358,10 @@ fn op_fresh_add_overlay(
     false
 }
 
+/// Remove a specific overlay by ID
+/// @param buffer_id - The buffer ID
+/// @param overlay_id - The overlay ID to remove
+/// @returns true if overlay was removed
 #[op2(fast)]
 fn op_fresh_remove_overlay(
     state: &mut OpState,
@@ -277,6 +379,10 @@ fn op_fresh_remove_overlay(
     false
 }
 
+/// Remove all overlays with IDs starting with a prefix
+/// @param buffer_id - The buffer ID
+/// @param prefix - The prefix to match overlay IDs against
+/// @returns true if any overlays were removed
 #[op2(fast)]
 fn op_fresh_remove_overlays_by_prefix(
     state: &mut OpState,
@@ -296,6 +402,9 @@ fn op_fresh_remove_overlays_by_prefix(
     false
 }
 
+/// Remove all overlays from a buffer
+/// @param buffer_id - The buffer ID
+/// @returns true if overlays were cleared
 #[op2(fast)]
 fn op_fresh_clear_all_overlays(state: &mut OpState, buffer_id: u32) -> bool {
     if let Some(runtime_state) = state.try_borrow::<Rc<RefCell<TsRuntimeState>>>() {
@@ -310,6 +419,16 @@ fn op_fresh_clear_all_overlays(state: &mut OpState, buffer_id: u32) -> bool {
     false
 }
 
+/// Add virtual text (inline decoration) at a position
+/// @param buffer_id - The buffer ID
+/// @param virtual_text_id - Unique identifier for this virtual text
+/// @param position - Byte position to insert at
+/// @param text - The virtual text to display
+/// @param r - Red color component (0-255)
+/// @param g - Green color component (0-255)
+/// @param b - Blue color component (0-255)
+/// @param before - Whether to insert before (true) or after (false) the position
+/// @returns true if virtual text was added
 #[op2(fast)]
 #[allow(clippy::too_many_arguments)]
 fn op_fresh_add_virtual_text(
@@ -338,6 +457,10 @@ fn op_fresh_add_virtual_text(
     false
 }
 
+/// Remove virtual text by ID
+/// @param buffer_id - The buffer ID
+/// @param virtual_text_id - The virtual text ID to remove
+/// @returns true if virtual text was removed
 #[op2(fast)]
 fn op_fresh_remove_virtual_text(
     state: &mut OpState,
@@ -355,6 +478,10 @@ fn op_fresh_remove_virtual_text(
     false
 }
 
+/// Remove all virtual texts with IDs starting with a prefix
+/// @param buffer_id - The buffer ID
+/// @param prefix - The prefix to match virtual text IDs against
+/// @returns true if any virtual texts were removed
 #[op2(fast)]
 fn op_fresh_remove_virtual_texts_by_prefix(
     state: &mut OpState,
@@ -374,6 +501,9 @@ fn op_fresh_remove_virtual_texts_by_prefix(
     false
 }
 
+/// Remove all virtual texts from a buffer
+/// @param buffer_id - The buffer ID
+/// @returns true if virtual texts were cleared
 #[op2(fast)]
 fn op_fresh_clear_virtual_texts(state: &mut OpState, buffer_id: u32) -> bool {
     if let Some(runtime_state) = state.try_borrow::<Rc<RefCell<TsRuntimeState>>>() {
@@ -388,6 +518,9 @@ fn op_fresh_clear_virtual_texts(state: &mut OpState, buffer_id: u32) -> bool {
     false
 }
 
+/// Force a refresh of line display for a buffer
+/// @param buffer_id - The buffer ID
+/// @returns true if refresh was triggered
 #[op2(fast)]
 fn op_fresh_refresh_lines(state: &mut OpState, buffer_id: u32) -> bool {
     if let Some(runtime_state) = state.try_borrow::<Rc<RefCell<TsRuntimeState>>>() {
@@ -402,6 +535,9 @@ fn op_fresh_refresh_lines(state: &mut OpState, buffer_id: u32) -> bool {
     false
 }
 
+/// Insert text at the current cursor position in the active buffer
+/// @param text - The text to insert
+/// @returns true if insertion succeeded
 #[op2(fast)]
 fn op_fresh_insert_at_cursor(state: &mut OpState, #[string] text: String) -> bool {
     if let Some(runtime_state) = state.try_borrow::<Rc<RefCell<TsRuntimeState>>>() {
@@ -414,6 +550,12 @@ fn op_fresh_insert_at_cursor(state: &mut OpState, #[string] text: String) -> boo
     false
 }
 
+/// Register a custom command that can be triggered by keybindings or the command palette
+/// @param name - Unique command name (e.g., "my_plugin_action")
+/// @param description - Human-readable description
+/// @param action - JavaScript function name to call when command is triggered
+/// @param contexts - Comma-separated list of contexts (e.g., "normal,prompt")
+/// @returns true if command was registered
 #[op2(fast)]
 fn op_fresh_register_command(
     state: &mut OpState,
@@ -461,6 +603,11 @@ fn op_fresh_register_command(
     false
 }
 
+/// Open a file in the editor, optionally at a specific location
+/// @param path - File path to open
+/// @param line - Line number to jump to (0 for no jump)
+/// @param column - Column number to jump to (0 for no jump)
+/// @returns true if file was opened
 #[op2(fast)]
 fn op_fresh_open_file(
     state: &mut OpState,
@@ -486,6 +633,10 @@ fn op_fresh_open_file(
     false
 }
 
+/// Get the ID of the focused split pane
+///
+/// Use with focusSplit, setSplitBuffer, or createVirtualBufferInExistingSplit
+/// to manage split layouts.
 #[op2(fast)]
 fn op_fresh_get_active_split_id(state: &mut OpState) -> u32 {
     if let Some(runtime_state) = state.try_borrow::<Rc<RefCell<TsRuntimeState>>>() {
@@ -497,8 +648,14 @@ fn op_fresh_get_active_split_id(state: &mut OpState) -> u32 {
     0
 }
 
-/// Get a range of text from a buffer
-/// This is important for plugins that need to analyze buffer content
+/// Extract text from a buffer by byte range
+///
+/// Returns empty string if buffer doesn't exist or range is invalid.
+/// Positions must be valid UTF-8 boundaries. For full content use
+/// getBufferText(id, 0, getBufferLength(id)).
+/// @param buffer_id - Target buffer ID
+/// @param start - Start byte offset (inclusive)
+/// @param end - End byte offset (exclusive)
 #[op2]
 #[string]
 fn op_fresh_get_buffer_text(
@@ -522,7 +679,10 @@ fn op_fresh_get_buffer_text(
     String::new()
 }
 
-/// Get the current line number (1-indexed) for the cursor position
+/// Get the line number of the primary cursor (1-indexed)
+///
+/// Line numbers start at 1. Returns 1 if no cursor exists.
+/// For byte offset use getCursorPosition instead.
 #[op2(fast)]
 fn op_fresh_get_cursor_line(state: &mut OpState) -> u32 {
     if let Some(runtime_state) = state.try_borrow::<Rc<RefCell<TsRuntimeState>>>() {
@@ -540,7 +700,10 @@ fn op_fresh_get_cursor_line(state: &mut OpState) -> u32 {
     1
 }
 
-/// Get all cursor positions for multi-cursor editing
+/// Get byte offsets of all cursors (multi-cursor support)
+///
+/// Returns array of positions; empty if no cursors. Primary cursor
+/// is typically first. For selection info use getAllCursors instead.
 #[op2]
 #[serde]
 fn op_fresh_get_all_cursor_positions(state: &mut OpState) -> Vec<u32> {
@@ -557,6 +720,12 @@ fn op_fresh_get_all_cursor_positions(state: &mut OpState) -> Vec<u32> {
     vec![]
 }
 
+/// Open a file in a specific split pane
+/// @param split_id - The split ID to open the file in
+/// @param path - File path to open
+/// @param line - Line number to jump to (0 for no jump)
+/// @param column - Column number to jump to (0 for no jump)
+/// @returns true if file was opened
 #[op2(fast)]
 fn op_fresh_open_file_in_split(
     state: &mut OpState,
@@ -584,16 +753,30 @@ fn op_fresh_open_file_in_split(
     false
 }
 
-/// Result of spawning a process
+/// Result from spawnProcess
 #[derive(serde::Serialize)]
 struct SpawnResult {
+    /// Complete stdout as string. Newlines preserved; trailing newline included.
     stdout: String,
+    /// Complete stderr as string. Contains error messages and warnings.
     stderr: String,
+    /// Process exit code. 0 usually means success; -1 if process was killed.
     exit_code: i32,
 }
 
-/// Async op for spawning external processes
-/// This is the key async op that enables TypeScript plugins to run shell commands
+/// Run an external command and capture its output
+///
+/// Waits for process to complete before returning. For long-running processes,
+/// consider if this will block your plugin. Output is captured completely;
+/// very large outputs may use significant memory.
+/// @param command - Program name (searched in PATH) or absolute path
+/// @param args - Command arguments (each array element is one argument)
+/// @param cwd - Working directory; null uses editor's cwd
+/// @example
+/// const result = await editor.spawnProcess("git", ["log", "--oneline", "-5"]);
+/// if (result.exit_code !== 0) {
+///   editor.setStatus(`git failed: ${result.stderr}`);
+/// }
 #[op2(async)]
 #[serde]
 async fn op_fresh_spawn_process(
@@ -682,9 +865,18 @@ async fn op_fresh_spawn_process(
     })
 }
 
-/// Register an event handler
-/// The handler_name should be a global JavaScript function name
-/// Returns true if registration succeeded
+/// Subscribe to an editor event
+///
+/// Handler must be a global function name (not a closure).
+/// Multiple handlers can be registered for the same event.
+/// Events: "buffer_save", "cursor_moved", "buffer_modified", etc.
+/// @param event_name - Event to subscribe to
+/// @param handler_name - Name of globalThis function to call with event data
+/// @example
+/// globalThis.onSave = (data) => {
+///   editor.setStatus(`Saved: ${data.path}`);
+/// };
+/// editor.on("buffer_save", "onSave");
 #[op2(fast)]
 fn op_fresh_on(
     state: &mut OpState,
@@ -705,7 +897,9 @@ fn op_fresh_on(
 }
 
 /// Unregister an event handler
-/// Returns true if the handler was found and removed
+/// @param event_name - Name of the event
+/// @param handler_name - Name of the handler to remove
+/// @returns true if handler was found and removed
 #[op2(fast)]
 fn op_fresh_off(
     state: &mut OpState,
@@ -727,6 +921,8 @@ fn op_fresh_off(
 }
 
 /// Get list of registered handlers for an event
+/// @param event_name - Name of the event
+/// @returns Array of handler function names
 #[op2]
 #[serde]
 fn op_fresh_get_handlers(state: &mut OpState, #[string] event_name: String) -> Vec<String> {
@@ -743,46 +939,65 @@ fn op_fresh_get_handlers(state: &mut OpState, #[string] event_name: String) -> V
 /// File stat information
 #[derive(serde::Serialize)]
 struct FileStat {
+    /// Whether the path exists
     exists: bool,
+    /// Whether the path is a file
     is_file: bool,
+    /// Whether the path is a directory
     is_dir: bool,
+    /// File size in bytes
     size: u64,
+    /// Whether the file is read-only
     readonly: bool,
 }
 
-/// Buffer information for TypeScript
+/// Buffer information
 #[derive(serde::Serialize)]
 struct TsBufferInfo {
+    /// Unique buffer ID
     id: u32,
+    /// File path (empty string if no path)
     path: String,
+    /// Whether buffer has unsaved changes
     modified: bool,
+    /// Buffer length in bytes
     length: u32,
 }
 
-/// Selection range for TypeScript
+/// Selection range
 #[derive(serde::Serialize)]
 struct TsSelectionRange {
+    /// Start byte position
     start: u32,
+    /// End byte position
     end: u32,
 }
 
-/// Cursor information for TypeScript
+/// Cursor information with optional selection
 #[derive(serde::Serialize)]
 struct TsCursorInfo {
+    /// Byte position of the cursor
     position: u32,
+    /// Selection range if text is selected, null otherwise
     selection: Option<TsSelectionRange>,
 }
 
-/// Viewport information for TypeScript
+/// Viewport information
 #[derive(serde::Serialize)]
 struct TsViewportInfo {
+    /// Byte offset of the top-left visible position
     top_byte: u32,
+    /// Column offset for horizontal scrolling
     left_column: u32,
+    /// Viewport width in columns
     width: u32,
+    /// Viewport height in rows
     height: u32,
 }
 
 /// Get full information about a buffer
+/// @param buffer_id - Buffer ID
+/// @returns BufferInfo object or null if buffer not found
 #[op2]
 #[serde]
 fn op_fresh_get_buffer_info(state: &mut OpState, buffer_id: u32) -> Option<TsBufferInfo> {
@@ -803,6 +1018,7 @@ fn op_fresh_get_buffer_info(state: &mut OpState, buffer_id: u32) -> Option<TsBuf
 }
 
 /// List all open buffers
+/// @returns Array of BufferInfo objects
 #[op2]
 #[serde]
 fn op_fresh_list_buffers(state: &mut OpState) -> Vec<TsBufferInfo> {
@@ -821,6 +1037,7 @@ fn op_fresh_list_buffers(state: &mut OpState) -> Vec<TsBufferInfo> {
 }
 
 /// Get primary cursor with selection info
+/// @returns CursorInfo object or null if no cursor
 #[op2]
 #[serde]
 fn op_fresh_get_primary_cursor(state: &mut OpState) -> Option<TsCursorInfo> {
@@ -842,6 +1059,7 @@ fn op_fresh_get_primary_cursor(state: &mut OpState) -> Option<TsCursorInfo> {
 }
 
 /// Get all cursors (for multi-cursor support)
+/// @returns Array of CursorInfo objects
 #[op2]
 #[serde]
 fn op_fresh_get_all_cursors(state: &mut OpState) -> Vec<TsCursorInfo> {
@@ -861,6 +1079,7 @@ fn op_fresh_get_all_cursors(state: &mut OpState) -> Vec<TsCursorInfo> {
 }
 
 /// Get viewport information
+/// @returns ViewportInfo object or null if no viewport
 #[op2]
 #[serde]
 fn op_fresh_get_viewport(state: &mut OpState) -> Option<TsViewportInfo> {
@@ -880,17 +1099,25 @@ fn op_fresh_get_viewport(state: &mut OpState) -> Option<TsViewportInfo> {
     None
 }
 
-/// Suggestion from TypeScript for prompt autocomplete
+/// Suggestion for prompt autocomplete
 #[derive(serde::Deserialize)]
 struct TsSuggestion {
+    /// Display text for the suggestion
     text: String,
+    /// Optional description shown alongside
     description: Option<String>,
+    /// Optional value to use instead of text when selected
     value: Option<String>,
+    /// Whether the suggestion is disabled
     disabled: Option<bool>,
+    /// Optional keybinding hint
     keybinding: Option<String>,
 }
 
 /// Start an interactive prompt
+/// @param label - Label to display (e.g., "Git grep: ")
+/// @param prompt_type - Type identifier (e.g., "git-grep")
+/// @returns true if prompt was started successfully
 #[op2(fast)]
 fn op_fresh_start_prompt(
     state: &mut OpState,
@@ -909,6 +1136,8 @@ fn op_fresh_start_prompt(
 }
 
 /// Set suggestions for the current prompt
+/// @param suggestions - Array of suggestions to display
+/// @returns true if suggestions were set successfully
 #[op2]
 fn op_fresh_set_prompt_suggestions(
     state: &mut OpState,
@@ -936,8 +1165,11 @@ fn op_fresh_set_prompt_suggestions(
     false
 }
 
-/// Read a file's contents asynchronously
-/// Useful for plugins that need to read configuration or data files
+/// Read entire file contents as UTF-8 string
+///
+/// Throws if file doesn't exist, isn't readable, or isn't valid UTF-8.
+/// For binary files, this will fail. For large files, consider memory usage.
+/// @param path - File path (absolute or relative to cwd)
 #[op2(async)]
 #[string]
 async fn op_fresh_read_file(
@@ -948,8 +1180,12 @@ async fn op_fresh_read_file(
         .map_err(|e| deno_core::error::generic_error(format!("Failed to read file {}: {}", path, e)))
 }
 
-/// Write content to a file asynchronously
-/// Useful for plugins that need to save data or generate files
+/// Write string content to a file, creating or overwriting
+///
+/// Creates parent directories if they don't exist (behavior may vary).
+/// Replaces file contents entirely; use readFile + modify + writeFile for edits.
+/// @param path - Destination path (absolute or relative to cwd)
+/// @param content - UTF-8 string to write
 #[op2(async)]
 async fn op_fresh_write_file(
     #[string] path: String,
@@ -960,13 +1196,21 @@ async fn op_fresh_write_file(
         .map_err(|e| deno_core::error::generic_error(format!("Failed to write file {}: {}", path, e)))
 }
 
-/// Check if a file or directory exists
+/// Check if a path exists (file, directory, or symlink)
+///
+/// Does not follow symlinks; returns true for broken symlinks.
+/// Use fileStat for more detailed information.
+/// @param path - Path to check (absolute or relative to cwd)
 #[op2(fast)]
 fn op_fresh_file_exists(#[string] path: String) -> bool {
     std::path::Path::new(&path).exists()
 }
 
-/// Get file/directory metadata
+/// Get metadata about a file or directory
+///
+/// Follows symlinks. Returns exists=false for non-existent paths
+/// rather than throwing. Size is in bytes; directories may report 0.
+/// @param path - Path to stat (absolute or relative to cwd)
 #[op2]
 #[serde]
 fn op_fresh_file_stat(#[string] path: String) -> FileStat {
@@ -990,13 +1234,18 @@ fn op_fresh_file_stat(#[string] path: String) -> FileStat {
 }
 
 /// Get an environment variable
+/// @param name - Name of environment variable
+/// @returns Value if set, null if not set
 #[op2]
 #[string]
 fn op_fresh_get_env(#[string] name: String) -> Option<String> {
     std::env::var(&name).ok()
 }
 
-/// Get the current working directory
+/// Get the editor's current working directory
+///
+/// Returns the directory from which the editor was launched.
+/// Use as base for resolving relative paths.
 #[op2]
 #[string]
 fn op_fresh_get_cwd() -> Result<String, deno_core::error::AnyError> {
@@ -1005,7 +1254,14 @@ fn op_fresh_get_cwd() -> Result<String, deno_core::error::AnyError> {
         .map_err(|e| deno_core::error::generic_error(format!("Failed to get cwd: {}", e)))
 }
 
-/// Join path components
+/// Join path segments using the OS path separator
+///
+/// Handles empty segments and normalizes separators.
+/// If a segment is absolute, previous segments are discarded.
+/// @param parts - Path segments to join
+/// @example
+/// pathJoin("/home", "user", "file.txt") // "/home/user/file.txt"
+/// pathJoin("relative", "/absolute") // "/absolute"
 #[op2]
 #[string]
 fn op_fresh_path_join(#[serde] parts: Vec<String>) -> String {
@@ -1016,7 +1272,14 @@ fn op_fresh_path_join(#[serde] parts: Vec<String>) -> String {
     path.to_string_lossy().to_string()
 }
 
-/// Get the directory name of a path
+/// Get the parent directory of a path
+///
+/// Returns empty string for root paths or paths without parent.
+/// Does not resolve symlinks or check existence.
+/// @param path - File or directory path
+/// @example
+/// pathDirname("/home/user/file.txt") // "/home/user"
+/// pathDirname("/") // ""
 #[op2]
 #[string]
 fn op_fresh_path_dirname(#[string] path: String) -> String {
@@ -1026,7 +1289,14 @@ fn op_fresh_path_dirname(#[string] path: String) -> String {
         .unwrap_or_default()
 }
 
-/// Get the base name of a path
+/// Get the final component of a path
+///
+/// Returns empty string for root paths.
+/// Does not strip file extension; use pathExtname for that.
+/// @param path - File or directory path
+/// @example
+/// pathBasename("/home/user/file.txt") // "file.txt"
+/// pathBasename("/home/user/") // "user"
 #[op2]
 #[string]
 fn op_fresh_path_basename(#[string] path: String) -> String {
@@ -1036,7 +1306,15 @@ fn op_fresh_path_basename(#[string] path: String) -> String {
         .unwrap_or_default()
 }
 
-/// Get the file extension
+/// Get the file extension including the dot
+///
+/// Returns empty string if no extension. Only returns the last extension
+/// for files like "archive.tar.gz" (returns ".gz").
+/// @param path - File path
+/// @example
+/// pathExtname("file.txt") // ".txt"
+/// pathExtname("archive.tar.gz") // ".gz"
+/// pathExtname("Makefile") // ""
 #[op2]
 #[string]
 fn op_fresh_path_extname(#[string] path: String) -> String {
@@ -1047,21 +1325,36 @@ fn op_fresh_path_extname(#[string] path: String) -> String {
 }
 
 /// Check if a path is absolute
+///
+/// On Unix: starts with "/". On Windows: starts with drive letter or UNC path.
+/// @param path - Path to check
 #[op2(fast)]
 fn op_fresh_path_is_absolute(#[string] path: String) -> bool {
     std::path::Path::new(&path).is_absolute()
 }
 
-/// Directory entry information
+/// Directory entry from readDir
 #[derive(serde::Serialize)]
 struct DirEntry {
+    /// Entry name only (not full path). Join with parent path to get absolute path.
     name: String,
+    /// True if entry is a regular file
     is_file: bool,
+    /// True if entry is a directory. Note: symlinks report the target type.
     is_dir: bool,
 }
 
-/// Read directory contents
-/// Returns a list of entries with name and type information
+/// List directory contents
+///
+/// Returns unsorted entries with type info. Entry names are relative
+/// to the directory (use pathJoin to construct full paths).
+/// Throws on permission errors or if path is not a directory.
+/// @param path - Directory path (absolute or relative to cwd)
+/// @example
+/// const entries = editor.readDir("/home/user");
+/// for (const e of entries) {
+///   const fullPath = editor.pathJoin("/home/user", e.name);
+/// }
 #[op2]
 #[serde]
 fn op_fresh_read_dir(#[string] path: String) -> Result<Vec<DirEntry>, deno_core::error::AnyError> {
@@ -1090,30 +1383,63 @@ fn op_fresh_read_dir(#[string] path: String) -> Result<Vec<DirEntry>, deno_core:
 
 // === Virtual Buffer Operations ===
 
-/// Text property entry for TypeScript
+/// Entry for virtual buffer content with embedded metadata
 #[derive(serde::Deserialize)]
 struct TsTextPropertyEntry {
+    /// Text to display. Include trailing newline for separate lines.
     text: String,
+    /// Arbitrary metadata queryable via getTextPropertiesAtCursor.
+    /// Common: { file: string, line: number, type: string }
     properties: std::collections::HashMap<String, serde_json::Value>,
 }
 
-/// Options for creating a virtual buffer in a split
+/// Configuration for createVirtualBufferInSplit
 #[derive(serde::Deserialize)]
 struct CreateVirtualBufferOptions {
+    /// Buffer name shown in status bar (convention: "*Name*")
     name: String,
+    /// Mode for keybindings; define with defineMode first
     mode: String,
+    /// Prevent text modifications
     read_only: bool,
+    /// Content with embedded metadata
     entries: Vec<TsTextPropertyEntry>,
+    /// Split ratio (0.3 = new pane gets 30% of height)
     ratio: f32,
+    /// If set and panel exists, update content instead of creating new buffer
     panel_id: Option<String>,
+    /// Show line numbers gutter (default: true)
     show_line_numbers: Option<bool>,
+    /// Show cursor in buffer (default: true)
     show_cursors: Option<bool>,
+    /// Disable all editing commands (default: false)
     editing_disabled: Option<bool>,
 }
 
-/// Create a virtual buffer in a horizontal split
-/// This is the key operation for creating diagnostic panels, search results, etc.
-/// Returns the buffer ID of the created virtual buffer.
+/// Create a virtual buffer in a new horizontal split below current pane
+///
+/// Use for results panels, diagnostics, logs, etc. The panel_id enables
+/// idempotent updates: if a panel with that ID exists, its content is replaced
+/// instead of creating a new split. Define the mode with defineMode first.
+/// @param options - Buffer configuration
+/// @example
+/// // First define the mode with keybindings
+/// editor.defineMode("search-results", "special", [
+///   ["Return", "search_goto"],
+///   ["q", "close_buffer"]
+/// ], true);
+///
+/// // Then create the buffer
+/// const id = await editor.createVirtualBufferInSplit({
+///   name: "*Search*",
+///   mode: "search-results",
+///   read_only: true,
+///   entries: [
+///     { text: "src/main.rs:42: match\n", properties: { file: "src/main.rs", line: 42 } }
+///   ],
+///   ratio: 0.3,
+///   panel_id: "search"
+/// });
 #[op2(async)]
 async fn op_fresh_create_virtual_buffer_in_split(
     state: Rc<RefCell<OpState>>,
@@ -1192,18 +1518,27 @@ async fn op_fresh_create_virtual_buffer_in_split(
 /// Options for creating a virtual buffer in an existing split
 #[derive(serde::Deserialize)]
 struct CreateVirtualBufferInExistingSplitOptions {
+    /// Display name (e.g., "*Commit Details*")
     name: String,
+    /// Mode name for buffer-local keybindings
     mode: String,
+    /// Whether the buffer is read-only
     read_only: bool,
+    /// Entries with text and embedded properties
     entries: Vec<TsTextPropertyEntry>,
+    /// Target split ID where the buffer should be displayed
     split_id: u32,
+    /// Whether to show line numbers in the buffer (default true)
     show_line_numbers: Option<bool>,
+    /// Whether to show cursors in the buffer (default true)
     show_cursors: Option<bool>,
+    /// Whether editing is disabled for this buffer (default false)
     editing_disabled: Option<bool>,
 }
 
 /// Create a virtual buffer in an existing split
-/// Returns the buffer ID of the created virtual buffer.
+/// @param options - Configuration for the virtual buffer
+/// @returns Promise resolving to the buffer ID of the created virtual buffer
 #[op2(async)]
 async fn op_fresh_create_virtual_buffer_in_existing_split(
     state: Rc<RefCell<OpState>>,
@@ -1277,6 +1612,16 @@ async fn op_fresh_create_virtual_buffer_in_existing_split(
 }
 
 /// Define a buffer mode with keybindings
+/// @param name - Mode name (e.g., "diagnostics-list")
+/// @param parent - Parent mode name for inheritance (e.g., "special"), or null
+/// @param bindings - Array of [key_string, command_name] pairs
+/// @param read_only - Whether buffers in this mode are read-only
+/// @returns true if mode was defined successfully
+/// @example
+/// editor.defineMode("diagnostics-list", "special", [
+///   ["Return", "diagnostics_goto"],
+///   ["q", "close_buffer"]
+/// ], true);
 #[op2]
 fn op_fresh_define_mode(
     state: &mut OpState,
@@ -1298,7 +1643,9 @@ fn op_fresh_define_mode(
     false
 }
 
-/// Show a buffer in the current split
+/// Switch the current split to display a buffer
+/// @param buffer_id - ID of the buffer to show
+/// @returns true if buffer was shown successfully
 #[op2(fast)]
 fn op_fresh_show_buffer(state: &mut OpState, buffer_id: u32) -> bool {
     if let Some(runtime_state) = state.try_borrow::<Rc<RefCell<TsRuntimeState>>>() {
@@ -1312,6 +1659,8 @@ fn op_fresh_show_buffer(state: &mut OpState, buffer_id: u32) -> bool {
 }
 
 /// Close a buffer and remove it from all splits
+/// @param buffer_id - ID of the buffer to close
+/// @returns true if buffer was closed successfully
 #[op2(fast)]
 fn op_fresh_close_buffer(state: &mut OpState, buffer_id: u32) -> bool {
     if let Some(runtime_state) = state.try_borrow::<Rc<RefCell<TsRuntimeState>>>() {
@@ -1325,6 +1674,8 @@ fn op_fresh_close_buffer(state: &mut OpState, buffer_id: u32) -> bool {
 }
 
 /// Focus a specific split
+/// @param split_id - ID of the split to focus
+/// @returns true if split was focused successfully
 #[op2(fast)]
 fn op_fresh_focus_split(state: &mut OpState, split_id: u32) -> bool {
     if let Some(runtime_state) = state.try_borrow::<Rc<RefCell<TsRuntimeState>>>() {
@@ -1338,6 +1689,9 @@ fn op_fresh_focus_split(state: &mut OpState, split_id: u32) -> bool {
 }
 
 /// Set the buffer displayed in a specific split
+/// @param split_id - ID of the split
+/// @param buffer_id - ID of the buffer to display in the split
+/// @returns true if the buffer was set successfully
 #[op2(fast)]
 fn op_fresh_set_split_buffer(state: &mut OpState, split_id: u32, buffer_id: u32) -> bool {
     if let Some(runtime_state) = state.try_borrow::<Rc<RefCell<TsRuntimeState>>>() {
@@ -1352,6 +1706,8 @@ fn op_fresh_set_split_buffer(state: &mut OpState, split_id: u32, buffer_id: u32)
 }
 
 /// Close a split (if not the last one)
+/// @param split_id - ID of the split to close
+/// @returns true if the split was closed successfully
 #[op2(fast)]
 fn op_fresh_close_split(state: &mut OpState, split_id: u32) -> bool {
     if let Some(runtime_state) = state.try_borrow::<Rc<RefCell<TsRuntimeState>>>() {
@@ -1364,8 +1720,14 @@ fn op_fresh_close_split(state: &mut OpState, split_id: u32) -> bool {
     false
 }
 
-/// Get text properties at cursor position
-/// Returns an array of property maps for all properties at the current cursor position
+/// Get text properties at the cursor position in a buffer
+/// @param buffer_id - ID of the buffer to query
+/// @returns Array of property objects for text ranges containing the cursor
+/// @example
+/// const props = editor.getTextPropertiesAtCursor(bufferId);
+/// if (props.length > 0 && props[0].location) {
+///   editor.openFile(props[0].location.file, props[0].location.line, 0);
+/// }
 #[op2]
 #[serde]
 fn op_fresh_get_text_properties_at_cursor(state: &mut OpState, buffer_id: u32) -> Vec<std::collections::HashMap<String, serde_json::Value>> {
@@ -1398,6 +1760,9 @@ fn op_fresh_get_text_properties_at_cursor(state: &mut OpState, buffer_id: u32) -
 }
 
 /// Set the content of a virtual buffer with text properties
+/// @param buffer_id - ID of the virtual buffer
+/// @param entries - Array of text entries with properties
+/// @returns true if content was set successfully
 #[op2]
 fn op_fresh_set_virtual_buffer_content(
     state: &mut OpState,
