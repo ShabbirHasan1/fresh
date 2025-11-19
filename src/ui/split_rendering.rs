@@ -1,5 +1,6 @@
 //! Split pane layout and buffer rendering
 
+use crate::ansi_background::{AnsiBackground, DEFAULT_BACKGROUND_FADE};
 use crate::ansi::AnsiParser;
 use crate::cursor::SelectionMode;
 use crate::editor::BufferMetadata;
@@ -46,6 +47,7 @@ impl SplitRenderer {
         buffer_metadata: &HashMap<BufferId, BufferMetadata>,
         event_logs: &mut HashMap<BufferId, EventLog>,
         theme: &crate::theme::Theme,
+        ansi_background: Option<&AnsiBackground>,
         lsp_waiting: bool,
         large_file_threshold_bytes: u64,
         line_wrap: bool,
@@ -173,6 +175,7 @@ impl SplitRenderer {
                     content_rect,
                     is_active,
                     theme,
+                    ansi_background,
                     lsp_waiting,
                     line_wrap,
                     estimated_line_length,
@@ -396,6 +399,7 @@ impl SplitRenderer {
         area: Rect,
         is_active: bool,
         theme: &crate::theme::Theme,
+        ansi_background: Option<&AnsiBackground>,
         lsp_waiting: bool,
         line_wrap: bool,
         estimated_line_length: usize,
@@ -562,6 +566,7 @@ impl SplitRenderer {
             .buffer
             .line_iterator(state.viewport.top_byte, estimated_line_length);
         let mut lines_rendered = 0;
+        let background_x_offset = state.viewport.left_column as usize;
 
         // Track cursor position during rendering (eliminates duplicate line iteration)
         let mut cursor_screen_x = 0u16;
@@ -1210,6 +1215,23 @@ impl SplitRenderer {
             };
         }
 
+        while lines.len() < area.height as usize {
+            lines.push(Line::raw(""));
+        }
+
+        if let Some(bg) = ansi_background {
+            Self::apply_background_to_lines(
+                &mut lines,
+                area.width,
+                bg,
+                theme.editor_bg,
+                theme.editor_fg,
+                DEFAULT_BACKGROUND_FADE,
+                background_x_offset,
+                starting_line_num,
+            );
+        }
+
         // Clear the area first to prevent rendering artifacts when switching buffers
         frame.render_widget(Clear, area);
 
@@ -1336,5 +1358,81 @@ impl SplitRenderer {
         } else {
             result_spans
         }
+    }
+
+    fn apply_background_to_lines(
+        lines: &mut Vec<Line<'static>>,
+        area_width: u16,
+        background: &AnsiBackground,
+        theme_bg: Color,
+        default_fg: Color,
+        fade: f32,
+        x_offset: usize,
+        y_offset: usize,
+    ) {
+        if area_width == 0 {
+            return;
+        }
+
+        let width = area_width as usize;
+
+        for (y, line) in lines.iter_mut().enumerate() {
+            // Flatten existing spans into per-character styles
+            let mut existing: Vec<(char, Style)> = Vec::new();
+            let spans = std::mem::take(&mut line.spans);
+            for span in spans {
+                let style = span.style;
+                for ch in span.content.chars() {
+                    existing.push((ch, style));
+                }
+            }
+
+            let mut chars_with_style = Vec::with_capacity(width);
+            for x in 0..width {
+                let sample_x = x_offset + x;
+                let sample_y = y_offset + y;
+
+                let (ch, mut style) = if x < existing.len() {
+                    existing[x]
+                } else {
+                    (' ', Style::default().fg(default_fg))
+                };
+
+                if let Some(bg_color) = background.faded_color(sample_x, sample_y, theme_bg, fade) {
+                    if style.bg.is_none() || matches!(style.bg, Some(Color::Reset)) {
+                        style = style.bg(bg_color);
+                    }
+                }
+
+                chars_with_style.push((ch, style));
+            }
+
+            line.spans = Self::compress_chars(chars_with_style);
+        }
+    }
+
+    fn compress_chars(chars: Vec<(char, Style)>) -> Vec<Span<'static>> {
+        if chars.is_empty() {
+            return vec![];
+        }
+
+        let mut spans = Vec::new();
+        let mut current_style = chars[0].1;
+        let mut current_text = String::new();
+        current_text.push(chars[0].0);
+
+        for (ch, style) in chars.into_iter().skip(1) {
+            if style == current_style {
+                current_text.push(ch);
+            } else {
+                spans.push(Span::styled(current_text.clone(), current_style));
+                current_text.clear();
+                current_text.push(ch);
+                current_style = style;
+            }
+        }
+
+        spans.push(Span::styled(current_text, current_style));
+        spans
     }
 }

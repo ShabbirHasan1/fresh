@@ -24,6 +24,8 @@ pub enum PromptType {
     Command,
     /// Go to a specific line number
     GotoLine,
+    /// Choose an ANSI background file
+    SetBackgroundFile,
     /// Plugin-controlled prompt with custom type identifier
     /// The string identifier is used to filter hooks in plugin code
     Plugin { custom_type: String },

@@ -35,6 +35,8 @@ use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
+const DEFAULT_BACKGROUND_FILE: &str = "scripts/landscape-wide.txt";
+
 // Re-export BufferId from event module for backward compatibility
 pub use crate::event::BufferId;
 
@@ -249,6 +251,12 @@ pub struct Editor {
 
     /// Active theme
     theme: crate::theme::Theme,
+
+    /// Optional ANSI background image
+    ansi_background: Option<crate::ansi_background::AnsiBackground>,
+
+    /// Source path for the currently loaded ANSI background
+    ansi_background_path: Option<PathBuf>,
 
     /// Keybinding resolver
     keybindings: KeybindingResolver,
@@ -706,6 +714,8 @@ impl Editor {
             next_buffer_id: 1,
             config,
             theme,
+            ansi_background: None,
+            ansi_background_path: None,
             keybindings,
             clipboard: String::new(),
             should_quit: false,
@@ -919,6 +929,40 @@ impl Editor {
         if let Some(event_log) = self.event_logs.get_mut(&self.active_buffer) {
             event_log.log_keystroke(key_code, modifiers);
         }
+    }
+
+    /// Load an ANSI background image from a user-provided path
+    fn load_ansi_background(&mut self, input: &str) -> io::Result<()> {
+        let trimmed = input.trim();
+
+        if trimmed.is_empty() {
+            self.ansi_background = None;
+            self.ansi_background_path = None;
+            self.set_status_message("Background cleared".to_string());
+            return Ok(());
+        }
+
+        let input_path = Path::new(trimmed);
+        let resolved = if input_path.is_absolute() {
+            input_path.to_path_buf()
+        } else {
+            self.working_dir.join(input_path)
+        };
+
+        let canonical = resolved
+            .canonicalize()
+            .unwrap_or_else(|_| resolved.clone());
+
+        let parsed = crate::ansi_background::AnsiBackground::from_file(&canonical)?;
+
+        self.ansi_background = Some(parsed);
+        self.ansi_background_path = Some(canonical.clone());
+        self.set_status_message(format!(
+            "Background set to {}",
+            canonical.display()
+        ));
+
+        Ok(())
     }
 
     /// Open a file and return its buffer ID
@@ -6950,6 +6994,23 @@ impl Editor {
                 };
                 self.set_status_message(format!("Line wrap {}", state));
             }
+            Action::SetBackground => {
+                let default_path = self
+                    .ansi_background_path
+                    .as_ref()
+                    .and_then(|p| {
+                        p.strip_prefix(&self.working_dir)
+                            .ok()
+                            .map(|rel| rel.to_string_lossy().to_string())
+                    })
+                    .unwrap_or_else(|| DEFAULT_BACKGROUND_FILE.to_string());
+
+                self.start_prompt_with_initial_text(
+                    "Background file: ".to_string(),
+                    PromptType::SetBackgroundFile,
+                    default_path,
+                );
+            }
             Action::LspCompletion => {
                 self.request_completion()?;
             }
@@ -7581,6 +7642,14 @@ impl Editor {
                                         input
                                     ));
                                 }
+                            }
+                        }
+                        PromptType::SetBackgroundFile => {
+                            if let Err(e) = self.load_ansi_background(&input) {
+                                self.set_status_message(format!(
+                                    "Failed to load background: {}",
+                                    e
+                                ));
                             }
                         }
                         PromptType::RecordMacro => {
@@ -9156,6 +9225,7 @@ impl Editor {
             &self.buffer_metadata,
             &mut self.event_logs,
             &self.theme,
+            self.ansi_background.as_ref(),
             lsp_waiting,
             self.config.editor.large_file_threshold_bytes,
             self.config.editor.line_wrap,

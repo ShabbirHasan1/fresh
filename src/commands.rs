@@ -349,6 +349,12 @@ pub fn get_all_commands() -> Vec<Command> {
             action: Action::ToggleLineWrap,
             contexts: vec![KeyContext::Normal],
         },
+        Command {
+            name: "Set Background".to_string(),
+            description: "Choose an ANSI art file to use as a faded background".to_string(),
+            action: Action::SetBackground,
+            contexts: vec![KeyContext::Normal],
+        },
         // Note: Command Palette is intentionally not in the command list
         // to avoid confusion when it's already open (use Ctrl+P or Ctrl+/ to toggle)
         // Search and replace

@@ -330,6 +330,7 @@ pub enum Action {
 
     // View toggles
     ToggleLineNumbers,
+    SetBackground,
 
     // Config operations
     DumpConfig,
@@ -572,6 +573,7 @@ impl Action {
             "toggle_inlay_hints" => Some(Action::ToggleInlayHints),
 
             "toggle_line_numbers" => Some(Action::ToggleLineNumbers),
+            "set_background" => Some(Action::SetBackground),
 
             "dump_config" => Some(Action::DumpConfig),
 
@@ -1702,6 +1704,7 @@ impl KeybindingResolver {
             Action::LspRestart => "LSP: Restart server for current language".to_string(),
             Action::ToggleInlayHints => "Toggle inlay hints".to_string(),
             Action::ToggleLineNumbers => "Toggle line numbers".to_string(),
+            Action::SetBackground => "Set ANSI background file".to_string(),
             Action::DumpConfig => "Dump config to file".to_string(),
             Action::Search => "Search for text in buffer".to_string(),
             Action::FindNext => "Find next search match".to_string(),

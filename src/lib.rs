@@ -2,6 +2,7 @@
 
 pub mod actions;
 pub mod ansi;
+pub mod ansi_background;
 pub mod async_bridge;
 pub mod buffer_mode;
 pub mod command_registry;
