@@ -31,7 +31,7 @@ impl Editor {
         }
     }
 
-    fn sync_file_explorer_to_active_file(&mut self) {
+    pub fn sync_file_explorer_to_active_file(&mut self) {
         if !self.file_explorer_visible {
             return;
         }
