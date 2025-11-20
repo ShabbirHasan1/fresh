@@ -738,6 +738,7 @@ impl SplitRenderer {
         let mut cursor_screen_y = 0u16;
         let mut source_to_screen: HashMap<usize, (u16, u16)> = HashMap::new();
         let mut have_cursor = false;
+        let mut last_seen_screen: Option<(u16, u16, usize)> = None;
 
         loop {
             let (line_view_offset, line_content, line_has_newline) =
@@ -1347,6 +1348,7 @@ impl SplitRenderer {
                             if let Some(src) = src_opt {
                                 // latest wins; monotonic render order preserves the last on-screen position
                                 source_to_screen.insert(src, (screen_x, current_y));
+                                last_seen_screen = Some((screen_x, current_y, src));
                                 if src == state.cursors.primary().position {
                                     cursor_screen_x = screen_x;
                                     cursor_screen_y = current_y;
@@ -1451,7 +1453,13 @@ impl SplitRenderer {
             };
         }
 
-        // No additional fallback; if unmapped, skip moving hardware cursor this frame
+        if !have_cursor {
+            if let Some((lx, ly, _)) = last_seen_screen {
+                cursor_screen_x = lx;
+                cursor_screen_y = ly;
+                have_cursor = true;
+            }
+        }
 
         while lines.len() < render_area.height as usize {
             lines.push(Line::raw(""));
