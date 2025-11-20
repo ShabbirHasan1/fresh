@@ -1691,6 +1691,104 @@ async fn op_fresh_create_virtual_buffer_in_existing_split(
     }
 }
 
+/// Options for creating a virtual buffer in the current split as a new tab
+#[derive(serde::Deserialize)]
+struct CreateVirtualBufferInCurrentSplitOptions {
+    /// Display name (e.g., "*Help*")
+    name: String,
+    /// Mode name for buffer-local keybindings
+    mode: String,
+    /// Whether the buffer is read-only
+    read_only: bool,
+    /// Entries with text and embedded properties
+    entries: Vec<TsTextPropertyEntry>,
+    /// Whether to show line numbers in the buffer (default false for help/docs)
+    show_line_numbers: Option<bool>,
+    /// Whether to show cursors in the buffer (default true)
+    show_cursors: Option<bool>,
+    /// Whether editing is disabled for this buffer (default false)
+    editing_disabled: Option<bool>,
+}
+
+/// Create a virtual buffer in the current split as a new tab
+/// This is useful for help panels, documentation, etc. that should open
+/// alongside other buffers rather than in a separate split.
+/// @param options - Configuration for the virtual buffer
+/// @returns Promise resolving to the buffer ID of the created virtual buffer
+#[op2(async)]
+async fn op_fresh_create_virtual_buffer(
+    state: Rc<RefCell<OpState>>,
+    #[serde] options: CreateVirtualBufferInCurrentSplitOptions,
+) -> Result<u32, deno_core::error::AnyError> {
+    // Get runtime state and create oneshot channel
+    let receiver = {
+        let state = state.borrow();
+        let runtime_state = state
+            .try_borrow::<Rc<RefCell<TsRuntimeState>>>()
+            .ok_or_else(|| deno_core::error::generic_error("Failed to get runtime state"))?;
+        let runtime_state = runtime_state.borrow();
+
+        // Allocate request ID
+        let request_id = {
+            let mut id = runtime_state.next_request_id.borrow_mut();
+            let current = *id;
+            *id += 1;
+            current
+        };
+
+        // Create oneshot channel for response
+        let (tx, rx) = tokio::sync::oneshot::channel();
+
+        // Store the sender
+        {
+            let mut pending = runtime_state.pending_responses.lock().unwrap();
+            pending.insert(request_id, tx);
+        }
+
+        // Convert TypeScript entries to Rust TextPropertyEntry
+        let entries: Vec<crate::text_property::TextPropertyEntry> = options
+            .entries
+            .into_iter()
+            .map(|e| crate::text_property::TextPropertyEntry {
+                text: e.text,
+                properties: e.properties,
+            })
+            .collect();
+
+        // Send command with request_id
+        runtime_state
+            .command_sender
+            .send(PluginCommand::CreateVirtualBufferWithContent {
+                name: options.name,
+                mode: options.mode,
+                read_only: options.read_only,
+                entries,
+                show_line_numbers: options.show_line_numbers.unwrap_or(false),
+                show_cursors: options.show_cursors.unwrap_or(true),
+                editing_disabled: options.editing_disabled.unwrap_or(false),
+                request_id: Some(request_id),
+            })
+            .map_err(|_| deno_core::error::generic_error("Failed to send command"))?;
+
+        rx
+    };
+
+    // Wait for response
+    let response = receiver
+        .await
+        .map_err(|_| deno_core::error::generic_error("Response channel closed"))?;
+
+    // Extract buffer ID from response
+    match response {
+        crate::plugin_api::PluginResponse::VirtualBufferCreated { buffer_id, .. } => {
+            Ok(buffer_id.0 as u32)
+        }
+        _ => Err(deno_core::error::generic_error(
+            "Unexpected plugin response for virtual buffer creation",
+        )),
+    }
+}
+
 /// Send an arbitrary LSP request and receive the raw JSON response
 /// @param language - Language ID (e.g., "cpp")
 /// @param method - Full LSP method (e.g., "textDocument/switchSourceHeader")
@@ -2012,6 +2110,7 @@ extension!(
         // Virtual buffer operations
         op_fresh_create_virtual_buffer_in_split,
         op_fresh_create_virtual_buffer_in_existing_split,
+        op_fresh_create_virtual_buffer,
         op_fresh_send_lsp_request,
         op_fresh_define_mode,
         op_fresh_show_buffer,
@@ -2282,6 +2381,9 @@ impl TypeScriptRuntime {
                     },
                     createVirtualBufferInExistingSplit(options) {
                         return core.ops.op_fresh_create_virtual_buffer_in_existing_split(options);
+                    },
+                    createVirtualBuffer(options) {
+                        return core.ops.op_fresh_create_virtual_buffer(options);
                     },
                     defineMode(name, parent, bindings, readOnly = false) {
                         return core.ops.op_fresh_define_mode(name, parent, bindings, readOnly);

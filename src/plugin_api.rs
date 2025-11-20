@@ -327,6 +327,14 @@ pub enum PluginCommand {
         read_only: bool,
         /// Entries with text and embedded properties
         entries: Vec<crate::text_property::TextPropertyEntry>,
+        /// Whether to show line numbers in the gutter
+        show_line_numbers: bool,
+        /// Whether to show cursors in the buffer
+        show_cursors: bool,
+        /// Whether editing is disabled (blocks editing commands)
+        editing_disabled: bool,
+        /// Optional request ID for async response
+        request_id: Option<u64>,
     },
 
     /// Create a virtual buffer in a horizontal split
@@ -650,6 +658,10 @@ impl PluginApi {
             mode,
             read_only,
             entries,
+            show_line_numbers: true,
+            show_cursors: true,
+            editing_disabled: false,
+            request_id: None,
         })
     }
 

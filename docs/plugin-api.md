@@ -256,6 +256,32 @@ interface CreateVirtualBufferInExistingSplitOptions {
 | `show_cursors` | Whether to show cursors in the buffer (default true) |
 | `editing_disabled` | Whether editing is disabled for this buffer (default false) |
 
+### CreateVirtualBufferInCurrentSplitOptions
+
+Options for creating a virtual buffer in the current split as a new tab
+
+```typescript
+interface CreateVirtualBufferInCurrentSplitOptions {
+  name: string;
+  mode: string;
+  read_only: boolean;
+  entries: TextPropertyEntry[];
+  show_line_numbers?: boolean | null;
+  show_cursors?: boolean | null;
+  editing_disabled?: boolean | null;
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `name` | Display name (e.g., "*Help*") |
+| `mode` | Mode name for buffer-local keybindings |
+| `read_only` | Whether the buffer is read-only |
+| `entries` | Entries with text and embedded properties |
+| `show_line_numbers` | Whether to show line numbers in the buffer (default false for help/docs) |
+| `show_cursors` | Whether to show cursors in the buffer (default true) |
+| `editing_disabled` | Whether editing is disabled for this buffer (default false) |
+
 ## API Reference
 
 ### Status and Logging
@@ -1188,6 +1214,22 @@ createVirtualBufferInExistingSplit(options: CreateVirtualBufferInExistingSplitOp
 | Name | Type | Description |
 |------|------|-------------|
 | `options` | `CreateVirtualBufferInExistingSplitOptions` | Configuration for the virtual buffer |
+
+#### `createVirtualBuffer`
+
+Create a virtual buffer in the current split as a new tab
+This is useful for help panels, documentation, etc. that should open
+alongside other buffers rather than in a separate split.
+
+```typescript
+createVirtualBuffer(options: CreateVirtualBufferInCurrentSplitOptions): Promise<number>
+```
+
+**Parameters:**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `options` | `CreateVirtualBufferInCurrentSplitOptions` | Configuration for the virtual buffer |
 
 #### `defineMode`
 

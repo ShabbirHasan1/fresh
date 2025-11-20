@@ -36,6 +36,13 @@ export interface SplitBufferOptions extends VirtualBufferOptions {
  *
  * @example
  * ```typescript
+ * // Create buffer as a tab in current split (e.g., help, manual)
+ * const bufferId = await VirtualBufferFactory.create({
+ *   name: "*Help*",
+ *   mode: "help-manual",
+ *   entries: helpEntries,
+ * });
+ *
  * // Create buffer in existing split (e.g., commit detail view)
  * const bufferId = await VirtualBufferFactory.createInSplit(splitId, {
  *   name: "*Commit Details*",
@@ -53,6 +60,34 @@ export interface SplitBufferOptions extends VirtualBufferOptions {
  * ```
  */
 export const VirtualBufferFactory = {
+  /**
+   * Create a virtual buffer as a new tab in the current split
+   * This is ideal for documentation, help panels, and content that should
+   * appear alongside other buffers rather than in a separate split.
+   *
+   * @param options - Buffer configuration
+   * @returns Buffer ID
+   */
+  async create(options: VirtualBufferOptions): Promise<number> {
+    const {
+      name,
+      mode,
+      entries,
+      showLineNumbers = false,
+      editingDisabled = true,
+      readOnly = true,
+    } = options;
+
+    return await editor.createVirtualBuffer({
+      name,
+      mode,
+      read_only: readOnly,
+      entries,
+      show_line_numbers: showLineNumbers,
+      editing_disabled: editingDisabled,
+    });
+  },
+
   /**
    * Create a virtual buffer in an existing split
    *

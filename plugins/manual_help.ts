@@ -4,8 +4,27 @@ import { VirtualBufferFactory } from "./lib/index.ts";
 
 const MANUAL_MODE = "help-manual";
 const SHORTCUTS_MODE = "help-keyboard";
-const MANUAL_PANEL_ID = "help-manual-panel";
-const SHORTCUTS_PANEL_ID = "help-keyboard-panel";
+
+// ANSI color codes for styling
+const COLORS = {
+  RESET: "\x1b[0m",
+  BOLD: "\x1b[1m",
+  DIM: "\x1b[2m",
+  UNDERLINE: "\x1b[4m",
+
+  // Foreground colors
+  CYAN: "\x1b[36m",
+  GREEN: "\x1b[32m",
+  YELLOW: "\x1b[33m",
+  BLUE: "\x1b[34m",
+  MAGENTA: "\x1b[35m",
+  WHITE: "\x1b[37m",
+  BRIGHT_CYAN: "\x1b[96m",
+  BRIGHT_GREEN: "\x1b[92m",
+  BRIGHT_YELLOW: "\x1b[93m",
+  BRIGHT_BLUE: "\x1b[94m",
+  BRIGHT_MAGENTA: "\x1b[95m",
+};
 
 const createEntriesFromLines = (lines: string[]): TextPropertyEntry[] =>
   lines.map((line) => ({
@@ -14,62 +33,82 @@ const createEntriesFromLines = (lines: string[]): TextPropertyEntry[] =>
   }));
 
 const buildManualEntries = (): TextPropertyEntry[] => {
+  const C = COLORS;
   const manualText = [
-    "Fresh Manual",
-    "============",
+    `${C.BOLD}${C.BRIGHT_CYAN}╔════════════════════════════════════════════════════════════╗${C.RESET}`,
+    `${C.BOLD}${C.BRIGHT_CYAN}║${C.RESET}         ${C.BOLD}${C.BRIGHT_YELLOW}Welcome to Fresh - A Modern Code Editor${C.RESET}          ${C.BOLD}${C.BRIGHT_CYAN}║${C.RESET}`,
+    `${C.BOLD}${C.BRIGHT_CYAN}╚════════════════════════════════════════════════════════════╝${C.RESET}`,
     "",
-    "Getting started:",
-    "- Open files with the regular explorer or `Ctrl+O`.",
-    "- Use the command palette (`Ctrl+P`) to run commands from anywhere.",
-    "- Create new files with `Ctrl+N` and save with `Ctrl+S`.",
+    `${C.BOLD}${C.BRIGHT_GREEN}🚀 Getting Started${C.RESET}`,
+    `${C.DIM}────────────────────────────────────────────────────────────${C.RESET}`,
+    `  ${C.CYAN}•${C.RESET} ${C.BOLD}Open Files:${C.RESET} Press ${C.YELLOW}Ctrl+O${C.RESET} to browse and open any file`,
+    `  ${C.CYAN}•${C.RESET} ${C.BOLD}Quick Actions:${C.RESET} Hit ${C.YELLOW}Ctrl+P${C.RESET} for the command palette - your Swiss Army knife!`,
+    `  ${C.CYAN}•${C.RESET} ${C.BOLD}New File:${C.RESET} ${C.YELLOW}Ctrl+N${C.RESET} creates a fresh buffer, ${C.YELLOW}Ctrl+S${C.RESET} saves it`,
     "",
-    "Navigation & editing:",
-    "- Move between buffers with `Ctrl+PageUp` / `Ctrl+PageDown`.",
-    "- Split windows using `Ctrl+\\` or the View menu.",
-    "- Toggle the file explorer with `Ctrl+B` and focus it with `Tab`.",
+    `${C.BOLD}${C.BRIGHT_MAGENTA}✨ Navigation & Editing${C.RESET}`,
+    `${C.DIM}────────────────────────────────────────────────────────────${C.RESET}`,
+    `  ${C.MAGENTA}•${C.RESET} ${C.BOLD}Switch Tabs:${C.RESET} ${C.YELLOW}Ctrl+PageUp${C.RESET}/${C.YELLOW}Ctrl+PageDown${C.RESET} to navigate between open files`,
+    `  ${C.MAGENTA}•${C.RESET} ${C.BOLD}Split Views:${C.RESET} Work on multiple files side-by-side (see View menu)`,
+    `  ${C.MAGENTA}•${C.RESET} ${C.BOLD}File Explorer:${C.RESET} ${C.YELLOW}Ctrl+B${C.RESET} toggles the sidebar - your project at a glance`,
+    `  ${C.MAGENTA}•${C.RESET} ${C.BOLD}Go to Line:${C.RESET} ${C.YELLOW}Ctrl+G${C.RESET} jumps you anywhere instantly`,
     "",
-    "Customization & plugins:",
-    "- Online docs live in `docs/ARCHITECTURE.md`, `docs/USER_GUIDE.md`,",
-    "  and the plugin folder contains TypeScript examples.",
-    "- Edit `config.json` to tweak keybindings, menu entries, and theme.",
-    "- Plugins can hook into prompts, render hooks, and virtual buffers.",
+    `${C.BOLD}${C.BRIGHT_BLUE}🎨 Make It Yours${C.RESET}`,
+    `${C.DIM}────────────────────────────────────────────────────────────${C.RESET}`,
+    `  ${C.BLUE}•${C.RESET} ${C.BOLD}Keybindings:${C.RESET} Edit ${C.GREEN}config.json${C.RESET} to customize every shortcut`,
+    `  ${C.BLUE}•${C.RESET} ${C.BOLD}Plugins:${C.RESET} Check out ${C.GREEN}plugins/${C.RESET} for TypeScript examples`,
+    `  ${C.BLUE}•${C.RESET} ${C.BOLD}Extend It:${C.RESET} Read ${C.GREEN}docs/PLUGIN_DEVELOPMENT.md${C.RESET} to build your own features`,
     "",
-    "Need more?",
-    "- Read `README.md` for quick start steps.",
-    "- See `docs/PLUGIN_DEVELOPMENT.md` for extending Fresh programmatically.",
+    `${C.BOLD}${C.BRIGHT_YELLOW}💡 Pro Tips${C.RESET}`,
+    `${C.DIM}────────────────────────────────────────────────────────────${C.RESET}`,
+    `  ${C.YELLOW}•${C.RESET} ${C.BOLD}Multi-cursor:${C.RESET} ${C.YELLOW}Ctrl+D${C.RESET} selects next match - edit multiple places at once!`,
+    `  ${C.YELLOW}•${C.RESET} ${C.BOLD}Search:${C.RESET} ${C.YELLOW}Ctrl+F${C.RESET} finds text, ${C.YELLOW}F3${C.RESET}/${C.YELLOW}Shift+F3${C.RESET} navigate matches`,
+    `  ${C.YELLOW}•${C.RESET} ${C.BOLD}Undo/Redo:${C.RESET} ${C.YELLOW}Ctrl+Z${C.RESET}/${C.YELLOW}Ctrl+Y${C.RESET} - we've got your back!`,
     "",
-    "Press `q` or `Esc` to close this buffer.",
+    `${C.BOLD}${C.WHITE}📚 Learn More${C.RESET}`,
+    `${C.DIM}────────────────────────────────────────────────────────────${C.RESET}`,
+    `  • ${C.GREEN}README.md${C.RESET} - Quick start guide`,
+    `  • ${C.GREEN}docs/USER_GUIDE.md${C.RESET} - Comprehensive documentation`,
+    `  • ${C.GREEN}docs/ARCHITECTURE.md${C.RESET} - How Fresh works under the hood`,
+    "",
+    `${C.DIM}Press ${C.YELLOW}q${C.RESET}${C.DIM} or ${C.YELLOW}Esc${C.RESET}${C.DIM} to close this help | ${C.YELLOW}Shift+F1${C.RESET}${C.DIM} for keyboard shortcuts${C.RESET}`,
   ];
   return createEntriesFromLines(manualText);
 };
 
 const buildShortcutEntries = (bindings: { key: string; action: string }[]): TextPropertyEntry[] => {
+  const C = COLORS;
   const header = [
-    "Keyboard Shortcuts",
-    "===================",
+    `${C.BOLD}${C.BRIGHT_CYAN}╔════════════════════════════════════════════════════════════╗${C.RESET}`,
+    `${C.BOLD}${C.BRIGHT_CYAN}║${C.RESET}                 ${C.BOLD}${C.BRIGHT_YELLOW}⌨️  Keyboard Shortcuts${C.RESET}                   ${C.BOLD}${C.BRIGHT_CYAN}║${C.RESET}`,
+    `${C.BOLD}${C.BRIGHT_CYAN}╚════════════════════════════════════════════════════════════╝${C.RESET}`,
     "",
   ];
+
   const lines: string[] = bindings.map((binding) => {
     const keyLabel = binding.key.padEnd(22);
-    return `${keyLabel} ${binding.action}`;
+    return `  ${C.CYAN}${keyLabel}${C.RESET} ${C.DIM}→${C.RESET} ${binding.action}`;
   });
-  const paddedLines = lines.length ? lines : ["(No bindings available)"];
-  return createEntriesFromLines([...header, ...paddedLines, "", "Press `q` or `Esc` to close."]);
+
+  const paddedLines = lines.length ? lines : [`  ${C.DIM}(No bindings available)${C.RESET}`];
+
+  const footer = [
+    "",
+    `${C.DIM}Press ${C.YELLOW}q${C.RESET}${C.DIM} or ${C.YELLOW}Esc${C.RESET}${C.DIM} to close | ${C.YELLOW}F1${C.RESET}${C.DIM} for the main help${C.RESET}`,
+  ];
+
+  return createEntriesFromLines([...header, ...paddedLines, ...footer]);
 };
 
 const openVirtualBuffer = async (
   name: string,
   entries: TextPropertyEntry[],
   mode: string,
-  panelId: string,
 ): Promise<void> => {
   try {
-    await VirtualBufferFactory.createWithSplit({
+    await VirtualBufferFactory.create({
       name,
       mode,
       entries,
-      ratio: 0.35,
-      panelId,
       showLineNumbers: false,
       editingDisabled: true,
       readOnly: true,
@@ -82,17 +121,12 @@ const openVirtualBuffer = async (
 
 const openManual = async (): Promise<void> => {
   const entries = buildManualEntries();
-  await openVirtualBuffer("*Fresh Manual*", entries, MANUAL_MODE, MANUAL_PANEL_ID);
+  await openVirtualBuffer("*Fresh Manual*", entries, MANUAL_MODE);
 };
 
 const openShortcuts = async (bindings: { key: string; action: string }[]): Promise<void> => {
   const entries = buildShortcutEntries(bindings);
-  await openVirtualBuffer(
-    "*Keyboard Shortcuts*",
-    entries,
-    SHORTCUTS_MODE,
-    SHORTCUTS_PANEL_ID,
-  );
+  await openVirtualBuffer("*Keyboard Shortcuts*", entries, SHORTCUTS_MODE);
 };
 
 editor.defineMode(

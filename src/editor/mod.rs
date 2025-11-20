@@ -3720,6 +3720,10 @@ impl Editor {
                 mode,
                 read_only,
                 entries,
+                show_line_numbers,
+                show_cursors,
+                editing_disabled,
+                request_id,
             } => {
                 let buffer_id = self.create_virtual_buffer(name.clone(), mode.clone(), read_only);
                 tracing::info!(
@@ -3728,6 +3732,21 @@ impl Editor {
                     mode,
                     buffer_id
                 );
+
+                // Apply view options to the buffer
+                if let Some(state) = self.buffers.get_mut(&buffer_id) {
+                    state.margins.set_line_numbers(show_line_numbers);
+                    state.show_cursors = show_cursors;
+                    state.editing_disabled = editing_disabled;
+                    tracing::debug!(
+                        "Set buffer {:?} view options: show_line_numbers={}, show_cursors={}, editing_disabled={}",
+                        buffer_id,
+                        show_line_numbers,
+                        show_cursors,
+                        editing_disabled
+                    );
+                }
+
                 // Now set the content
                 match self.set_virtual_buffer_content(buffer_id, entries) {
                     Ok(()) => {
@@ -3735,6 +3754,19 @@ impl Editor {
                         // Switch to the new buffer to display it
                         self.set_active_buffer(buffer_id);
                         tracing::debug!("Switched to virtual buffer {:?}", buffer_id);
+
+                        // Send response if request_id is present
+                        if let Some(req_id) = request_id {
+                            tracing::trace!(
+                                "CreateVirtualBufferWithContent: sending response for request_id={}, buffer_id={:?}",
+                                req_id,
+                                buffer_id
+                            );
+                            self.send_plugin_response(crate::plugin_api::PluginResponse::VirtualBufferCreated {
+                                buffer_id,
+                                request_id: req_id,
+                            });
+                        }
                     }
                     Err(e) => {
                         tracing::error!("Failed to set virtual buffer content: {}", e);
