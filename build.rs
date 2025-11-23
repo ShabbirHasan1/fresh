@@ -688,21 +688,21 @@ export {};
 "#,
     );
 
-    // Ensure types directory exists
-    let types_dir = Path::new("types");
-    if !types_dir.exists() {
-        fs::create_dir_all(types_dir)?;
+    // Write TypeScript output to plugins/lib/ so it's included in cargo-dist archives
+    let plugins_lib_dir = Path::new("plugins/lib");
+    if !plugins_lib_dir.exists() {
+        fs::create_dir_all(plugins_lib_dir)?;
     }
 
     // Write TypeScript output
-    fs::write("types/fresh.d.ts", &output)?;
+    fs::write("plugins/lib/fresh.d.ts", &output)?;
 
     // Generate markdown documentation
     let markdown = generate_markdown_docs(&ops, &structs, &categories);
     fs::write("docs/plugin-api.md", markdown)?;
 
     println!(
-        "cargo::warning=Generated types/fresh.d.ts with {} ops and {} interfaces",
+        "cargo::warning=Generated plugins/lib/fresh.d.ts with {} ops and {} interfaces",
         ops.len(),
         structs.len()
     );

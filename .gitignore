@@ -27,4 +27,5 @@ perf.data
 perf.data.old
 *.snap.new
 \#*#
+# Generated TypeScript types - OLD location (now in plugins/lib, committed for distribution)
 types/fresh.d.ts

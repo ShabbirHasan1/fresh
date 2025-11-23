@@ -1,4 +1,4 @@
-/// <reference path="../../types/fresh.d.ts" />
+/// <reference path="./fresh.d.ts" />
 
 /**
  * Shared Types for Fresh Editor Plugin Library
