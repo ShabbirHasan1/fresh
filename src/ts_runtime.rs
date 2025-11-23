@@ -424,6 +424,32 @@ fn op_fresh_clear_namespace(
     false
 }
 
+/// Clear all overlays that overlap with a byte range
+/// @param buffer_id - The buffer ID
+/// @param start - Start byte position (inclusive)
+/// @param end - End byte position (exclusive)
+/// @returns true if successful
+#[op2(fast)]
+fn op_fresh_clear_overlays_in_range(
+    state: &mut OpState,
+    buffer_id: u32,
+    start: u32,
+    end: u32,
+) -> bool {
+    if let Some(runtime_state) = state.try_borrow::<Rc<RefCell<TsRuntimeState>>>() {
+        let runtime_state = runtime_state.borrow();
+        let result = runtime_state
+            .command_sender
+            .send(PluginCommand::ClearOverlaysInRange {
+                buffer_id: BufferId(buffer_id as usize),
+                start: start as usize,
+                end: end as usize,
+            });
+        return result.is_ok();
+    }
+    false
+}
+
 /// Enable/disable line numbers for a buffer
 /// @param buffer_id - The buffer ID
 /// @param enabled - Whether to show line numbers
@@ -2117,6 +2143,7 @@ extension!(
         op_fresh_add_overlay,
         op_fresh_remove_overlay,
         op_fresh_clear_namespace,
+        op_fresh_clear_overlays_in_range,
         op_fresh_set_line_numbers,
         op_fresh_clear_all_overlays,
         op_fresh_add_virtual_text,
@@ -2282,6 +2309,9 @@ impl TypeScriptRuntime {
                     },
                     clearNamespace(bufferId, namespace) {
                         return core.ops.op_fresh_clear_namespace(bufferId, namespace);
+                    },
+                    clearOverlaysInRange(bufferId, start, end) {
+                        return core.ops.op_fresh_clear_overlays_in_range(bufferId, start, end);
                     },
                     clearAllOverlays(bufferId) {
                         return core.ops.op_fresh_clear_all_overlays(bufferId);

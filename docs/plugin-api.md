@@ -781,6 +781,22 @@ removeOverlay(buffer_id: number, handle: string): boolean
 | `buffer_id` | `number` | The buffer ID |
 | `handle` | `string` | The overlay handle to remove |
 
+#### `clearOverlaysInRange`
+
+Clear all overlays that overlap with a byte range
+
+```typescript
+clearOverlaysInRange(buffer_id: number, start: number, end: number): boolean
+```
+
+**Parameters:**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `buffer_id` | `number` | The buffer ID |
+| `start` | `number` | Start byte position (inclusive) |
+| `end` | `number` | End byte position (exclusive) |
+
 #### `clearAllOverlays`
 
 Remove all overlays from a buffer

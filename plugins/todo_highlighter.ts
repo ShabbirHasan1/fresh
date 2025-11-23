@@ -1,6 +1,6 @@
 // TypeScript TODO Highlighter Plugin
 // Highlights TODO, FIXME, XXX keywords in source code
-// Uses namespace-based overlay management for efficient batch operations
+// Uses targeted overlay invalidation for efficient updates on edits
 
 interface HighlightConfig {
   enabled: boolean;
@@ -24,9 +24,6 @@ const config: HighlightConfig = {
 
 // Namespace for all TODO highlighter overlays
 const NAMESPACE = "todo";
-
-// Track which buffers need their overlays refreshed (content changed)
-const dirtyBuffers = new Set<number>();
 
 // Process a single line for keyword highlighting
 function highlightLine(
@@ -73,18 +70,8 @@ function clearHighlights(bufferId: number): void {
   editor.clearNamespace(bufferId, NAMESPACE);
 }
 
-// Handle render-start events (only clear overlays if buffer content changed)
-globalThis.onRenderStart = function(data: { buffer_id: number }): void {
-  if (!config.enabled) return;
-
-  // Only clear and recreate overlays if the buffer content changed
-  if (dirtyBuffers.has(data.buffer_id)) {
-    clearHighlights(data.buffer_id);
-    dirtyBuffers.delete(data.buffer_id);
-  }
-};
-
 // Handle lines_changed events (batched for efficiency)
+// This is called for lines that need (re)processing
 globalThis.onLinesChanged = function(data: {
   buffer_id: number;
   lines: Array<{
@@ -96,28 +83,55 @@ globalThis.onLinesChanged = function(data: {
 }): void {
   if (!config.enabled) return;
 
-  // Process all changed lines
+  // Process all changed lines and create overlays for them
   for (const line of data.lines) {
     highlightLine(data.buffer_id, line.byte_start, line.content);
   }
 };
 
-// Handle buffer content changes - mark buffer as needing overlay refresh
-globalThis.onAfterInsert = function(data: { buffer_id: number }): void {
-  dirtyBuffers.add(data.buffer_id);
+// Handle buffer content changes - clear only affected overlays
+// The editor will automatically re-send the affected lines via lines_changed
+globalThis.onAfterInsert = function(data: {
+  buffer_id: number;
+  position: number;
+  text: string;
+  affected_start: number;
+  affected_end: number;
+}): void {
+  if (!config.enabled) return;
+
+  // Clear only overlays that overlap with the insertion range
+  // These overlays may now span corrupted content (e.g., "TODO" -> "TOxDO")
+  // The affected lines will be re-sent via lines_changed with correct content
+  editor.clearOverlaysInRange(data.buffer_id, data.affected_start, data.affected_end);
 };
 
-globalThis.onAfterDelete = function(data: { buffer_id: number }): void {
-  dirtyBuffers.add(data.buffer_id);
+globalThis.onAfterDelete = function(data: {
+  buffer_id: number;
+  start: number;
+  end: number;
+  deleted_text: string;
+  affected_start: number;
+  deleted_len: number;
+}): void {
+  if (!config.enabled) return;
+
+  // Clear overlays that overlapped with the deleted range
+  // Overlays that were entirely within the deleted range are already gone
+  // (their markers were deleted), but overlays that spanned the deletion
+  // boundary may now be incorrect
+  // Use a slightly expanded range to catch boundary cases
+  const clearStart = data.affected_start > 0 ? data.affected_start - 1 : 0;
+  const clearEnd = data.affected_start + 1;
+  editor.clearOverlaysInRange(data.buffer_id, clearStart, clearEnd);
 };
 
 // Handle buffer close events
 globalThis.onBufferClosed = function(data: { buffer_id: number }): void {
-  dirtyBuffers.delete(data.buffer_id);
+  // No cleanup needed - overlays are automatically cleaned up with the buffer
 };
 
 // Register hooks
-editor.on("render_start", "onRenderStart");
 editor.on("lines_changed", "onLinesChanged");
 editor.on("after-insert", "onAfterInsert");
 editor.on("after-delete", "onAfterDelete");
@@ -126,7 +140,7 @@ editor.on("buffer_closed", "onBufferClosed");
 // Plugin commands
 globalThis.todoHighlighterEnable = function(): void {
   config.enabled = true;
-  // Clear seen_lines so next render processes all visible lines
+  // Refresh lines so next render processes all visible lines
   const bufferId = editor.getActiveBufferId();
   editor.refreshLines(bufferId);
   editor.setStatus("TODO Highlighter: Enabled");
@@ -143,7 +157,7 @@ globalThis.todoHighlighterToggle = function(): void {
   config.enabled = !config.enabled;
   const bufferId = editor.getActiveBufferId();
   if (config.enabled) {
-    // Clear seen_lines so next render processes all visible lines
+    // Refresh lines so next render processes all visible lines
     editor.refreshLines(bufferId);
   } else {
     clearHighlights(bufferId);

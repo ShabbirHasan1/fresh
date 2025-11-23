@@ -142,13 +142,13 @@ impl Editor {
                     let visible_count = split_area.height as usize;
                     let top_byte = state.viewport.top_byte;
 
-                    // Get or create the seen lines set for this buffer
-                    let seen_lines = self
-                        .seen_lines
+                    // Get or create the seen byte ranges set for this buffer
+                    let seen_byte_ranges = self
+                        .seen_byte_ranges
                         .entry(buffer_id)
                         .or_insert_with(std::collections::HashSet::new);
 
-                    // Collect only NEW lines (not seen before)
+                    // Collect only NEW lines (not seen before based on byte range)
                     let mut new_lines: Vec<crate::hooks::LineInfo> = Vec::new();
                     let mut line_number = state.buffer.get_line_number(top_byte);
                     let mut iter = state
@@ -157,16 +157,18 @@ impl Editor {
 
                     for _ in 0..visible_count {
                         if let Some((line_start, line_content)) = iter.next() {
-                            // Only add if not seen before
-                            if !seen_lines.contains(&line_number) {
-                                let byte_end = line_start + line_content.len();
+                            let byte_end = line_start + line_content.len();
+                            let byte_range = (line_start, byte_end);
+
+                            // Only add if this byte range hasn't been seen before
+                            if !seen_byte_ranges.contains(&byte_range) {
                                 new_lines.push(crate::hooks::LineInfo {
                                     line_number,
                                     byte_start: line_start,
                                     byte_end,
                                     content: line_content,
                                 });
-                                seen_lines.insert(line_number);
+                                seen_byte_ranges.insert(byte_range);
                             }
                             line_number += 1;
                         } else {

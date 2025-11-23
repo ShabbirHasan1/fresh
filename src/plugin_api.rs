@@ -252,6 +252,14 @@ pub enum PluginCommand {
         namespace: OverlayNamespace,
     },
 
+    /// Remove all overlays that overlap with a byte range
+    /// Used for targeted invalidation when content in a range changes
+    ClearOverlaysInRange {
+        buffer_id: BufferId,
+        start: usize,
+        end: usize,
+    },
+
     /// Add virtual text (inline text that doesn't exist in the buffer)
     /// Used for color swatches, type hints, parameter hints, etc.
     AddVirtualText {
@@ -578,6 +586,21 @@ impl PluginApi {
         self.send_command(PluginCommand::ClearNamespace {
             buffer_id,
             namespace: crate::overlay::OverlayNamespace::from_string(namespace),
+        })
+    }
+
+    /// Clear all overlays that overlap with a byte range
+    /// Used for targeted invalidation when content changes
+    pub fn clear_overlays_in_range(
+        &self,
+        buffer_id: BufferId,
+        start: usize,
+        end: usize,
+    ) -> Result<(), String> {
+        self.send_command(PluginCommand::ClearOverlaysInRange {
+            buffer_id,
+            start,
+            end,
         })
     }
 

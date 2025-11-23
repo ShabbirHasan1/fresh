@@ -3397,6 +3397,18 @@ impl Editor {
                     // Note: Overlays are ephemeral, not added to event log for undo/redo
                 }
             }
+            PluginCommand::ClearOverlaysInRange {
+                buffer_id,
+                start,
+                end,
+            } => {
+                if let Some(state) = self.buffers.get_mut(&buffer_id) {
+                    state
+                        .overlays
+                        .remove_in_range(&(start..end), &mut state.marker_list);
+                    // Note: Overlays are ephemeral, not added to event log for undo/redo
+                }
+            }
             PluginCommand::AddVirtualText {
                 buffer_id,
                 virtual_text_id,
@@ -3457,10 +3469,10 @@ impl Editor {
                 }
             }
             PluginCommand::RefreshLines { buffer_id } => {
-                // Clear seen_lines for this buffer so all visible lines will be re-processed
+                // Clear seen_byte_ranges for this buffer so all visible lines will be re-processed
                 // on the next render. This is useful when a plugin is enabled and needs to
                 // process lines that were already marked as seen.
-                self.seen_lines.remove(&buffer_id);
+                self.seen_byte_ranges.remove(&buffer_id);
                 // Request a render so the lines_changed hook fires
                 self.plugin_render_requested = true;
             }
