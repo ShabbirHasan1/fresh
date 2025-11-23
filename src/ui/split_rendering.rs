@@ -10,7 +10,7 @@ use crate::split::SplitManager;
 use crate::state::{EditorState, ViewMode};
 use crate::text_buffer::Buffer;
 use crate::ui::tabs::TabsRenderer;
-use crate::ui::view_pipeline::{LineStart, ViewLine, ViewLineIterator, should_show_line_number};
+use crate::ui::view_pipeline::{should_show_line_number, LineStart, ViewLine, ViewLineIterator};
 use crate::virtual_text::VirtualTextPosition;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
@@ -1257,7 +1257,8 @@ impl SplitRenderer {
                             // If this byte maps to a tab character, only show cursor at tab_start
                             // Check if this is part of a tab expansion by looking at surrounding positions
                             let prev_col_offset = col_offset.saturating_sub(1);
-                            let prev_byte_pos = line_char_mappings.get(prev_col_offset).copied().flatten();
+                            let prev_byte_pos =
+                                line_char_mappings.get(prev_col_offset).copied().flatten();
                             // Show cursor if: this is start of line, OR previous char had different byte pos
                             col_offset == 0 || prev_byte_pos != Some(bp)
                         })

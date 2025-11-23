@@ -1447,20 +1447,27 @@ fn test_git_blame_shows_blocks_with_headers() {
     harness.open_file(&file_path).unwrap();
 
     // Wait until file is loaded (logical event)
-    harness.wait_until(|h| {
-        let content = h.get_buffer_content();
-        content.contains("fn main")
-    }).unwrap();
+    harness
+        .wait_until(|h| {
+            let content = h.get_buffer_content();
+            content.contains("fn main")
+        })
+        .unwrap();
 
     // Trigger git blame
     trigger_git_blame(&mut harness);
 
     // Wait until git blame view appears (logical event) with timeout
-    let blame_appeared = harness.wait_for_async(|h| {
-        let screen = h.screen_to_string();
-        // Should show block headers with ── (commit info injected via view transform)
-        screen.contains("──") && screen.contains("Initial commit")
-    }, 5000).unwrap();
+    let blame_appeared = harness
+        .wait_for_async(
+            |h| {
+                let screen = h.screen_to_string();
+                // Should show block headers with ── (commit info injected via view transform)
+                screen.contains("──") && screen.contains("Initial commit")
+            },
+            5000,
+        )
+        .unwrap();
 
     if !blame_appeared {
         let screen = harness.screen_to_string();
@@ -1472,7 +1479,10 @@ fn test_git_blame_shows_blocks_with_headers() {
     println!("Git blame screen:\n{screen}");
 
     assert!(screen.contains("──"), "Should show block header separator");
-    assert!(screen.contains("Initial commit"), "Should show commit summary in header");
+    assert!(
+        screen.contains("Initial commit"),
+        "Should show commit summary in header"
+    );
 }
 
 /// Test git blame cursor navigation
@@ -1508,20 +1518,22 @@ fn test_git_blame_cursor_navigation() {
     harness.open_file(&file_path).unwrap();
 
     // Wait until file is loaded
-    harness.wait_until(|h| {
-        h.get_buffer_content().contains("Line 1")
-    }).unwrap();
+    harness
+        .wait_until(|h| h.get_buffer_content().contains("Line 1"))
+        .unwrap();
 
     // Trigger git blame
     trigger_git_blame(&mut harness);
 
     // Wait until blame view appears (block headers with ──)
-    harness.wait_until(|h| {
-        h.screen_to_string().contains("──")
-    }).unwrap();
+    harness
+        .wait_until(|h| h.screen_to_string().contains("──"))
+        .unwrap();
 
     // Navigate down using j key
-    harness.send_key(KeyCode::Char('j'), KeyModifiers::NONE).unwrap();
+    harness
+        .send_key(KeyCode::Char('j'), KeyModifiers::NONE)
+        .unwrap();
     harness.process_async_and_render().unwrap();
 
     // Navigate down using Down arrow
@@ -1529,7 +1541,9 @@ fn test_git_blame_cursor_navigation() {
     harness.process_async_and_render().unwrap();
 
     // Navigate up using k key
-    harness.send_key(KeyCode::Char('k'), KeyModifiers::NONE).unwrap();
+    harness
+        .send_key(KeyCode::Char('k'), KeyModifiers::NONE)
+        .unwrap();
     harness.process_async_and_render().unwrap();
 
     let screen = harness.screen_to_string();
@@ -1563,30 +1577,34 @@ fn test_git_blame_close() {
     harness.open_file(&file_path).unwrap();
 
     // Wait until file is loaded
-    harness.wait_until(|h| {
-        h.get_buffer_content().contains("fn main")
-    }).unwrap();
+    harness
+        .wait_until(|h| h.get_buffer_content().contains("fn main"))
+        .unwrap();
 
     // Trigger git blame
     trigger_git_blame(&mut harness);
 
     // Wait until blame view appears (block headers with ──)
-    harness.wait_until(|h| {
-        h.screen_to_string().contains("──")
-    }).unwrap();
+    harness
+        .wait_until(|h| h.screen_to_string().contains("──"))
+        .unwrap();
 
     let screen_before = harness.screen_to_string();
     assert!(screen_before.contains("──"));
 
     // Press q to close git blame
-    harness.send_key(KeyCode::Char('q'), KeyModifiers::NONE).unwrap();
+    harness
+        .send_key(KeyCode::Char('q'), KeyModifiers::NONE)
+        .unwrap();
 
     // Wait until blame view is closed (back to original file without headers)
-    harness.wait_until(|h| {
-        let screen = h.screen_to_string();
-        // Original file should be visible without blame headers
-        screen.contains("fn main") && !screen.contains("──")
-    }).unwrap();
+    harness
+        .wait_until(|h| {
+            let screen = h.screen_to_string();
+            // Original file should be visible without blame headers
+            screen.contains("fn main") && !screen.contains("──")
+        })
+        .unwrap();
 
     let screen_after = harness.screen_to_string();
     println!("After closing:\n{screen_after}");
@@ -1629,17 +1647,17 @@ fn test_git_blame_go_back_in_history() {
     harness.open_file(&file_path).unwrap();
 
     // Wait until file is loaded
-    harness.wait_until(|h| {
-        h.get_buffer_content().contains("line")
-    }).unwrap();
+    harness
+        .wait_until(|h| h.get_buffer_content().contains("line"))
+        .unwrap();
 
     // Trigger git blame
     trigger_git_blame(&mut harness);
 
     // Wait until blame view appears (block headers with ──)
-    harness.wait_until(|h| {
-        h.screen_to_string().contains("──")
-    }).unwrap();
+    harness
+        .wait_until(|h| h.screen_to_string().contains("──"))
+        .unwrap();
 
     // Navigate to a line from the second commit
     harness.send_key(KeyCode::Down, KeyModifiers::NONE).unwrap();
@@ -1651,15 +1669,19 @@ fn test_git_blame_go_back_in_history() {
     println!("Before pressing 'b':\n{screen_before}");
 
     // Press 'b' to go back in history
-    harness.send_key(KeyCode::Char('b'), KeyModifiers::NONE).unwrap();
+    harness
+        .send_key(KeyCode::Char('b'), KeyModifiers::NONE)
+        .unwrap();
 
     // Wait until we see the depth indicator in status or content changes
-    harness.wait_until(|h| {
-        let screen = h.screen_to_string();
-        // After going back, the blame headers should still be visible
-        // and we might see "depth:" in the status or different file content
-        screen.contains("──") && (screen.contains("depth:") || screen.contains("First commit"))
-    }).unwrap();
+    harness
+        .wait_until(|h| {
+            let screen = h.screen_to_string();
+            // After going back, the blame headers should still be visible
+            // and we might see "depth:" in the status or different file content
+            screen.contains("──") && (screen.contains("depth:") || screen.contains("First commit"))
+        })
+        .unwrap();
 
     let screen_after = harness.screen_to_string();
     println!("After pressing 'b':\n{screen_after}");
@@ -1682,7 +1704,10 @@ fn test_git_blame_shows_different_commits() {
     repo.git_commit("First commit");
 
     // Add more lines in a second commit
-    repo.create_file("multi.txt", "Line from first commit\nLine from second commit\n");
+    repo.create_file(
+        "multi.txt",
+        "Line from first commit\nLine from second commit\n",
+    );
     repo.git_add(&["multi.txt"]);
     repo.git_commit("Second commit");
 
@@ -1705,21 +1730,23 @@ fn test_git_blame_shows_different_commits() {
     harness.open_file(&file_path).unwrap();
 
     // Wait until file is loaded
-    harness.wait_until(|h| {
-        h.get_buffer_content().contains("Line from")
-    }).unwrap();
+    harness
+        .wait_until(|h| h.get_buffer_content().contains("Line from"))
+        .unwrap();
 
     // Trigger git blame
     trigger_git_blame(&mut harness);
 
     // Wait until blame view appears with multiple blocks
-    harness.wait_until(|h| {
-        let screen = h.screen_to_string();
-        // Should show at least two block headers (different commits)
-        // The blocks are separated by ── lines
-        let header_count = screen.matches("──").count();
-        header_count >= 2
-    }).unwrap();
+    harness
+        .wait_until(|h| {
+            let screen = h.screen_to_string();
+            // Should show at least two block headers (different commits)
+            // The blocks are separated by ── lines
+            let header_count = screen.matches("──").count();
+            header_count >= 2
+        })
+        .unwrap();
 
     let screen = harness.screen_to_string();
     println!("Git blame with multiple commits:\n{screen}");
@@ -1738,7 +1765,10 @@ fn test_git_blame_line_numbers_correct() {
     let repo = GitTestRepo::new();
 
     // Create file with multiple commits for different blame blocks
-    repo.create_file("numbered.txt", "Line 1 from first commit\nLine 2 from first commit\n");
+    repo.create_file(
+        "numbered.txt",
+        "Line 1 from first commit\nLine 2 from first commit\n",
+    );
     repo.git_add(&["numbered.txt"]);
     repo.git_commit("First commit");
 
@@ -1766,18 +1796,20 @@ fn test_git_blame_line_numbers_correct() {
     harness.open_file(&file_path).unwrap();
 
     // Wait until file is loaded
-    harness.wait_until(|h| {
-        h.get_buffer_content().contains("Line 1")
-    }).unwrap();
+    harness
+        .wait_until(|h| h.get_buffer_content().contains("Line 1"))
+        .unwrap();
 
     // Trigger git blame
     trigger_git_blame(&mut harness);
 
     // Wait until blame view appears with multiple blocks
-    harness.wait_until(|h| {
-        let screen = h.screen_to_string();
-        screen.matches("──").count() >= 2
-    }).unwrap();
+    harness
+        .wait_until(|h| {
+            let screen = h.screen_to_string();
+            screen.matches("──").count() >= 2
+        })
+        .unwrap();
 
     let screen = harness.screen_to_string();
     println!("Git blame with line numbers:\n{screen}");
@@ -1789,7 +1821,10 @@ fn test_git_blame_line_numbers_correct() {
     // Check that line numbers 1-4 are present (for the 4 content lines)
     // Line numbers appear at the start of lines in the gutter
     assert!(
-        screen.contains("1") && screen.contains("2") && screen.contains("3") && screen.contains("4"),
+        screen.contains("1")
+            && screen.contains("2")
+            && screen.contains("3")
+            && screen.contains("4"),
         "Should show line numbers 1-4 for content lines"
     );
 
@@ -1843,17 +1878,17 @@ fn test_git_blame_scroll_to_bottom() {
     harness.open_file(&file_path).unwrap();
 
     // Wait until file is loaded
-    harness.wait_until(|h| {
-        h.get_buffer_content().contains("Line 1")
-    }).unwrap();
+    harness
+        .wait_until(|h| h.get_buffer_content().contains("Line 1"))
+        .unwrap();
 
     // Trigger git blame
     trigger_git_blame(&mut harness);
 
     // Wait until blame view appears (with timeout and debug output)
-    let blame_appeared = harness.wait_for_async(|h| {
-        h.screen_to_string().contains("──")
-    }, 5000).unwrap();
+    let blame_appeared = harness
+        .wait_for_async(|h| h.screen_to_string().contains("──"), 5000)
+        .unwrap();
 
     if !blame_appeared {
         let screen = harness.screen_to_string();
@@ -1865,7 +1900,9 @@ fn test_git_blame_scroll_to_bottom() {
     println!("Git blame at top:\n{screen_top}");
 
     // Scroll to bottom using G (go to end of file in vim mode)
-    harness.send_key(KeyCode::Char('G'), KeyModifiers::SHIFT).unwrap();
+    harness
+        .send_key(KeyCode::Char('G'), KeyModifiers::SHIFT)
+        .unwrap();
     harness.process_async_and_render().unwrap();
 
     // Wait a bit for scrolling to complete
@@ -1881,7 +1918,9 @@ fn test_git_blame_scroll_to_bottom() {
     // 3. Still be in blame view (showing ── header or content)
 
     assert!(
-        screen_bottom.contains("Line 50") || screen_bottom.contains("Line 49") || screen_bottom.contains("Line 48"),
+        screen_bottom.contains("Line 50")
+            || screen_bottom.contains("Line 49")
+            || screen_bottom.contains("Line 48"),
         "Should show last lines of file after scrolling to bottom"
     );
 
@@ -1960,18 +1999,23 @@ fn test_view_transform_header_at_byte_zero() {
     harness.open_file(&file_path).unwrap();
 
     // Wait for file to load
-    harness.wait_until(|h| {
-        !h.get_buffer_content().is_empty()
-    }).unwrap();
+    harness
+        .wait_until(|h| !h.get_buffer_content().is_empty())
+        .unwrap();
 
     // Trigger the test view marker command
     trigger_test_view_marker(&mut harness);
 
     // Wait for the virtual buffer to be created
-    let buffer_created = harness.wait_for_async(|h| {
-        let screen = h.screen_to_string();
-        screen.contains("Test view marker active") || screen.contains("*test-view-marker*")
-    }, 5000).unwrap();
+    let buffer_created = harness
+        .wait_for_async(
+            |h| {
+                let screen = h.screen_to_string();
+                screen.contains("Test view marker active") || screen.contains("*test-view-marker*")
+            },
+            5000,
+        )
+        .unwrap();
 
     if !buffer_created {
         let screen = harness.screen_to_string();
@@ -1979,10 +2023,15 @@ fn test_view_transform_header_at_byte_zero() {
     }
 
     // Wait a bit more for the view transform to be applied
-    let header_appeared = harness.wait_for_async(|h| {
-        let screen = h.screen_to_string();
-        screen.contains("HEADER AT BYTE 0")
-    }, 5000).unwrap();
+    let header_appeared = harness
+        .wait_for_async(
+            |h| {
+                let screen = h.screen_to_string();
+                screen.contains("HEADER AT BYTE 0")
+            },
+            5000,
+        )
+        .unwrap();
 
     let screen_after = harness.screen_to_string();
     println!("Screen after view marker:\n{screen_after}");
@@ -2022,9 +2071,9 @@ fn test_git_blame_original_buffer_not_decorated() {
     harness.open_file(&file_path).unwrap();
 
     // Wait until file is loaded
-    harness.wait_until(|h| {
-        h.get_buffer_content().contains("fn main")
-    }).unwrap();
+    harness
+        .wait_until(|h| h.get_buffer_content().contains("fn main"))
+        .unwrap();
 
     // Capture screen BEFORE opening blame
     let screen_before_blame = harness.screen_to_string();
@@ -2040,9 +2089,9 @@ fn test_git_blame_original_buffer_not_decorated() {
     trigger_git_blame(&mut harness);
 
     // Wait until blame view appears (with timeout and debug output)
-    let blame_appeared = harness.wait_for_async(|h| {
-        h.screen_to_string().contains("──")
-    }, 5000).unwrap();
+    let blame_appeared = harness
+        .wait_for_async(|h| h.screen_to_string().contains("──"), 5000)
+        .unwrap();
 
     if !blame_appeared {
         let screen = harness.screen_to_string();
@@ -2060,13 +2109,20 @@ fn test_git_blame_original_buffer_not_decorated() {
     );
 
     // Close blame with q
-    harness.send_key(KeyCode::Char('q'), KeyModifiers::NONE).unwrap();
+    harness
+        .send_key(KeyCode::Char('q'), KeyModifiers::NONE)
+        .unwrap();
 
     // Wait until we're back to original file (with timeout)
-    let back_to_original = harness.wait_for_async(|h| {
-        let screen = h.screen_to_string();
-        screen.contains("fn main") && !screen.contains("──")
-    }, 5000).unwrap();
+    let back_to_original = harness
+        .wait_for_async(
+            |h| {
+                let screen = h.screen_to_string();
+                screen.contains("fn main") && !screen.contains("──")
+            },
+            5000,
+        )
+        .unwrap();
 
     if !back_to_original {
         let screen = harness.screen_to_string();

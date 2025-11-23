@@ -314,7 +314,10 @@ A sample project for testing.
         let git_blame_src = project_root.join("plugins/git_blame.ts");
         let git_blame_dst = plugins_dir.join("git_blame.ts");
         fs::copy(&git_blame_src, &git_blame_dst).unwrap_or_else(|e| {
-            panic!("Failed to copy git_blame.ts from {:?}: {}", git_blame_src, e)
+            panic!(
+                "Failed to copy git_blame.ts from {:?}: {}",
+                git_blame_src, e
+            )
         });
     }
 
@@ -332,9 +335,8 @@ A sample project for testing.
         // Copy test_view_marker.ts plugin
         let src = project_root.join("plugins/test_view_marker.ts");
         let dst = plugins_dir.join("test_view_marker.ts");
-        fs::copy(&src, &dst).unwrap_or_else(|e| {
-            panic!("Failed to copy test_view_marker.ts from {:?}: {}", src, e)
-        });
+        fs::copy(&src, &dst)
+            .unwrap_or_else(|e| panic!("Failed to copy test_view_marker.ts from {:?}: {}", src, e));
     }
 }
 

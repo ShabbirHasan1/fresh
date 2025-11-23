@@ -20,7 +20,7 @@
 //! so rendering decisions (like line numbers) can be made based on token types,
 //! not reconstructed from flattened text.
 
-use crate::plugin_api::{ViewTokenWire, ViewTokenWireKind, ViewTokenStyle};
+use crate::plugin_api::{ViewTokenStyle, ViewTokenWire, ViewTokenWireKind};
 use std::collections::HashSet;
 
 /// A display line built from tokens, preserving token-level information
@@ -201,7 +201,11 @@ impl<'a> Iterator for ViewLineIterator<'a> {
 /// - Otherwise: show line number
 pub fn should_show_line_number(line: &ViewLine) -> bool {
     // Check if this line contains injected (non-source) content
-    let first_char_is_source = line.char_mappings.first().map(|m| m.is_some()).unwrap_or(false);
+    let first_char_is_source = line
+        .char_mappings
+        .first()
+        .map(|m| m.is_some())
+        .unwrap_or(false);
 
     if !first_char_is_source {
         // Injected line (header, etc.) - no line number
@@ -282,7 +286,10 @@ mod tests {
         assert!(should_show_line_number(&lines[0]));
 
         assert_eq!(lines[1].line_start, LineStart::AfterBreak);
-        assert!(!should_show_line_number(&lines[1]), "Wrapped continuation should NOT show line number");
+        assert!(
+            !should_show_line_number(&lines[1]),
+            "Wrapped continuation should NOT show line number"
+        );
     }
 
     #[test]
@@ -304,7 +311,10 @@ mod tests {
         // Header line - no line number (injected content)
         assert_eq!(lines[0].text, "== HEADER ==\n");
         assert_eq!(lines[0].line_start, LineStart::Beginning);
-        assert!(!should_show_line_number(&lines[0]), "Injected header should NOT show line number");
+        assert!(
+            !should_show_line_number(&lines[0]),
+            "Injected header should NOT show line number"
+        );
 
         // Source line after header - SHOULD show line number
         assert_eq!(lines[1].text, "Line 1\n");
@@ -314,7 +324,11 @@ mod tests {
             "BUG: Source line after injected header SHOULD show line number!\n\
              line_start={:?}, first_char_is_source={}",
             lines[1].line_start,
-            lines[1].char_mappings.first().map(|m| m.is_some()).unwrap_or(false)
+            lines[1]
+                .char_mappings
+                .first()
+                .map(|m| m.is_some())
+                .unwrap_or(false)
         );
     }
 
