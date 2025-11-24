@@ -559,16 +559,19 @@ impl EditorState {
         self.cursors.primary_mut()
     }
 
-    /// Get all cursor positions for rendering
-    pub fn cursor_positions(&mut self) -> Vec<(u16, u16)> {
-        let mut positions = Vec::new();
-        for (_, cursor) in self.cursors.iter() {
-            let pos = self
-                .viewport
-                .cursor_screen_position(&mut self.buffer, cursor);
-            positions.push(pos);
-        }
-        positions
+    /// Get all cursor positions for rendering (requires layout to compute columns).
+    pub fn cursor_positions(
+        &self,
+        layout: &crate::ui::view_pipeline::Layout,
+        gutter_width: usize,
+    ) -> Vec<(u16, u16)> {
+        self.cursors
+            .iter()
+            .map(|(_, cursor)| {
+                self.viewport
+                    .cursor_screen_position_layout(layout, cursor, gutter_width)
+            })
+            .collect()
     }
 
     /// Resize the viewport
@@ -577,9 +580,8 @@ impl EditorState {
         let content_height = height.saturating_sub(2);
         self.viewport.resize(width, content_height);
 
-        // Ensure primary cursor is still visible after resize
-        let primary = *self.cursors.primary();
-        self.viewport.ensure_visible(&mut self.buffer, &primary);
+        // Defer visibility sync; layout will handle visibility on next render.
+        self.viewport.mark_needs_sync();
     }
 }
 

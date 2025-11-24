@@ -37,6 +37,45 @@ pub(crate) fn normalize_path(path: &std::path::Path) -> std::path::PathBuf {
     }
 }
 
+fn view_pos_to_event(pos: crate::cursor::ViewPosition) -> ViewEventPosition {
+    ViewEventPosition {
+        view_line: pos.view_line,
+        column: pos.column,
+        source_byte: pos.source_byte,
+    }
+}
+
+fn view_event_pos_to_lsp(buffer: &Buffer, pos: ViewEventPosition) -> (usize, usize) {
+    if let Some(byte) = pos.source_byte {
+        buffer.position_to_lsp_position(byte)
+    } else {
+        (pos.view_line, pos.column)
+    }
+}
+
+fn view_event_range_to_lsp(
+    buffer: &Buffer,
+    range: &crate::event::ViewEventRange,
+) -> (lsp_types::Range, usize) {
+    let (start_line, start_char) = view_event_pos_to_lsp(buffer, range.start);
+    let (end_line, end_char) = view_event_pos_to_lsp(buffer, range.end);
+    (
+        lsp_types::Range::new(
+            lsp_types::Position::new(start_line as u32, start_char as u32),
+            lsp_types::Position::new(end_line as u32, end_char as u32),
+        ),
+        end_char.saturating_sub(start_char),
+    )
+}
+
+fn view_pos_to_event(pos: crate::cursor::ViewPosition) -> ViewEventPosition {
+    ViewEventPosition {
+        view_line: pos.view_line,
+        column: pos.column,
+        source_byte: pos.source_byte,
+    }
+}
+
 use self::types::{
     Bookmark, CachedLayout, InteractiveReplaceState, LspMessageEntry, LspProgressInfo,
     MacroRecordingState, MouseState, SearchState, DEFAULT_BACKGROUND_FILE,
@@ -46,7 +85,7 @@ use crate::buffer_mode::ModeRegistry;
 use crate::command_registry::CommandRegistry;
 use crate::commands::Suggestion;
 use crate::config::Config;
-use crate::event::{CursorId, Event, EventLog, SplitDirection, SplitId};
+use crate::event::{CursorId, Event, EventLog, SplitDirection, SplitId, ViewEventPosition};
 use crate::file_tree::{FileTree, FileTreeView};
 use crate::fs::{FsBackend, FsManager, LocalFsBackend};
 use crate::keybindings::{Action, KeyContext, KeybindingResolver};
@@ -63,6 +102,7 @@ use crate::prompt::{Prompt, PromptType};
 use crate::split::{SplitManager, SplitViewState};
 use crate::state::EditorState;
 use crate::ui::{FileExplorerRenderer, SplitRenderer, StatusBarRenderer, SuggestionsRenderer};
+use crate::event::ViewEventPosition;
 use crossterm::event::{KeyCode, KeyModifiers};
 use lsp_types::{Position, Range as LspRange, TextDocumentContentChangeEvent};
 use ratatui::{
@@ -1056,8 +1096,12 @@ impl Editor {
 
             // Explicitly record current position before switching
             let current_state = self.active_state();
-            let position = current_state.cursors.primary().position;
-            let anchor = current_state.cursors.primary().anchor;
+            let position = view_pos_to_event(current_state.cursors.primary().position);
+            let anchor = current_state
+                .cursors
+                .primary()
+                .anchor
+                .map(view_pos_to_event);
             self.position_history
                 .record_movement(self.active_buffer, position, anchor);
             self.position_history.commit_pending_movement();
@@ -1094,8 +1138,12 @@ impl Editor {
 
         // Explicitly record current position before switching
         let current_state = self.active_state();
-        let position = current_state.cursors.primary().position;
-        let anchor = current_state.cursors.primary().anchor;
+        let position = view_pos_to_event(current_state.cursors.primary().position);
+        let anchor = current_state
+            .cursors
+            .primary()
+            .anchor
+            .map(view_pos_to_event);
         self.position_history
             .record_movement(self.active_buffer, position, anchor);
         self.position_history.commit_pending_movement();
@@ -1269,8 +1317,12 @@ impl Editor {
 
             // Also explicitly record current position (in case there was no pending movement)
             let current_state = self.active_state();
-            let position = current_state.cursors.primary().position;
-            let anchor = current_state.cursors.primary().anchor;
+            let position = view_pos_to_event(current_state.cursors.primary().position);
+            let anchor = current_state
+                .cursors
+                .primary()
+                .anchor
+                .map(view_pos_to_event);
             self.position_history
                 .record_movement(self.active_buffer, position, anchor);
             self.position_history.commit_pending_movement();
@@ -1304,8 +1356,12 @@ impl Editor {
 
                 // Also explicitly record current position
                 let current_state = self.active_state();
-                let position = current_state.cursors.primary().position;
-                let anchor = current_state.cursors.primary().anchor;
+                let position = view_pos_to_event(current_state.cursors.primary().position);
+                let anchor = current_state
+                    .cursors
+                    .primary()
+                    .anchor
+                    .map(view_pos_to_event);
                 self.position_history
                     .record_movement(self.active_buffer, position, anchor);
                 self.position_history.commit_pending_movement();
@@ -1340,8 +1396,12 @@ impl Editor {
 
                 // Also explicitly record current position
                 let current_state = self.active_state();
-                let position = current_state.cursors.primary().position;
-                let anchor = current_state.cursors.primary().anchor;
+                let position = view_pos_to_event(current_state.cursors.primary().position);
+                let anchor = current_state
+                    .cursors
+                    .primary()
+                    .anchor
+                    .map(view_pos_to_event);
                 self.position_history
                     .record_movement(self.active_buffer, position, anchor);
                 self.position_history.commit_pending_movement();
@@ -1363,8 +1423,12 @@ impl Editor {
         // so we can navigate forward to it later
         if self.position_history.can_go_back() && !self.position_history.can_go_forward() {
             let current_state = self.active_state();
-            let position = current_state.cursors.primary().position;
-            let anchor = current_state.cursors.primary().anchor;
+            let position = view_pos_to_event(current_state.cursors.primary().position);
+            let anchor = current_state
+                .cursors
+                .primary()
+                .anchor
+                .map(view_pos_to_event);
             self.position_history
                 .record_movement(self.active_buffer, position, anchor);
             self.position_history.commit_pending_movement();
@@ -1383,8 +1447,8 @@ impl Editor {
                 // Move cursor to the saved position
                 let state = self.active_state_mut();
                 let cursor_id = state.cursors.primary_id();
-                let old_position = state.cursors.primary().position;
-                let old_anchor = state.cursors.primary().anchor;
+                let old_position = view_pos_to_event(state.cursors.primary().position);
+                let old_anchor = state.cursors.primary().anchor.map(view_pos_to_event);
                 let old_sticky_column = state.cursors.primary().sticky_column;
                 let event = Event::MoveCursor {
                     cursor_id,
@@ -1393,7 +1457,7 @@ impl Editor {
                     old_anchor,
                     new_anchor: target_anchor,
                     old_sticky_column,
-                    new_sticky_column: None, // Reset sticky column for navigation
+                    new_sticky_column: Some(0), // Reset sticky column for navigation
                 };
                 state.apply(&event);
             }
@@ -1420,8 +1484,8 @@ impl Editor {
                 // Move cursor to the saved position
                 let state = self.active_state_mut();
                 let cursor_id = state.cursors.primary_id();
-                let old_position = state.cursors.primary().position;
-                let old_anchor = state.cursors.primary().anchor;
+                let old_position = view_pos_to_event(state.cursors.primary().position);
+                let old_anchor = state.cursors.primary().anchor.map(view_pos_to_event);
                 let old_sticky_column = state.cursors.primary().sticky_column;
                 let event = Event::MoveCursor {
                     cursor_id,
@@ -1430,7 +1494,7 @@ impl Editor {
                     old_anchor,
                     new_anchor: target_anchor,
                     old_sticky_column,
-                    new_sticky_column: 0, // Reset sticky column for navigation
+                    new_sticky_column: Some(0), // Reset sticky column for navigation
                 };
                 state.apply(&event);
             }
@@ -2123,21 +2187,16 @@ impl Editor {
             .map(|(_, c)| c.position);
 
         if let Some(cursor_pos) = cursor_position {
-            // Get buffer to calculate line
-            if let Some(state) = self.buffers.get(&buffer_id) {
-                let cursor_line = state.buffer.position_to_line_col(cursor_pos).0;
-                let half_height = self
-                    .split_view_states
-                    .get(&active_split)
-                    .map(|vs| (vs.viewport.height / 2) as usize)
-                    .unwrap_or(12);
-                let new_top = cursor_line.saturating_sub(half_height);
+            let half_height = self
+                .split_view_states
+                .get(&active_split)
+                .map(|vs| (vs.viewport.height / 2) as usize)
+                .unwrap_or(12);
+            let new_top = cursor_pos.view_line.saturating_sub(half_height);
 
-                // Now scroll the viewport
-                let buffer = &mut self.buffers.get_mut(&buffer_id).unwrap().buffer;
-                if let Some(view_state) = self.split_view_states.get_mut(&active_split) {
-                    view_state.viewport.scroll_to(buffer, new_top);
-                }
+            if let Some(view_state) = self.split_view_states.get_mut(&active_split) {
+                view_state.viewport.top_view_line = new_top;
+                view_state.viewport.anchor_byte = cursor_pos.source_byte.unwrap_or(0);
             }
         }
     }
@@ -2221,7 +2280,9 @@ impl Editor {
             if !text.is_empty() {
                 text.push('\n');
             }
-            let range_text = state.get_text_range(range.start, range.end);
+            let start = range.start.source_byte.unwrap_or(0);
+            let end = range.end.source_byte.unwrap_or(start);
+            let range_text = state.get_text_range(start, end);
             text.push_str(&range_text);
         }
 
@@ -2252,9 +2313,12 @@ impl Editor {
             .iter()
             .rev()
             .map(|range| {
-                let deleted_text = state.get_text_range(range.start, range.end);
+                let start = range.start.source_byte.unwrap_or(0);
+                let end = range.end.source_byte.unwrap_or(start);
+                let deleted_text = state.get_text_range(start, end);
                 Event::Delete {
-                    range: range.clone(),
+                    range: crate::event::ViewEventRange::normalized(range.start.into(), range.end.into()),
+                    source_range: Some(start..end),
                     deleted_text,
                     cursor_id: primary_id,
                 }
@@ -2282,7 +2346,7 @@ impl Editor {
 
         let state = self.active_state();
         let cursor_id = state.cursors.primary_id();
-        let position = state.cursors.primary().position;
+        let position = view_pos_to_event(state.cursors.primary().position);
 
         let event = Event::Insert {
             position,
@@ -2309,7 +2373,7 @@ impl Editor {
                 let next_id = CursorId(self.active_state().cursors.count());
                 let event = Event::AddCursor {
                     cursor_id: next_id,
-                    position: cursor.position,
+                    position: view_pos_to_event(cursor.position),
                     anchor: cursor.anchor,
                 };
 
@@ -2336,9 +2400,9 @@ impl Editor {
                 // Create AddCursor event with the next cursor ID
                 let next_id = CursorId(self.active_state().cursors.count());
                 let event = Event::AddCursor {
-                    cursor_id: next_id,
-                    position: cursor.position,
-                    anchor: cursor.anchor,
+                cursor_id: next_id,
+                position: view_pos_to_event(cursor.position),
+                anchor: cursor.anchor.map(view_pos_to_event),
                 };
 
                 // Log and apply the event
@@ -2364,9 +2428,9 @@ impl Editor {
                 // Create AddCursor event with the next cursor ID
                 let next_id = CursorId(self.active_state().cursors.count());
                 let event = Event::AddCursor {
-                    cursor_id: next_id,
-                    position: cursor.position,
-                    anchor: cursor.anchor,
+                cursor_id: next_id,
+                position: view_pos_to_event(cursor.position),
+                anchor: cursor.anchor.map(view_pos_to_event),
                 };
 
                 // Log and apply the event
@@ -2783,12 +2847,17 @@ impl Editor {
 
         let selection_range = {
             let state = self.active_state();
-            state.cursors.primary().selection_range()
+            state.cursors
+                .primary()
+                .selection_range()
+                .map(|(s, e)| (view_pos_to_event(s), view_pos_to_event(e)))
         };
 
         let selected_text = if let Some(range) = selection_range.clone() {
             let state = self.active_state_mut();
-            let text = state.get_text_range(range.start, range.end);
+            let start = range.start.source_byte.unwrap_or(0);
+            let end = range.end.source_byte.unwrap_or(start);
+            let text = state.get_text_range(start, end);
             if !text.contains('\n') && !text.is_empty() {
                 Some(text)
             } else {
@@ -3877,7 +3946,7 @@ impl Editor {
                 snapshot.buffers.insert(*buffer_id, buffer_info);
 
                 // Store cursor position for this buffer
-                let cursor_pos = state.cursors.primary().position;
+                let cursor_pos = view_pos_to_event(state.cursors.primary().position);
                 snapshot
                     .buffer_cursor_positions
                     .insert(*buffer_id, cursor_pos);
@@ -3914,14 +3983,14 @@ impl Editor {
                     .cursors
                     .iter()
                     .map(|(_, cursor)| CursorInfo {
-                        position: cursor.position,
-                        selection: cursor.selection_range(),
+                        position: view_pos_to_event(cursor.position),
+                        selection: cursor.selection_range().map(|(s, e)| (view_pos_to_event(s), view_pos_to_event(e))),
                     })
                     .collect();
 
                 // Viewport
                 snapshot.viewport = Some(ViewportInfo {
-                    top_byte: active_state.viewport.top_byte,
+                    top_byte: active_state.viewport.anchor_byte,
                     left_column: active_state.viewport.left_column,
                     width: active_state.viewport.width,
                     height: active_state.viewport.height,
@@ -5330,10 +5399,10 @@ impl Editor {
     fn request_completion(&mut self) -> io::Result<()> {
         // Get the current buffer and cursor position
         let state = self.active_state();
-        let cursor_pos = state.cursors.primary().position;
+        let cursor_pos = view_pos_to_event(state.cursors.primary().position);
 
-        // Convert byte position to LSP position (line, UTF-16 code units)
-        let (line, character) = state.buffer.position_to_lsp_position(cursor_pos);
+        // Convert view position to LSP position (line, UTF-16 code units)
+        let (line, character) = view_event_pos_to_lsp(&state.buffer, cursor_pos);
 
         // Get the current file URI and path
         let metadata = self.buffer_metadata.get(&self.active_buffer);
@@ -5378,10 +5447,10 @@ impl Editor {
     fn request_goto_definition(&mut self) -> io::Result<()> {
         // Get the current buffer and cursor position
         let state = self.active_state();
-        let cursor_pos = state.cursors.primary().position;
+        let cursor_pos = view_pos_to_event(state.cursors.primary().position);
 
-        // Convert byte position to LSP position (line, UTF-16 code units)
-        let (line, character) = state.buffer.position_to_lsp_position(cursor_pos);
+        // Convert view position to LSP position (line, UTF-16 code units)
+        let (line, character) = view_event_pos_to_lsp(&state.buffer, cursor_pos);
 
         // Get the current file URI and path
         let metadata = self.buffer_metadata.get(&self.active_buffer);
@@ -5425,16 +5494,16 @@ impl Editor {
     fn request_hover(&mut self) -> io::Result<()> {
         // Get the current buffer and cursor position
         let state = self.active_state();
-        let cursor_pos = state.cursors.primary().position;
+        let cursor_pos = view_pos_to_event(state.cursors.primary().position);
 
-        // Convert byte position to LSP position (line, UTF-16 code units)
-        let (line, character) = state.buffer.position_to_lsp_position(cursor_pos);
+        // Convert view position to LSP position (line, UTF-16 code units)
+        let (line, character) = view_event_pos_to_lsp(&state.buffer, cursor_pos);
 
         // Debug: Log the position conversion details
-        if let Some(pos) = state.buffer.offset_to_position(cursor_pos) {
+        if let Some(pos) = cursor_pos.source_byte.and_then(|b| state.buffer.offset_to_position(b)) {
             tracing::debug!(
                 "Hover request: cursor_byte={}, line={}, byte_col={}, utf16_col={}",
-                cursor_pos,
+                cursor_pos.source_byte.unwrap_or(0),
                 pos.line,
                 pos.column,
                 character
@@ -5500,7 +5569,7 @@ impl Editor {
             return;
         }
 
-        // Convert LSP range to byte offsets for highlighting
+        // Convert LSP range to byte offsets for highlighting (view-aware).
         if let Some(((start_line, start_char), (end_line, end_char))) = range {
             let state = self.active_state();
             let start_byte = state
@@ -5691,8 +5760,8 @@ impl Editor {
             }
         };
 
-        // Convert byte position to LSP position (line, UTF-16 code units)
-        let (line, character) = state.buffer.position_to_lsp_position(cursor_pos);
+        // Convert view position to LSP position (line, UTF-16 code units)
+        let (line, character) = view_event_pos_to_lsp(&state.buffer, cursor_pos);
 
         // Get the current file URI and path
         let metadata = self.buffer_metadata.get(&self.active_buffer);
@@ -5725,7 +5794,7 @@ impl Editor {
                             uri.as_str(),
                             line,
                             character,
-                            cursor_pos
+                            cursor_pos.source_byte.unwrap_or(0)
                         );
                     }
                 }
@@ -5739,10 +5808,10 @@ impl Editor {
     fn request_signature_help(&mut self) -> io::Result<()> {
         // Get the current buffer and cursor position
         let state = self.active_state();
-        let cursor_pos = state.cursors.primary().position;
+        let cursor_pos = view_pos_to_event(state.cursors.primary().position);
 
-        // Convert byte position to LSP position (line, UTF-16 code units)
-        let (line, character) = state.buffer.position_to_lsp_position(cursor_pos);
+        // Convert view position to LSP position (line, UTF-16 code units)
+        let (line, character) = view_event_pos_to_lsp(&state.buffer, cursor_pos);
 
         // Get the current file URI and path
         let metadata = self.buffer_metadata.get(&self.active_buffer);
@@ -5774,7 +5843,7 @@ impl Editor {
                             uri.as_str(),
                             line,
                             character,
-                            cursor_pos
+                            cursor_pos.source_byte.unwrap_or(0)
                         );
                     }
                 }
@@ -5903,16 +5972,18 @@ impl Editor {
     fn request_code_actions(&mut self) -> io::Result<()> {
         // Get the current buffer and cursor position
         let state = self.active_state();
-        let cursor_pos = state.cursors.primary().position;
+        let cursor_pos = view_pos_to_event(state.cursors.primary().position);
 
-        // Convert byte position to LSP position (line, UTF-16 code units)
-        let (line, character) = state.buffer.position_to_lsp_position(cursor_pos);
+        // Convert view position to LSP position (line, UTF-16 code units)
+        let (line, character) = view_event_pos_to_lsp(&state.buffer, cursor_pos);
 
         // Get selection range (if any) or use cursor position
         let (start_line, start_char, end_line, end_char) =
             if let Some(range) = state.cursors.primary().selection_range() {
-                let (s_line, s_char) = state.buffer.position_to_lsp_position(range.start);
-                let (e_line, e_char) = state.buffer.position_to_lsp_position(range.end);
+                let (s_line, s_char) =
+                    view_event_pos_to_lsp(&state.buffer, view_pos_to_event(range.start));
+                let (e_line, e_char) =
+                    view_event_pos_to_lsp(&state.buffer, view_pos_to_event(range.end));
                 (s_line as u32, s_char as u32, e_line as u32, e_char as u32)
             } else {
                 (line as u32, character as u32, line as u32, character as u32)
@@ -6451,15 +6522,24 @@ impl Editor {
         state.apply(&batch);
 
         // Restore cursor to adjusted position
+        // Restore cursor to adjusted position (view-based TODO: needs layout mapping).
         let buffer_len = state.buffer.len();
-        let new_cursor_pos =
+        let new_cursor_byte =
             ((original_cursor_pos as isize + cursor_delta).max(0) as usize).min(buffer_len);
-        state.cursors.primary_mut().position = new_cursor_pos;
+        let new_cursor = crate::cursor::ViewPosition {
+            view_line: 0,
+            column: new_cursor_byte,
+            source_byte: Some(new_cursor_byte),
+        };
+        state.cursors.primary_mut().position = new_cursor;
 
-        // Adjust anchor if there was a selection
         if let Some(anchor) = original_cursor_anchor {
-            let new_anchor = ((anchor as isize + cursor_delta).max(0) as usize).min(buffer_len);
-            state.cursors.primary_mut().anchor = Some(new_anchor);
+            let new_anchor_byte = ((anchor as isize + cursor_delta).max(0) as usize).min(buffer_len);
+            state.cursors.primary_mut().anchor = Some(crate::cursor::ViewPosition {
+                view_line: 0,
+                column: new_anchor_byte,
+                source_byte: Some(new_anchor_byte),
+            });
         }
 
         // Notify LSP about the changes using pre-calculated positions
@@ -6630,10 +6710,10 @@ impl Editor {
         // This ensures we send the rename request for the correct symbol even if cursor moved
         let rename_pos = start_pos;
 
-        // Convert byte position to LSP position (line, UTF-16 code units)
-        // LSP uses UTF-16 code units for character offsets, not byte offsets
+        // Convert stored byte position to view event position for LSP mapping.
         let state = self.active_state();
-        let (line, character) = state.buffer.position_to_lsp_position(rename_pos);
+        let (line, character) =
+            view_event_pos_to_lsp(&state.buffer, ViewEventPosition::from_source_byte(rename_pos));
 
         // Get the current file URI and path
         let metadata = self.buffer_metadata.get(&self.active_buffer);
@@ -6791,8 +6871,12 @@ mod tests {
 
         // Insert "NEW" at position 0 (before "hello")
         // Expected LSP range: line 0, char 0 to line 0, char 0 (zero-width)
-        let position = 0;
-        let (line, character) = buffer.position_to_lsp_position(position);
+        let position = ViewEventPosition {
+            view_line: 0,
+            column: 0,
+            source_byte: Some(0),
+        };
+        let (line, character) = view_event_pos_to_lsp(&buffer, position);
 
         assert_eq!(line, 0, "Insertion at start should be line 0");
         assert_eq!(character, 0, "Insertion at start should be char 0");
@@ -6811,15 +6895,23 @@ mod tests {
         );
 
         // Test insertion at middle of first line (position 3, after "hel")
-        let position = 3;
-        let (line, character) = buffer.position_to_lsp_position(position);
+        let position = ViewEventPosition {
+            view_line: 0,
+            column: 3,
+            source_byte: Some(3),
+        };
+        let (line, character) = view_event_pos_to_lsp(&buffer, position);
 
         assert_eq!(line, 0);
         assert_eq!(character, 3);
 
         // Test insertion at start of second line (position 6, after "hello\n")
-        let position = 6;
-        let (line, character) = buffer.position_to_lsp_position(position);
+        let position = ViewEventPosition {
+            view_line: 1,
+            column: 0,
+            source_byte: Some(6),
+        };
+        let (line, character) = view_event_pos_to_lsp(&buffer, position);
 
         assert_eq!(line, 1, "Position after newline should be line 1");
         assert_eq!(character, 0, "Position at start of line 2 should be char 0");
@@ -6834,11 +6926,19 @@ mod tests {
         let buffer = Buffer::from_str_test("hello\nworld");
 
         // Delete "ello" (positions 1-5 on line 0)
-        let range_start = 1;
-        let range_end = 5;
+        let range_start = ViewEventPosition {
+            view_line: 0,
+            column: 1,
+            source_byte: Some(1),
+        };
+        let range_end = ViewEventPosition {
+            view_line: 0,
+            column: 5,
+            source_byte: Some(5),
+        };
 
-        let (start_line, start_char) = buffer.position_to_lsp_position(range_start);
-        let (end_line, end_char) = buffer.position_to_lsp_position(range_end);
+        let (start_line, start_char) = view_event_pos_to_lsp(&buffer, range_start);
+        let (end_line, end_char) = view_event_pos_to_lsp(&buffer, range_end);
 
         assert_eq!(start_line, 0);
         assert_eq!(start_char, 1);
@@ -6860,11 +6960,11 @@ mod tests {
         );
 
         // Test deletion across lines (delete "o\nw" - positions 4-8)
-        let range_start = 4;
-        let range_end = 8;
+        let range_start = ViewEventPosition::from_source_byte(4);
+        let range_end = ViewEventPosition::from_source_byte(8);
 
-        let (start_line, start_char) = buffer.position_to_lsp_position(range_start);
-        let (end_line, end_char) = buffer.position_to_lsp_position(range_end);
+        let (start_line, start_char) = view_event_pos_to_lsp(&buffer, range_start);
+        let (end_line, end_char) = view_event_pos_to_lsp(&buffer, range_end);
 
         assert_eq!(start_line, 0, "Delete start on line 0");
         assert_eq!(start_char, 4, "Delete start at char 4");
@@ -6882,13 +6982,15 @@ mod tests {
         let buffer = Buffer::from_str_test("😀hello");
 
         // Position 4 is after the emoji (4 bytes)
-        let (line, character) = buffer.position_to_lsp_position(4);
+        let (line, character) =
+            view_event_pos_to_lsp(&buffer, ViewEventPosition::from_source_byte(4));
 
         assert_eq!(line, 0);
         assert_eq!(character, 2, "Emoji should count as 2 UTF-16 code units");
 
         // Position 9 is after "😀hell" (4 bytes emoji + 5 bytes text)
-        let (line, character) = buffer.position_to_lsp_position(9);
+        let (line, character) =
+            view_event_pos_to_lsp(&buffer, ViewEventPosition::from_source_byte(9));
 
         assert_eq!(line, 0);
         assert_eq!(
@@ -6900,13 +7002,15 @@ mod tests {
         let buffer = Buffer::from_str_test("café");
 
         // Position 3 is after "caf" (3 bytes)
-        let (line, character) = buffer.position_to_lsp_position(3);
+        let (line, character) =
+            view_event_pos_to_lsp(&buffer, ViewEventPosition::from_source_byte(3));
 
         assert_eq!(line, 0);
         assert_eq!(character, 3);
 
         // Position 5 is after "café" (3 + 2 bytes)
-        let (line, character) = buffer.position_to_lsp_position(5);
+        let (line, character) =
+            view_event_pos_to_lsp(&buffer, ViewEventPosition::from_source_byte(5));
 
         assert_eq!(line, 0);
         assert_eq!(character, 4, "é should count as 1 UTF-16 code unit");

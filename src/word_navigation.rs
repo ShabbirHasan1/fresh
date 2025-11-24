@@ -1,6 +1,8 @@
 //! Word boundary detection and navigation helpers
 
+use crate::cursor::ViewPosition;
 use crate::text_buffer::Buffer;
+use crate::ui::view_pipeline::Layout;
 
 /// Check if a byte is a word character (alphanumeric or underscore)
 pub fn is_word_char(byte: u8) -> bool {
@@ -268,10 +270,114 @@ pub fn find_word_start_right(buffer: &Buffer, pos: usize) -> usize {
     start + new_pos
 }
 
+// ============================================================================
+// View-centric helpers (Layout + Buffer)
+// ============================================================================
+
+/// Map a source byte to a view position via layout.
+fn map_source_to_view(layout: &Layout, byte: usize) -> Option<ViewPosition> {
+    layout
+        .source_byte_to_view_position(byte)
+        .map(|(line, col)| ViewPosition {
+            view_line: line,
+            column: col,
+            source_byte: Some(byte),
+        })
+}
+
+/// Map a view position to a source byte via layout.
+fn map_view_to_source(layout: &Layout, pos: &ViewPosition) -> Option<usize> {
+    layout.view_position_to_source_byte(pos.view_line, pos.column)
+}
+
+/// Find word start in view coordinates (falls back to original position if unmapped).
+pub fn find_word_start_view(
+    layout: &Layout,
+    pos: &ViewPosition,
+    buffer: &Buffer,
+) -> ViewPosition {
+    if let Some(byte_pos) = map_view_to_source(layout, pos) {
+        let start_byte = find_word_start(buffer, byte_pos);
+        map_source_to_view(layout, start_byte).unwrap_or(*pos)
+    } else {
+        *pos
+    }
+}
+
+/// Find word end in view coordinates (falls back to original position if unmapped).
+pub fn find_word_end_view(layout: &Layout, pos: &ViewPosition, buffer: &Buffer) -> ViewPosition {
+    if let Some(byte_pos) = map_view_to_source(layout, pos) {
+        let end_byte = find_word_end(buffer, byte_pos);
+        map_source_to_view(layout, end_byte).unwrap_or(*pos)
+    } else {
+        *pos
+    }
+}
+
+/// Find word start to the left in view coordinates.
+pub fn find_word_start_left_view(
+    layout: &Layout,
+    pos: &ViewPosition,
+    buffer: &Buffer,
+) -> ViewPosition {
+    if let Some(byte_pos) = map_view_to_source(layout, pos) {
+        let start_byte = find_word_start_left(buffer, byte_pos);
+        map_source_to_view(layout, start_byte).unwrap_or(*pos)
+    } else {
+        *pos
+    }
+}
+
+/// Find word start to the right in view coordinates.
+pub fn find_word_start_right_view(
+    layout: &Layout,
+    pos: &ViewPosition,
+    buffer: &Buffer,
+) -> ViewPosition {
+    if let Some(byte_pos) = map_view_to_source(layout, pos) {
+        let start_byte = find_word_start_right(buffer, byte_pos);
+        map_source_to_view(layout, start_byte).unwrap_or(*pos)
+    } else {
+        *pos
+    }
+}
+
+/// Find completion word start in view coordinates.
+pub fn find_completion_word_start_view(
+    layout: &Layout,
+    pos: &ViewPosition,
+    buffer: &Buffer,
+) -> ViewPosition {
+    if let Some(byte_pos) = map_view_to_source(layout, pos) {
+        let start_byte = find_completion_word_start(buffer, byte_pos);
+        map_source_to_view(layout, start_byte).unwrap_or(*pos)
+    } else {
+        *pos
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::text_buffer::Buffer;
+    use crate::ui::view_pipeline::{Layout, ViewTokenWire, ViewTokenWireKind};
+
+    fn vp(line: usize, col: usize, source: Option<usize>) -> ViewPosition {
+        ViewPosition {
+            view_line: line,
+            column: col,
+            source_byte: source,
+        }
+    }
+
+    fn layout_from_text(text: &str) -> Layout {
+        let token = ViewTokenWire {
+            source_offset: Some(0),
+            kind: ViewTokenWireKind::Text(text.to_string()),
+            style: None,
+        };
+        Layout::from_tokens(&[token], 0..text.len())
+    }
 
     #[test]
     fn test_is_word_char() {
@@ -313,6 +419,46 @@ mod tests {
         let buffer = Buffer::from_str_test("hello world test");
         assert_eq!(find_word_start_right(&buffer, 0), 6); // From "hello" to "world"
         assert_eq!(find_word_start_right(&buffer, 6), 12); // From "world" to "test"
+    }
+
+    #[test]
+    fn test_view_word_start_and_end() {
+        let text = "hello world";
+        let buffer = Buffer::from_str_test(text);
+        let layout = layout_from_text(text);
+
+        let pos = vp(0, 3, Some(3)); // inside "hello"
+        let start = find_word_start_view(&layout, &pos, &buffer);
+        assert_eq!(start.view_line, 0);
+        assert_eq!(start.column, 0);
+
+        let end = find_word_end_view(&layout, &pos, &buffer);
+        assert_eq!(end.view_line, 0);
+        assert_eq!(end.column, 5);
+    }
+
+    #[test]
+    fn test_view_completion_word_start() {
+        let text = "foo.bar";
+        let buffer = Buffer::from_str_test(text);
+        let layout = layout_from_text(text);
+
+        let pos = vp(0, 7, Some(7)); // after bar
+        let start = find_completion_word_start_view(&layout, &pos, &buffer);
+        assert_eq!(start.view_line, 0);
+        assert_eq!(start.column, 4); // after '.'
+    }
+
+    #[test]
+    fn test_view_helpers_no_mapping_fall_back() {
+        let text = "hello";
+        let buffer = Buffer::from_str_test(text);
+        let layout = layout_from_text(text);
+        let unmapped = vp(0, 0, None);
+        assert_eq!(
+            find_word_start_view(&layout, &unmapped, &buffer),
+            unmapped
+        );
     }
 
     // ========================================================================

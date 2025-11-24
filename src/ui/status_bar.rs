@@ -1,5 +1,6 @@
-//! Status bar and prompt/minibuffer rendering
+//! Status bar and prompt/minibuffer rendering (view-centric).
 
+use crate::cursor::ViewPosition;
 use crate::prompt::Prompt;
 use crate::state::EditorState;
 use ratatui::layout::Rect;
@@ -8,25 +9,16 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
-/// Renders the status bar and prompt/minibuffer
+/// Renders the status bar and prompt/minibuffer.
 pub struct StatusBarRenderer;
 
 impl StatusBarRenderer {
-    /// Render only the status bar (without prompt)
-    ///
-    /// # Arguments
-    /// * `frame` - The ratatui frame to render to
-    /// * `area` - The rectangular area to render in
-    /// * `state` - The active buffer's editor state
-    /// * `status_message` - Optional status message to display
-    /// * `lsp_status` - LSP status indicator
-    /// * `theme` - The active theme for colors
-    /// * `display_name` - The display name for the file (project-relative path)
-    /// * `chord_state` - Current chord sequence state (for multi-key bindings)
+    /// Render only the status bar (without prompt).
     pub fn render_status_bar(
         frame: &mut Frame,
         area: Rect,
-        state: &mut EditorState,
+        state: &EditorState,
+        layout: Option<&crate::ui::view_pipeline::Layout>,
         status_message: &Option<String>,
         plugin_status_message: &Option<String>,
         lsp_status: &str,
@@ -39,6 +31,7 @@ impl StatusBarRenderer {
             frame,
             area,
             state,
+            layout,
             status_message,
             plugin_status_message,
             lsp_status,
@@ -49,7 +42,7 @@ impl StatusBarRenderer {
         );
     }
 
-    /// Render the prompt/minibuffer
+    /// Render the prompt/minibuffer.
     pub fn render_prompt(
         frame: &mut Frame,
         area: Rect,
@@ -58,21 +51,18 @@ impl StatusBarRenderer {
     ) {
         let base_style = Style::default().fg(theme.prompt_fg).bg(theme.prompt_bg);
 
-        // Create spans for the prompt
+        // Create spans for the prompt.
         let mut spans = vec![Span::styled(prompt.message.clone(), base_style)];
 
-        // If there's a selection, split the input into parts
+        // If there's a selection, split the input into parts.
         if let Some((sel_start, sel_end)) = prompt.selection_range() {
             let input = &prompt.input;
 
-            // Text before selection
             if sel_start > 0 {
                 spans.push(Span::styled(input[..sel_start].to_string(), base_style));
             }
 
-            // Selected text (blue background for visibility, cursor remains visible)
             if sel_start < sel_end {
-                // Use theme colors for selection to ensure consistency across themes
                 let selection_style = Style::default()
                     .fg(theme.prompt_selection_fg)
                     .bg(theme.prompt_selection_bg);
@@ -82,12 +72,10 @@ impl StatusBarRenderer {
                 ));
             }
 
-            // Text after selection
             if sel_end < input.len() {
                 spans.push(Span::styled(input[sel_end..].to_string(), base_style));
             }
         } else {
-            // No selection, render entire input normally
             spans.push(Span::styled(prompt.input.clone(), base_style));
         }
 
@@ -96,19 +84,19 @@ impl StatusBarRenderer {
 
         frame.render_widget(prompt_line, area);
 
-        // Set cursor position in the prompt
-        // Cursor should be at: message.len() + cursor_pos
+        // Set cursor position in the prompt.
         let cursor_x = (prompt.message.len() + prompt.cursor_pos) as u16;
         if cursor_x < area.width {
             frame.set_cursor_position((area.x + cursor_x, area.y));
         }
     }
 
-    /// Render the normal status bar
+    /// Render the normal status bar.
     fn render_status(
         frame: &mut Frame,
         area: Rect,
-        state: &mut EditorState,
+        state: &EditorState,
+        layout: Option<&crate::ui::view_pipeline::Layout>,
         status_message: &Option<String>,
         plugin_status_message: &Option<String>,
         lsp_status: &str,
@@ -117,16 +105,10 @@ impl StatusBarRenderer {
         keybindings: &crate::keybindings::KeybindingResolver,
         chord_state: &[(crossterm::event::KeyCode, crossterm::event::KeyModifiers)],
     ) {
-        // Use the pre-computed display name from buffer metadata
         let filename = display_name;
+        let modified = if state.buffer.is_modified() { " [+]" } else { "" };
 
-        let modified = if state.buffer.is_modified() {
-            " [+]"
-        } else {
-            ""
-        };
-
-        // Format chord state if present
+        // Chord indicator.
         let chord_display = if !chord_state.is_empty() {
             let chord_str = chord_state
                 .iter()
@@ -138,7 +120,7 @@ impl StatusBarRenderer {
             String::new()
         };
 
-        // View mode indicator
+        // View mode indicator.
         let mode_label = match state.view_mode {
             crate::state::ViewMode::Compose => " | Compose",
             _ => "",
@@ -146,30 +128,27 @@ impl StatusBarRenderer {
 
         let cursor = *state.primary_cursor();
 
-        // Get line number and column efficiently using cached values
-        let (line, col) = {
-            // Find the start of the line containing the cursor
-            let cursor_iter = state.buffer.line_iterator(cursor.position, 80);
-            let line_start = cursor_iter.current_position();
-            let col = cursor.position.saturating_sub(line_start);
+        // Derive view position and optional source position (line/col) for display.
+        let (view_line, view_col) = (
+            cursor.position.view_line.saturating_add(1),
+            cursor.position.column.saturating_add(1),
+        );
 
-            // Use cached line number from state
-            let line_num = state.primary_cursor_line_number.value();
-            (line_num, col)
-        };
+        let mut source_display = None;
+        if let (Some(l), Some(layout)) = (cursor.position.source_byte, layout) {
+            if let Some((src_line, src_col)) = layout.source_byte_to_view_position(l) {
+                // source_byte_to_view_position returns view coords; use buffer to get true source line/col.
+                let (line, col) = state.buffer.offset_to_position(l).map(|p| (p.line, p.column)).unwrap_or((src_line, src_col));
+                source_display = Some((line + 1, col + 1));
+            }
+        }
 
-        // Count diagnostics by severity
+        // Diagnostics counts.
         let diagnostics = state.overlays.all();
-        let mut error_count = 0;
-        let mut warning_count = 0;
-        let mut info_count = 0;
-
-        // Use the lsp-diagnostic namespace to identify diagnostic overlays
         let diagnostic_ns = crate::lsp_diagnostics::lsp_diagnostic_namespace();
+        let (mut error_count, mut warning_count, mut info_count) = (0, 0, 0);
         for overlay in diagnostics {
             if overlay.namespace.as_ref() == Some(&diagnostic_ns) {
-                // Check priority to determine severity
-                // Based on lsp_diagnostics.rs: Error=100, Warning=50, Info=30, Hint=10
                 match overlay.priority {
                     100 => error_count += 1,
                     50 => warning_count += 1,
@@ -178,7 +157,6 @@ impl StatusBarRenderer {
             }
         }
 
-        // Build diagnostics summary if there are any
         let diagnostics_summary = if error_count + warning_count + info_count > 0 {
             let mut parts = Vec::new();
             if error_count > 0 {
@@ -195,14 +173,14 @@ impl StatusBarRenderer {
             String::new()
         };
 
-        // Build cursor count indicator (only show if multiple cursors)
+        // Cursor count indicator.
         let cursor_count_indicator = if state.cursors.count() > 1 {
             format!(" | {} cursors", state.cursors.count())
         } else {
             String::new()
         };
 
-        // Build the status string with optional LSP status and status message
+        // LSP indicator.
         let lsp_indicator = if !lsp_status.is_empty() {
             format!(" | {}", lsp_status)
         } else {
@@ -227,13 +205,18 @@ impl StatusBarRenderer {
             format!(" | {}", message_parts.join(" | "))
         };
 
+        let source_suffix = if let Some((line, col)) = source_display {
+            format!(" (Src Ln {}, Col {})", line, col)
+        } else {
+            String::new()
+        };
+
         let base_status = format!(
-            "{filename}{modified} | Ln {line}, Col {col}{diagnostics_summary}{cursor_count_indicator}{lsp_indicator}"
+            "{filename}{modified} | View Ln {view_line}, Col {view_col}{source_suffix}{mode_label}{diagnostics_summary}{cursor_count_indicator}{lsp_indicator}"
         );
         let left_status = format!("{base_status}{chord_display}{message_suffix}");
 
-        // Build Command Palette indicator for right side
-        // Always show Command Palette indicator on the right side
+        // Command Palette indicator on the right side.
         let cmd_palette_shortcut = keybindings
             .get_keybinding_for_action(
                 &crate::keybindings::Action::CommandPalette,
@@ -243,24 +226,14 @@ impl StatusBarRenderer {
         let cmd_palette_indicator = format!("Palette: {}", cmd_palette_shortcut);
         let padded_cmd_palette = format!(" {} ", cmd_palette_indicator);
 
-        // Calculate available width - always reserve space for command palette indicator
         let available_width = area.width as usize;
         let cmd_palette_width = padded_cmd_palette.len();
 
-        // Only show command palette indicator if there's enough space (at least 15 chars for minimal display)
         let spans = if available_width >= 15 {
-            // Reserve space for command palette indicator
-            let left_max_width = if available_width > cmd_palette_width + 1 {
-                available_width - cmd_palette_width - 1 // -1 for at least one space separator
-            } else {
-                1 // Minimal space
-            };
+            let left_max_width = available_width.saturating_sub(cmd_palette_width + 1);
 
-            let mut spans = vec![];
-
-            // Truncate left status if it's too long
             let displayed_left = if left_status.len() > left_max_width {
-                let truncate_at = left_max_width.saturating_sub(3); // -3 for "..."
+                let truncate_at = left_max_width.saturating_sub(3);
                 if truncate_at > 0 {
                     format!("{}...", &left_status[..truncate_at])
                 } else {
@@ -270,16 +243,15 @@ impl StatusBarRenderer {
                 left_status.clone()
             };
 
-            spans.push(Span::styled(
+            let mut spans = vec![Span::styled(
                 displayed_left.clone(),
                 Style::default()
                     .fg(theme.status_bar_fg)
                     .bg(theme.status_bar_bg),
-            ));
+            )];
 
             let displayed_left_len = displayed_left.len();
 
-            // Add spacing to push command palette indicator to the right
             if displayed_left_len + cmd_palette_width < available_width {
                 let padding_len = available_width - displayed_left_len - cmd_palette_width;
                 spans.push(Span::styled(
@@ -289,7 +261,6 @@ impl StatusBarRenderer {
                         .bg(theme.status_bar_bg),
                 ));
             } else if displayed_left_len < available_width {
-                // Add minimal space
                 spans.push(Span::styled(
                     " ",
                     Style::default()
@@ -298,7 +269,6 @@ impl StatusBarRenderer {
                 ));
             }
 
-            // Add command palette indicator with distinct styling and padding
             spans.push(Span::styled(
                 padded_cmd_palette.clone(),
                 Style::default()
@@ -306,7 +276,6 @@ impl StatusBarRenderer {
                     .bg(theme.help_indicator_bg),
             ));
 
-            // Calculate total width covered by spans
             let total_width = displayed_left_len
                 + if displayed_left_len + cmd_palette_width < available_width {
                     available_width - displayed_left_len - cmd_palette_width
@@ -317,7 +286,6 @@ impl StatusBarRenderer {
                 }
                 + cmd_palette_width;
 
-            // Add final padding to fill exactly to area width if needed
             if total_width < available_width {
                 spans.push(Span::styled(
                     " ".repeat(available_width - total_width),
@@ -329,7 +297,6 @@ impl StatusBarRenderer {
 
             spans
         } else {
-            // Terminal too narrow or no command palette indicator - fill entire width with left status
             let mut spans = vec![];
             let displayed_left = if left_status.len() > available_width {
                 let truncate_at = available_width.saturating_sub(3);
@@ -349,7 +316,6 @@ impl StatusBarRenderer {
                     .bg(theme.status_bar_bg),
             ));
 
-            // Fill remaining width
             if displayed_left.len() < available_width {
                 spans.push(Span::styled(
                     " ".repeat(available_width - displayed_left.len()),
@@ -365,5 +331,19 @@ impl StatusBarRenderer {
         let status_line = Paragraph::new(Line::from(spans));
 
         frame.render_widget(status_line, area);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn basic_prompt_cursor_position() {
+        let mut prompt = Prompt::new("Test".to_string());
+        prompt.input = "input".to_string();
+        prompt.cursor_pos = 2;
+        // Rendering can't be unit-tested easily here without a terminal; just ensure accessors work.
+        assert_eq!(prompt.cursor_pos, 2);
     }
 }

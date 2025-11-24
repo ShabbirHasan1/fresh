@@ -251,6 +251,21 @@ impl Cursors {
         self.cursors.iter().map(|(id, c)| (*id, c))
     }
 
+    /// Number of cursors.
+    pub fn len(&self) -> usize {
+        self.cursors.len()
+    }
+
+    /// True if no cursors (should not happen in practice).
+    pub fn is_empty(&self) -> bool {
+        self.cursors.is_empty()
+    }
+
+    /// Alias for len() for callers expecting count.
+    pub fn count(&self) -> usize {
+        self.len()
+    }
+
     /// Add a new cursor and return its ID
     pub fn add(&mut self, cursor: Cursor) -> CursorId {
         let id = CursorId(self.next_id);
