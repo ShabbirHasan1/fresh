@@ -299,7 +299,15 @@ fn test_command_palette_enter_uses_selection() {
 #[test]
 fn test_command_palette_enter_partial_match() {
     use crossterm::event::{KeyCode, KeyModifiers};
+    use tempfile::TempDir;
+
+    let temp_dir = TempDir::new().unwrap();
+    let file_path = temp_dir.path().join("partial_match.txt");
+    std::fs::write(&file_path, "hello").unwrap();
+
     let mut harness = EditorTestHarness::new(80, 24).unwrap();
+    harness.open_file(&file_path).unwrap();
+    harness.render().unwrap();
 
     // Trigger the command palette
     harness
