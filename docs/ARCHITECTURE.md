@@ -546,6 +546,14 @@ impl SplitViewState {
 - View transform changes (plugin sends new tokens)
 - Scroll would move past current layout's source_range
 
+#### Current implementation snapshot (ongoing refactor)
+
+- `SplitViewState::ensure_layout` always returns a Layout, rebuilding lazily from the active view transform or base tokens. Rebuilds respect wrapping parameters from the viewport.
+- The viewport tracks `top_view_line` and a stable `anchor_byte`; `stabilize_after_layout_change` walks backward to include injected lines above the anchor so headers remain visible.
+- Vertical navigation and scroll events are routed through view-layout coordinates (no buffer-line fallback). Page/line motion expands layout ranges up or down when scrolling past existing source_range.
+- Rendering consumes a stored Layout from `SplitViewState` when present; the viewport is synchronized back to the view state after drawing so multiple splits stay consistent.
+- Outstanding: initial visibility for some injected-header transforms is still being exercised in tests (see `e2e::git::test_view_transform_scroll_with_many_virtual_lines`).
+
 ### The Frame Flow
 
 ```

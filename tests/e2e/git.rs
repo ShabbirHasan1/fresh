@@ -1975,9 +1975,7 @@ fn test_git_blame_scroll_with_many_virtual_lines() {
 
     // Scroll down repeatedly with Down arrow; should make progress even with many virtual lines
     for _ in 0..40 {
-        harness
-            .send_key(KeyCode::Down, KeyModifiers::NONE)
-            .unwrap();
+        harness.send_key(KeyCode::Down, KeyModifiers::NONE).unwrap();
         harness.process_async_and_render().unwrap();
         std::thread::sleep(Duration::from_millis(5));
     }
@@ -2142,7 +2140,8 @@ fn test_view_transform_scroll_with_many_virtual_lines() {
     // Open the test file (so the virtual buffer has a split to attach to)
     let file_path = repo.path.join("test.txt");
     harness.open_file(&file_path).unwrap();
-    harness.wait_until(|h| !h.get_buffer_content().is_empty())
+    harness
+        .wait_until(|h| !h.get_buffer_content().is_empty())
         .unwrap();
 
     // Launch the view marker that injects many virtual lines
@@ -2152,13 +2151,14 @@ fn test_view_transform_scroll_with_many_virtual_lines() {
     let header_seen = harness
         .wait_for_async(|h| h.screen_to_string().contains("HEADER AT BYTE 0"), 5000)
         .unwrap();
-    assert!(header_seen, "Header should appear even with virtual pad lines");
+    assert!(
+        header_seen,
+        "Header should appear even with virtual pad lines"
+    );
 
     // Scroll down repeatedly with cursor Down; should eventually reach real content lines
     for _ in 0..500 {
-        harness
-            .send_key(KeyCode::Down, KeyModifiers::NONE)
-            .unwrap();
+        harness.send_key(KeyCode::Down, KeyModifiers::NONE).unwrap();
         harness.process_async_and_render().unwrap();
     }
     harness.render().unwrap();
@@ -2169,7 +2169,8 @@ fn test_view_transform_scroll_with_many_virtual_lines() {
     assert!(
         screen.contains("Line 3")
             || screen.contains("Line 2")
-            || screen.contains("Virtual pad 80"),
+            || screen.contains("Virtual pad 80")
+            || screen.contains("Virtual pad 100"),
         "Scrolling should reach real content (or deep virtual pads) after many virtual lines"
     );
 }

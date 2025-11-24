@@ -2576,7 +2576,9 @@ impl Editor {
                 // Use view-aware scrolling with the transform's tokens
                 use crate::ui::view_pipeline::ViewLineIterator;
                 let view_lines: Vec<_> = ViewLineIterator::new(&tokens).collect();
-                view_state.viewport.scroll_view_lines(&view_lines, delta as isize);
+                view_state
+                    .viewport
+                    .scroll_view_lines(&view_lines, delta as isize);
             } else {
                 // No view transform - use traditional buffer-based scrolling
                 if delta < 0 {

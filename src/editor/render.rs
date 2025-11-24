@@ -224,7 +224,7 @@ impl Editor {
             self.config.editor.large_file_threshold_bytes,
             self.config.editor.line_wrap,
             self.config.editor.estimated_line_length,
-            Some(&self.split_view_states),
+            Some(&mut self.split_view_states),
             self.menu_state.active_menu.is_some(),
         );
         self.cached_layout.split_areas = split_areas;
@@ -1144,6 +1144,42 @@ impl Editor {
         // (since scroll events now update SplitViewState's viewport directly)
         // Note: We only sync viewport, NOT cursors - EditorState has authoritative cursor state
         self.sync_viewport_from_split_view_state();
+
+        // Layout-aware vertical navigation (always use view-layer movement)
+        if matches!(
+            action,
+            Action::MoveUp | Action::MoveDown | Action::MovePageUp | Action::MovePageDown
+        ) {
+            let split_id = self.split_manager.active_split();
+            if let (Some(view_state), Some(buffer_state)) = (
+                self.split_view_states.get_mut(&split_id),
+                self.buffers.get_mut(&self.active_buffer),
+            ) {
+                // Keep view state in sync with current editor cursors/viewport sizes
+                view_state.cursors = buffer_state.cursors.clone();
+                view_state.viewport.width = buffer_state.viewport.width;
+                view_state.viewport.height = buffer_state.viewport.height;
+
+                let viewport_height = view_state.viewport.visible_line_count();
+                let delta = match action {
+                    Action::MoveUp => -1,
+                    Action::MoveDown => 1,
+                    Action::MovePageDown => viewport_height.saturating_sub(1) as isize,
+                    Action::MovePageUp => -(viewport_height.saturating_sub(1) as isize),
+                    _ => 0,
+                };
+
+                let estimated_line_length = self.config.editor.estimated_line_length;
+                let events = view_state.move_cursors_by_view_lines(
+                    delta,
+                    &mut buffer_state.buffer,
+                    estimated_line_length,
+                );
+
+                buffer_state.viewport = view_state.viewport.clone();
+                return Some(events);
+            }
+        }
 
         let tab_size = self.config.editor.tab_size;
         let auto_indent = self.config.editor.auto_indent;

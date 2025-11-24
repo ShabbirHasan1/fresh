@@ -705,6 +705,15 @@ impl Editor {
         self.active_state().editing_disabled
     }
 
+    /// Check if the active split has an active view transform
+    fn active_split_has_view_transform(&self) -> bool {
+        let split_id = self.split_manager.active_split();
+        self.split_view_states
+            .get(&split_id)
+            .and_then(|vs| vs.view_transform.as_ref())
+            .is_some()
+    }
+
     /// Resolve a keybinding for the active buffer's mode
     ///
     /// If the active buffer has a mode (virtual buffer), check if that mode
@@ -2029,41 +2038,62 @@ impl Editor {
         }
     }
 
-    /// Handle scroll events using the SplitViewState's viewport
+    /// Handle scroll events using the SplitViewState's layout/view lines
     ///
     /// View events (like Scroll) go to SplitViewState, not EditorState.
-    /// This correctly handles scroll limits when view transforms inject headers.
+    /// This uses view-aware scrolling with layout/view lines; no buffer fallback.
     fn handle_scroll_event(&mut self, line_offset: isize) {
-        use crate::ui::view_pipeline::ViewLineIterator;
-
         let active_split = self.split_manager.active_split();
         let buffer_id = self.active_buffer;
 
-        // Get view_transform tokens from SplitViewState (if any)
-        let view_transform_tokens = self
-            .split_view_states
-            .get(&active_split)
-            .and_then(|vs| vs.view_transform.as_ref())
-            .map(|vt| vt.tokens.clone());
+        if let (Some(view_state), Some(buffer_state)) = (
+            self.split_view_states.get_mut(&active_split),
+            self.buffers.get_mut(&buffer_id),
+        ) {
+            let estimated_line_length = self.config.editor.estimated_line_length;
+            let gutter_width = view_state.viewport.gutter_width(&buffer_state.buffer);
+            let wrap_params = Some((view_state.viewport.width as usize, gutter_width));
+            let layout = view_state
+                .ensure_layout(&mut buffer_state.buffer, estimated_line_length, wrap_params)
+                .clone();
 
-        // Get mutable references to both buffer and view state
-        let buffer = &mut self.buffers.get_mut(&buffer_id).unwrap().buffer;
-        let view_state = self.split_view_states.get_mut(&active_split);
+            view_state.viewport.scroll_layout(line_offset, &layout);
 
-        if let Some(view_state) = view_state {
-            if let Some(tokens) = view_transform_tokens {
-                // Use view-aware scrolling with the transform's tokens
-                let view_lines: Vec<_> = ViewLineIterator::new(&tokens).collect();
-                view_state.viewport.scroll_view_lines(&view_lines, line_offset);
-            } else {
-                // No view transform - use traditional buffer-based scrolling
-                // Still use SplitViewState's viewport (not EditorState's)
-                if line_offset > 0 {
-                    view_state.viewport.scroll_down(buffer, line_offset as usize);
-                } else {
-                    view_state.viewport.scroll_up(buffer, line_offset.unsigned_abs());
-                }
+            if view_state.viewport.top_view_line == 0
+                && line_offset < 0
+                && layout.source_range.start > 0
+            {
+                let backtrack_bytes = estimated_line_length
+                    .saturating_mul(view_state.viewport.visible_line_count().max(1));
+                view_state.viewport.top_byte =
+                    layout.source_range.start.saturating_sub(backtrack_bytes);
+                view_state.viewport.anchor_byte = view_state.viewport.top_byte;
+                view_state.layout_dirty = true;
+
+                let layout = view_state
+                    .ensure_layout(&mut buffer_state.buffer, estimated_line_length, wrap_params)
+                    .clone();
+                view_state.viewport.scroll_layout(line_offset, &layout);
             }
+
+            // If we hit the end of the current layout but the buffer continues,
+            // rebuild starting from the end of this layout to keep scrolling working.
+            let max_top = layout.max_top_line(view_state.viewport.visible_line_count());
+            if view_state.viewport.top_view_line == max_top
+                && layout.has_content_below(buffer_state.buffer.len())
+            {
+                view_state.viewport.top_byte =
+                    layout.source_range.end.min(buffer_state.buffer.len());
+                view_state.viewport.anchor_byte = view_state.viewport.top_byte;
+                view_state.layout_dirty = true;
+
+                let layout = view_state
+                    .ensure_layout(&mut buffer_state.buffer, estimated_line_length, wrap_params)
+                    .clone();
+                view_state.viewport.scroll_layout(line_offset, &layout);
+            }
+
+            buffer_state.viewport = view_state.viewport.clone();
         }
     }
 
@@ -2073,10 +2103,7 @@ impl Editor {
         let buffer_id = self.active_buffer;
 
         // Get mutable references to both buffer and view state
-        let buffer = self
-            .buffers
-            .get_mut(&buffer_id)
-            .map(|s| &mut s.buffer);
+        let buffer = self.buffers.get_mut(&buffer_id).map(|s| &mut s.buffer);
         let view_state = self.split_view_states.get_mut(&active_split);
 
         if let (Some(buffer), Some(view_state)) = (buffer, view_state) {
@@ -4176,6 +4203,8 @@ impl Editor {
                         )
                     });
                 view_state.view_transform = Some(payload);
+                view_state.layout = None;
+                view_state.layout_dirty = true;
             }
             PluginCommand::ClearViewTransform {
                 buffer_id,
@@ -4185,6 +4214,8 @@ impl Editor {
                 if let Some(view_state) = self.split_view_states.get_mut(&target_split) {
                     view_state.view_transform = None;
                     view_state.compose_width = None;
+                    view_state.layout = None;
+                    view_state.layout_dirty = true;
                 }
             }
             PluginCommand::OpenFileAtLocation { path, line, column } => {

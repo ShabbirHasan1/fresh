@@ -1,7 +1,7 @@
 use crate::cursor::Cursor;
 use crate::line_wrapping::{char_position_to_segment, wrap_line, WrapConfig};
 use crate::text_buffer::Buffer;
-use crate::ui::view_pipeline::ViewLine;
+use crate::ui::view_pipeline::{Layout, ViewLine};
 /// The viewport - what portion of the buffer is visible
 #[derive(Debug, Clone)]
 pub struct Viewport {
@@ -9,6 +9,15 @@ pub struct Viewport {
     /// **This is the authoritative source of truth for all viewport operations**
     /// The line number for this byte is obtained from Buffer's LineCache
     pub top_byte: usize,
+
+    /// Stable anchor byte for layout-based scrolling.
+    /// This survives layout rebuilds and lets us restore top_view_line
+    /// using byte→view mappings.
+    pub anchor_byte: usize,
+
+    /// View-line offset within the current layout/view transform.
+    /// This allows scrolling through injected lines that have no source bytes.
+    pub top_view_line: usize,
 
     /// Left column offset (horizontal scroll position)
     pub left_column: usize,
@@ -38,6 +47,8 @@ impl Viewport {
     pub fn new(width: u16, height: u16) -> Self {
         Self {
             top_byte: 0,
+            anchor_byte: 0,
+            top_view_line: 0,
             left_column: 0,
             width,
             height,
@@ -81,6 +92,88 @@ impl Viewport {
         };
         // 1 (indicator) + minimum 4 digits for readability + 3 (" │ ")
         1 + digits.max(4) + 3
+    }
+
+    /// Re-anchor the viewport after a layout rebuild.
+    /// This keeps scroll position stable across layout changes.
+    pub fn stabilize_after_layout_change(&mut self, layout: &Layout) {
+        if layout.lines.is_empty() {
+            self.top_view_line = 0;
+            self.top_byte = 0;
+            self.anchor_byte = 0;
+            return;
+        }
+
+        // Try to land on the same byte as before; otherwise find nearest view line.
+        // Then walk backward to include any injected lines that precede that source byte
+        // so headers at byte 0 remain visible.
+        let mut view_line = layout
+            .view_line_for_byte(self.anchor_byte)
+            .unwrap_or_else(|| layout.find_nearest_view_line(self.anchor_byte));
+        while view_line > 0
+            && layout.lines[view_line - 1]
+                .char_mappings
+                .iter()
+                .all(|m| m.is_none())
+        {
+            view_line -= 1;
+        }
+        self.top_view_line = view_line;
+
+        // Clamp to a valid scroll position for the new layout
+        let max_top = layout.max_top_line(self.visible_line_count());
+        self.top_view_line = self.top_view_line.min(max_top);
+
+        if let Some(byte) = layout.get_source_byte_for_line(self.top_view_line) {
+            self.top_byte = byte;
+            self.anchor_byte = byte;
+        }
+    }
+
+    /// Scroll using layout/view lines exclusively.
+    /// This keeps injected lines and view transforms in sync.
+    pub fn scroll_layout(&mut self, offset: isize, layout: &Layout) {
+        if layout.lines.is_empty() {
+            return;
+        }
+
+        let max_top = layout.max_top_line(self.visible_line_count());
+        let target = (self.top_view_line as isize + offset).max(0) as usize;
+        self.top_view_line = target.min(max_top);
+
+        if let Some(byte) = layout.get_source_byte_for_line(self.top_view_line) {
+            self.top_byte = byte;
+            self.anchor_byte = byte;
+        }
+    }
+
+    /// Ensure a cursor is visible using layout/view-line coordinates.
+    pub fn ensure_visible_in_layout(&mut self, cursor: &Cursor, layout: &Layout) {
+        if layout.lines.is_empty() {
+            return;
+        }
+
+        let viewport_height = self.visible_line_count().max(1);
+        let (cursor_line, _visual_col) = layout
+            .source_byte_to_view_position(cursor.position)
+            .unwrap_or((0, 0));
+
+        let max_top = layout.max_top_line(viewport_height);
+        let bottom = self
+            .top_view_line
+            .saturating_add(viewport_height.saturating_sub(1));
+
+        if cursor_line < self.top_view_line || cursor_line > bottom {
+            let target_top = cursor_line.saturating_sub(viewport_height / 2);
+            self.top_view_line = target_top.min(max_top);
+        }
+
+        if let Some(byte) = layout.get_source_byte_for_line(self.top_view_line) {
+            self.top_byte = byte;
+            self.anchor_byte = byte;
+        }
+
+        self.needs_sync = false;
     }
 
     /// Scroll up by N lines (byte-based)
@@ -128,8 +221,8 @@ impl Viewport {
             return;
         }
 
-        // Find the current view line index that corresponds to top_byte
-        let current_idx = self.find_view_line_for_byte(view_lines, self.top_byte);
+        // Start from current top_view_line
+        let current_idx = self.top_view_line;
 
         // Calculate target index
         let target_idx = if line_offset >= 0 {
@@ -142,13 +235,12 @@ impl Viewport {
         let max_top_idx = view_lines.len().saturating_sub(viewport_height);
         let clamped_idx = target_idx.min(max_top_idx);
 
-        // Get the source byte for the target view line
+        self.top_view_line = clamped_idx;
+
+        // Get the source byte for the target view line (if any) to keep anchor_byte stable
         if let Some(new_top_byte) = self.get_source_byte_for_view_line(view_lines, clamped_idx) {
-            tracing::trace!(
-                "scroll_view_lines: offset={}, current_idx={}, target_idx={}, clamped_idx={}, new_top_byte={}",
-                line_offset, current_idx, target_idx, clamped_idx, new_top_byte
-            );
             self.top_byte = new_top_byte;
+            self.anchor_byte = new_top_byte;
         }
     }
 
@@ -200,12 +292,14 @@ impl Viewport {
         let viewport_height = self.visible_line_count();
         if viewport_height == 0 {
             self.top_byte = proposed_top_byte;
+            self.anchor_byte = self.top_byte;
             return;
         }
 
         let buffer_len = buffer.len();
         if buffer_len == 0 {
             self.top_byte = 0;
+            self.anchor_byte = 0;
             return;
         }
 
@@ -224,6 +318,7 @@ impl Viewport {
                     proposed_top_byte
                 );
                 self.top_byte = proposed_top_byte;
+                self.anchor_byte = self.top_byte;
                 return;
             }
         }
@@ -261,6 +356,7 @@ impl Viewport {
                 proposed_top_byte
             );
             self.top_byte = proposed_top_byte;
+            self.anchor_byte = self.top_byte;
             return;
         }
 
@@ -298,6 +394,7 @@ impl Viewport {
             final_top_byte
         );
         self.top_byte = final_top_byte;
+        self.anchor_byte = self.top_byte;
     }
 
     /// Scroll to a specific line (byte-based)

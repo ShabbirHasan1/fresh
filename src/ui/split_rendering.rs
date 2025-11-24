@@ -10,7 +10,9 @@ use crate::split::SplitManager;
 use crate::state::{EditorState, ViewMode};
 use crate::text_buffer::Buffer;
 use crate::ui::tabs::TabsRenderer;
-use crate::ui::view_pipeline::{should_show_line_number, LineStart, ViewLine, ViewLineIterator};
+use crate::ui::view_pipeline::{
+    should_show_line_number, Layout, LineStart, ViewLine, ViewLineIterator,
+};
 use crate::virtual_text::VirtualTextPosition;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
@@ -148,7 +150,9 @@ impl SplitRenderer {
         large_file_threshold_bytes: u64,
         _line_wrap: bool,
         estimated_line_length: usize,
-        split_view_states: Option<&HashMap<crate::event::SplitId, crate::split::SplitViewState>>,
+        mut split_view_states: Option<
+            &mut HashMap<crate::event::SplitId, crate::split::SplitViewState>,
+        >,
         hide_cursor: bool,
     ) -> Vec<(crate::event::SplitId, BufferId, Rect, Rect, usize, usize)> {
         let _span = tracing::trace_span!("render_content").entered();
@@ -166,7 +170,7 @@ impl SplitRenderer {
 
             let layout = Self::split_layout(split_area);
             let (split_buffers, tab_scroll_offset) =
-                Self::split_buffers_for_tabs(split_view_states, split_id, buffer_id);
+                Self::split_buffers_for_tabs(split_view_states.as_deref(), split_id, buffer_id);
 
             // Render tabs for this split
             TabsRenderer::render_for_split(
@@ -186,10 +190,41 @@ impl SplitRenderer {
             let event_log_opt = event_logs.get_mut(&buffer_id);
 
             if let Some(state) = state_opt {
-                let saved_state =
-                    Self::temporary_split_state(state, split_view_states, split_id, is_active);
+                let saved_state = Self::temporary_split_state(
+                    state,
+                    split_view_states.as_deref(),
+                    split_id,
+                    is_active,
+                );
                 Self::sync_viewport_to_content(state, layout.content_rect);
-                let view_prefs = Self::resolve_view_preferences(state, split_view_states, split_id);
+                let view_prefs =
+                    Self::resolve_view_preferences(state, split_view_states.as_deref(), split_id);
+
+                // Build layout override from SplitViewState if available
+                let mut layout_override: Option<Layout> = None;
+                if let Some(view_states) = split_view_states.as_mut() {
+                    if let Some(view_state) = view_states.get_mut(&split_id) {
+                        // Keep view state sized correctly for this split
+                        view_state.viewport.width = state.viewport.width;
+                        view_state.viewport.height = state.viewport.height;
+                        view_state.cursors = state.cursors.clone();
+
+                        let gutter_width = view_state.viewport.gutter_width(&state.buffer);
+                        let wrap_params = Some((view_state.viewport.width as usize, gutter_width));
+                        let layout = view_state
+                            .ensure_layout(&mut state.buffer, estimated_line_length, wrap_params)
+                            .clone();
+
+                        // Ensure primary cursor is visible within layout coordinates
+                        let primary_cursor = *state.cursors.primary();
+                        view_state
+                            .viewport
+                            .ensure_visible_in_layout(&primary_cursor, &layout);
+
+                        state.viewport = view_state.viewport.clone();
+                        layout_override = Some(layout);
+                    }
+                }
 
                 Self::render_buffer_in_split(
                     frame,
@@ -204,11 +239,18 @@ impl SplitRenderer {
                     view_prefs.view_mode,
                     view_prefs.compose_width,
                     view_prefs.compose_column_guides,
+                    layout_override,
                     view_prefs.view_transform,
                     estimated_line_length,
                     buffer_id,
                     hide_cursor,
                 );
+
+                if let Some(view_states) = split_view_states.as_mut() {
+                    if let Some(view_state) = view_states.get_mut(&split_id) {
+                        view_state.viewport = state.viewport.clone();
+                    }
+                }
 
                 // For small files, count actual lines for accurate scrollbar
                 // For large files, we'll use a constant thumb size
@@ -543,6 +585,7 @@ impl SplitRenderer {
 
     fn build_view_data(
         state: &mut EditorState,
+        layout_override: Option<&Layout>,
         view_transform: Option<ViewTransformPayload>,
         estimated_line_length: usize,
         visible_count: usize,
@@ -550,6 +593,19 @@ impl SplitRenderer {
         content_width: usize,
         gutter_width: usize,
     ) -> ViewData {
+        if let Some(layout) = layout_override {
+            let max_top = layout.max_top_line(visible_count);
+            state.viewport.top_view_line = state.viewport.top_view_line.min(max_top);
+            let start = state.viewport.top_view_line;
+            let end = (start + visible_count).min(layout.lines.len());
+            if let Some(byte) = layout.get_source_byte_for_line(start) {
+                state.viewport.top_byte = byte;
+                state.viewport.anchor_byte = byte;
+            }
+            let lines = layout.lines[start..end].to_vec();
+            return ViewData { lines };
+        }
+
         // Build base token stream from source
         let base_tokens = Self::build_base_tokens(
             &mut state.buffer,
@@ -568,7 +624,14 @@ impl SplitRenderer {
 
         // Convert tokens to display lines using the view pipeline
         // Each ViewLine preserves LineStart info for correct line number rendering
-        let lines: Vec<ViewLine> = ViewLineIterator::new(&tokens).collect();
+        let all_lines: Vec<ViewLine> = ViewLineIterator::new(&tokens).collect();
+
+        // Apply vertical offset from viewport (view-line based)
+        let max_top = all_lines.len().saturating_sub(visible_count);
+        state.viewport.top_view_line = state.viewport.top_view_line.min(max_top);
+        let start = state.viewport.top_view_line;
+        let end = (start + visible_count).min(all_lines.len());
+        let lines = all_lines[start..end].to_vec();
 
         ViewData { lines }
     }
@@ -658,7 +721,7 @@ impl SplitRenderer {
         Self::build_base_tokens(buffer, top_byte, estimated_line_length, visible_count)
     }
 
-    fn apply_wrapping_transform(
+    pub fn apply_wrapping_transform(
         tokens: Vec<crate::plugin_api::ViewTokenWire>,
         content_width: usize,
         gutter_width: usize,
@@ -1765,6 +1828,7 @@ impl SplitRenderer {
         view_mode: ViewMode,
         compose_width: Option<u16>,
         compose_column_guides: Option<Vec<u16>>,
+        layout_override: Option<Layout>,
         view_transform: Option<ViewTransformPayload>,
         estimated_line_length: usize,
         _buffer_id: BufferId,
@@ -1791,6 +1855,7 @@ impl SplitRenderer {
 
         let view_data = Self::build_view_data(
             state,
+            layout_override.as_ref(),
             view_transform,
             estimated_line_length,
             visible_count,
@@ -2058,6 +2123,7 @@ mod tests {
 
         let view_data = SplitRenderer::build_view_data(
             &mut state,
+            None,
             None,
             content.len().max(1),
             visible_count,

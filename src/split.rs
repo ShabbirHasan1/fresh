@@ -28,8 +28,10 @@ use crate::event::{BufferId, SplitDirection, SplitId};
 use crate::ui::view_pipeline::Layout;
 use crate::viewport::Viewport;
 use crate::{plugin_api::ViewTransformPayload, state::ViewMode};
+use crate::{text_buffer::Buffer, ui::split_rendering::SplitRenderer};
 use ratatui::layout::Rect;
 use serde::{Deserialize, Serialize};
+use std::ops::Range;
 
 /// A node in the split tree
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -147,19 +149,23 @@ impl SplitViewState {
     /// Ensure layout is valid, rebuilding if needed.
     /// Returns the Layout - never returns None. Following VSCode's ViewModel pattern.
     ///
-    /// # Arguments
-    /// * `tokens` - ViewTokenWire array (from view_transform or built from buffer)
-    /// * `source_range` - The byte range this layout covers
+    /// Builds layout from either plugin view transform or base tokens.
     pub fn ensure_layout(
         &mut self,
-        tokens: &[crate::plugin_api::ViewTokenWire],
-        source_range: std::ops::Range<usize>,
+        buffer: &mut Buffer,
+        estimated_line_length: usize,
+        wrap_params: Option<(usize, usize)>,
     ) -> &Layout {
         if self.layout.is_none() || self.layout_dirty {
-            self.layout = Some(Layout::from_tokens(tokens, source_range));
-            self.layout_dirty = false;
+            self.rebuild_layout(buffer, estimated_line_length, wrap_params);
         }
-        self.layout.as_ref().unwrap()
+
+        // Stabilize scroll position if we just rebuilt
+        if let Some(layout) = &self.layout {
+            self.viewport.stabilize_after_layout_change(layout);
+        }
+
+        self.layout.as_ref().expect("layout must exist")
     }
 
     /// Get the current layout if it exists and is valid
@@ -169,6 +175,212 @@ impl SplitViewState {
         } else {
             self.layout.as_ref()
         }
+    }
+
+    /// Move all cursors vertically by view lines using the current layout.
+    /// Returns the events needed to update EditorState.
+    pub fn move_cursors_by_view_lines(
+        &mut self,
+        delta: isize,
+        buffer: &mut Buffer,
+        estimated_line_length: usize,
+    ) -> Vec<crate::event::Event> {
+        let gutter_width = self.viewport.gutter_width(buffer);
+        let wrap_params = Some((self.viewport.width as usize, gutter_width));
+        let mut layout = self
+            .ensure_layout(buffer, estimated_line_length, wrap_params)
+            .clone();
+        let mut events = Vec::new();
+
+        let cursor_snapshot: Vec<_> = self
+            .cursors
+            .iter()
+            .map(|(id, cursor)| (id, *cursor))
+            .collect();
+
+        // Apply movement to view-state cursors so viewport visibility checks are accurate
+        for (cursor_id, cursor) in cursor_snapshot {
+            let mut layout_for_cursor = layout.clone();
+            if let Some((mut view_line, mut visual_col)) =
+                layout_for_cursor.source_byte_to_view_position(cursor.position)
+            {
+                let mut goal_col = if cursor.sticky_column > 0 {
+                    cursor.sticky_column
+                } else {
+                    visual_col
+                };
+
+                // If we're at the very top of the current layout but the source range
+                // starts after byte 0, expand upward so vertical movement can proceed.
+                if delta < 0 && view_line == 0 && layout_for_cursor.source_range.start > 0 {
+                    let backtrack_bytes = estimated_line_length
+                        .saturating_mul(self.viewport.visible_line_count().max(1));
+                    self.viewport.top_byte = layout_for_cursor
+                        .source_range
+                        .start
+                        .saturating_sub(backtrack_bytes);
+                    self.viewport.anchor_byte = self.viewport.top_byte;
+                    self.layout_dirty = true;
+                    layout_for_cursor = self
+                        .ensure_layout(buffer, estimated_line_length, wrap_params)
+                        .clone();
+                    layout = layout_for_cursor.clone();
+
+                    if let Some((vl, vc)) =
+                        layout_for_cursor.source_byte_to_view_position(cursor.position)
+                    {
+                        view_line = vl;
+                        visual_col = vc;
+                        goal_col = if cursor.sticky_column > 0 {
+                            cursor.sticky_column
+                        } else {
+                            visual_col
+                        };
+                    }
+                }
+
+                let mut raw_target = (view_line as isize + delta)
+                    .clamp(0, (layout_for_cursor.lines.len() as isize - 1).max(0));
+                let mut target_view_line = raw_target as usize;
+
+                if (target_view_line >= layout_for_cursor.lines.len())
+                    && layout_for_cursor.has_content_below(buffer.len())
+                {
+                    self.viewport.top_byte = layout_for_cursor.source_range.end.min(buffer.len());
+                    self.viewport.anchor_byte = self.viewport.top_byte;
+                    self.layout_dirty = true;
+
+                    layout_for_cursor = self
+                        .ensure_layout(buffer, estimated_line_length, wrap_params)
+                        .clone();
+                    layout = layout_for_cursor.clone();
+
+                    if let Some((view_line, col)) =
+                        layout_for_cursor.source_byte_to_view_position(cursor.position)
+                    {
+                        visual_col = col;
+                        goal_col = if cursor.sticky_column > 0 {
+                            cursor.sticky_column
+                        } else {
+                            visual_col
+                        };
+                        raw_target = (view_line as isize + delta)
+                            .clamp(0, (layout_for_cursor.lines.len() as isize - 1).max(0));
+                        target_view_line = raw_target as usize;
+                    }
+                }
+
+                // Skip injected-only lines by looking forward, then backward
+                let mut new_position =
+                    layout_for_cursor.view_position_to_source_byte(target_view_line, goal_col);
+                if new_position.is_none() {
+                    new_position =
+                        (target_view_line..layout_for_cursor.lines.len()).find_map(|idx| {
+                            layout_for_cursor.view_position_to_source_byte(idx, goal_col)
+                        });
+                }
+                if new_position.is_none() {
+                    new_position = (0..=target_view_line).rev().find_map(|idx| {
+                        layout_for_cursor.view_position_to_source_byte(idx, goal_col)
+                    });
+                }
+
+                if let Some(new_pos) = new_position {
+                    let new_anchor = if cursor.deselect_on_move {
+                        None
+                    } else {
+                        cursor.anchor
+                    };
+
+                    events.push(crate::event::Event::MoveCursor {
+                        cursor_id,
+                        old_position: cursor.position,
+                        new_position: new_pos,
+                        old_anchor: cursor.anchor,
+                        new_anchor,
+                        old_sticky_column: cursor.sticky_column,
+                        new_sticky_column: goal_col,
+                    });
+
+                    if let Some(c) = self.cursors.get_mut(cursor_id) {
+                        c.position = new_pos;
+                        c.anchor = new_anchor;
+                        c.sticky_column = goal_col;
+                    }
+                }
+            }
+        }
+
+        // Keep viewport in sync with the primary cursor
+        if let Some(primary) = self.cursors.iter().next().map(|(_, c)| *c) {
+            if let Some(layout) = self.layout.as_ref() {
+                self.viewport.ensure_visible_in_layout(&primary, layout);
+            }
+        }
+
+        events
+    }
+
+    fn rebuild_layout(
+        &mut self,
+        buffer: &mut Buffer,
+        estimated_line_length: usize,
+        wrap_params: Option<(usize, usize)>,
+    ) {
+        let visible_count = self.viewport.visible_line_count().saturating_add(4);
+        let top_byte = self.viewport.top_byte;
+
+        let (mut tokens, source_range) = if let Some(transform) = &self.view_transform {
+            (transform.tokens.clone(), transform.range.clone())
+        } else {
+            let tokens = SplitRenderer::build_base_tokens_for_hook(
+                buffer,
+                top_byte,
+                estimated_line_length,
+                visible_count,
+            );
+            let range = Self::source_range_for_tokens(&tokens, top_byte);
+            (tokens, range)
+        };
+
+        if self.viewport.line_wrap_enabled {
+            if let Some((content_width, gutter_width)) = wrap_params {
+                tokens =
+                    SplitRenderer::apply_wrapping_transform(tokens, content_width, gutter_width);
+            }
+        }
+
+        self.layout = Some(Layout::from_tokens(&tokens, source_range));
+        self.layout_dirty = false;
+    }
+
+    fn source_range_for_tokens(
+        tokens: &[crate::plugin_api::ViewTokenWire],
+        default_start: usize,
+    ) -> Range<usize> {
+        use crate::plugin_api::ViewTokenWireKind;
+
+        let mut min = None;
+        let mut max = default_start;
+
+        for token in tokens {
+            if let Some(offset) = token.source_offset {
+                min = Some(min.map_or(offset, |m: usize| m.min(offset)));
+                match &token.kind {
+                    ViewTokenWireKind::Text(s) => {
+                        max = max.max(offset.saturating_add(s.len()));
+                    }
+                    ViewTokenWireKind::Newline | ViewTokenWireKind::Space => {
+                        max = max.max(offset.saturating_add(1));
+                    }
+                    ViewTokenWireKind::Break => {}
+                }
+            }
+        }
+
+        let start = min.unwrap_or(default_start);
+        let end = max.max(start);
+        start..end
     }
 
     /// Add a buffer to this split's tabs (if not already present)
