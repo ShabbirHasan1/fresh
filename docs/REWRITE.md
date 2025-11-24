@@ -149,10 +149,129 @@ This document captures the final architecture for rewriting the remaining byte-c
 
 ## Next Steps
 
-1. **Run Full Test Suite** - Verify all functionality works end-to-end
+1. **Fix Test Compilation** - 192 test errors (see breakdown below)
 2. **Clean Up Warnings** - Run `cargo fix` to remove unused imports (21 auto-fixable)
 3. **Verify Block Selection** - Test rectangular selection feature
 4. **UI Features** - Implement theme switcher, log viewer, code action picker
+
+---
+
+## Test Compilation Fixes Required
+
+**Total: 192 test errors**
+
+### Category 1: QUICK FIX - Private Import Errors (6 errors)
+
+Change imports from `crate::ui::view_pipeline::{ViewTokenWire, ViewTokenWireKind}` to `crate::plugin_api::{ViewTokenWire, ViewTokenWireKind}`
+
+| File | Line | Issue |
+|------|------|-------|
+| src/ui/split_rendering.rs | 585 | Private import |
+| src/viewport.rs | 305 | Private import |
+| src/word_navigation.rs | 363 | Private import |
+| tests/integration_tests.rs | 513 | `diagnostic_to_overlay` is private |
+
+### Category 2: FIX - Test Harness Updates (5 errors)
+
+**File:** `tests/common/harness.rs`
+
+| Line | Issue | Fix |
+|------|-------|-----|
+| 896 | `cursor_position()` returns `ViewPosition` not `usize` | Return `cursor.position.source_byte.unwrap_or(0)` |
+| 993, 1002 | `viewport.top_byte` doesn't exist | Use `viewport.top_view_line` or `viewport.anchor_byte` |
+| 1056 | `selection_range()` returns `Selection` not `Range<usize>` | Convert Selection to Range via source_byte |
+
+### Category 3: REWRITE - View-Centric Type Conversions (~170 errors)
+
+Tests use old byte-centric APIs. Need helper functions or macros.
+
+**Pattern 1: Event::Insert position (integer → ViewEventPosition)**
+```rust
+// Old:
+Event::Insert { position: 0, text: "hello".into(), cursor_id: None }
+
+// New:
+Event::Insert {
+    position: ViewEventPosition { view_line: 0, column: 0, source_byte: Some(0) },
+    text: "hello".into(),
+    cursor_id: None,
+}
+```
+
+**Pattern 2: Event::Delete range + missing source_range**
+```rust
+// Old:
+Event::Delete { range: 6..16, deleted_text: "...".into(), cursor_id: None }
+
+// New:
+Event::Delete {
+    range: ViewEventRange {
+        start: ViewEventPosition { view_line: 0, column: 6, source_byte: Some(6) },
+        end: ViewEventPosition { view_line: 0, column: 16, source_byte: Some(16) },
+    },
+    source_range: Some(6..16),
+    deleted_text: "...".into(),
+    cursor_id: None,
+}
+```
+
+**Pattern 3: Assertions comparing ViewPosition to integer**
+```rust
+// Old:
+assert_eq!(cursor.position, 5);
+
+// New:
+assert_eq!(cursor.position.source_byte, Some(5));
+```
+
+### Category 4: REMOVE or IMPLEMENT - Missing Methods (8 errors)
+
+| Method | Lines | Recommendation |
+|--------|-------|----------------|
+| `goto_matching_bracket()` | 8181, 8215, 8246 | **Implement** - useful feature |
+| `perform_search()` | 8267, 8278, 8308, 8319 | **Remove tests** - use `prompt_search()`/`find_next()` |
+| `set_bookmark()` | 8356 | **Implement** - useful feature |
+| `jump_to_bookmark()` | 8373 | **Implement** - useful feature |
+| `clear_bookmark()` | 8377 | **Implement** - useful feature |
+
+### Category 5: FIX - Signature Changes (3 errors)
+
+| File | Line | Issue | Fix |
+|------|------|-------|-----|
+| src/ui/status_bar.rs | 343 | `Prompt::new` needs 2 args | Add `PromptType::Command` |
+| src/viewport.rs | 353 | `cursor_screen_position` signature changed | Update call signature |
+| src/ts_runtime.rs | 4693-4694 | MoveCursor positions need ViewEventPosition | Convert to view-centric |
+
+### Recommended Test Helper Functions
+
+Create `tests/common/view_helpers.rs`:
+```rust
+use fresh::cursor::ViewPosition;
+use fresh::event::{ViewEventPosition, ViewEventRange};
+
+/// Helper to create ViewEventPosition from byte offset
+pub fn pos(byte: usize) -> ViewEventPosition {
+    ViewEventPosition { view_line: 0, column: byte, source_byte: Some(byte) }
+}
+
+/// Helper to create ViewEventRange from byte range
+pub fn range(start: usize, end: usize) -> ViewEventRange {
+    ViewEventRange { start: pos(start), end: pos(end) }
+}
+
+/// Helper to assert cursor byte position
+pub fn assert_cursor_byte(cursor: &fresh::cursor::Cursor, expected_byte: usize) {
+    assert_eq!(cursor.position.source_byte, Some(expected_byte));
+}
+```
+
+### Fix Order
+
+1. **Phase 1:** Fix private imports (6 errors) - ~5 minutes
+2. **Phase 2:** Fix test harness (5 errors) - ~15 minutes
+3. **Phase 3:** Add test helpers + bulk update integration_tests.rs - ~1-2 hours
+4. **Phase 4:** Update editor/mod.rs inline tests - ~1 hour
+5. **Phase 5:** Implement missing bookmark/bracket methods or remove tests
 
 ---
 
