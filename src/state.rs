@@ -725,6 +725,11 @@ impl EditorState {
     /// This is the preferred API for getting text ranges. The caller never needs
     /// to worry about lazy loading or buffer preparation.
     ///
+    /// Get a reference to the buffer
+    pub fn buffer(&self) -> &Buffer {
+        &self.buffer
+    }
+
     /// # Example
     /// ```ignore
     /// let text = state.get_text_range(0, 100);

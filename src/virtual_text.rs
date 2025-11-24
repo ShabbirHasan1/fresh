@@ -275,6 +275,20 @@ impl VirtualTextManager {
 
         lookup
     }
+
+    /// Adjust virtual text positions after an insert operation
+    /// The markers handle the actual position adjustments
+    pub fn adjust_for_insert(&mut self, _position: usize, _text_len: usize) {
+        // Virtual text positions are tracked by markers which auto-adjust
+        // No action needed here as markers handle the adjustment
+    }
+
+    /// Adjust virtual text positions after a delete operation
+    /// The markers handle the actual position adjustments
+    pub fn adjust_for_delete(&mut self, _start: usize, _end: usize) {
+        // Virtual text positions are tracked by markers which auto-adjust
+        // No action needed here as markers handle the adjustment
+    }
 }
 
 impl Default for VirtualTextManager {
