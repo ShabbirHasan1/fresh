@@ -148,16 +148,23 @@ impl Viewport {
     }
 
     /// Ensure a cursor is visible using layout/view-line coordinates.
-    pub fn ensure_visible_in_layout(&mut self, cursor: &Cursor, layout: &Layout) {
+    /// Also handles horizontal scrolling when line wrapping is disabled.
+    ///
+    /// # Arguments
+    /// * `cursor` - The cursor to ensure is visible
+    /// * `layout` - The current layout with view lines
+    /// * `gutter_width` - Width of the gutter (line numbers), for horizontal scroll calculation
+    pub fn ensure_visible_in_layout(&mut self, cursor: &Cursor, layout: &Layout, gutter_width: usize) {
         if layout.lines.is_empty() {
             return;
         }
 
         let viewport_height = self.visible_line_count().max(1);
-        let (cursor_line, _visual_col) = layout
+        let (cursor_line, visual_col) = layout
             .source_byte_to_view_position(cursor.position)
             .unwrap_or((0, 0));
 
+        // Vertical scrolling
         let max_top = layout.max_top_line(viewport_height);
         let bottom = self
             .top_view_line
@@ -171,6 +178,53 @@ impl Viewport {
         if let Some(byte) = layout.get_source_byte_for_line(self.top_view_line) {
             self.top_byte = byte;
             self.anchor_byte = byte;
+        }
+
+        // Horizontal scrolling (only when line wrapping is disabled)
+        if !self.line_wrap_enabled {
+            // Calculate visible width (accounting for gutter and scrollbar)
+            let scrollbar_width = 1;
+            let visible_width = (self.width as usize)
+                .saturating_sub(gutter_width)
+                .saturating_sub(scrollbar_width);
+
+            if visible_width > 0 {
+                // Get line length for the cursor's line
+                let line_length = if cursor_line < layout.lines.len() {
+                    layout.lines[cursor_line].char_mappings.len()
+                } else {
+                    0
+                };
+
+                // If viewport is too small for scroll offset, use what we can
+                let effective_offset = self.horizontal_scroll_offset.min(visible_width / 2);
+
+                // Calculate the ideal left and right boundaries with scroll offset
+                let ideal_left = self.left_column + effective_offset;
+                let ideal_right = self.left_column + visible_width.saturating_sub(effective_offset);
+
+                if visual_col < ideal_left {
+                    // Cursor is to the left of the ideal zone - scroll left
+                    self.left_column = visual_col.saturating_sub(effective_offset);
+                } else if visual_col >= ideal_right {
+                    // Cursor is to the right of the ideal zone - scroll right
+                    let target_position = visible_width
+                        .saturating_sub(effective_offset)
+                        .saturating_sub(1);
+                    self.left_column = visual_col.saturating_sub(target_position);
+                }
+
+                // Limit left_column to ensure content is always visible
+                if line_length > 0 {
+                    let max_left_column = line_length.saturating_sub(visible_width.saturating_sub(1));
+                    if self.left_column > max_left_column {
+                        self.left_column = max_left_column;
+                    }
+                }
+            }
+        } else {
+            // With line wrapping enabled, reset any horizontal scroll
+            self.left_column = 0;
         }
 
         self.needs_sync = false;

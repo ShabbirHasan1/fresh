@@ -2147,10 +2147,32 @@ fn test_view_transform_scroll_with_many_virtual_lines() {
     // Launch the view marker that injects many virtual lines
     trigger_test_view_marker_many_virtual_lines(&mut harness);
 
+    // Wait for buffer to be created (like the passing test does)
+    let buffer_created = harness
+        .wait_for_async(
+            |h| {
+                let screen = h.screen_to_string();
+                screen.contains("Test view marker active") || screen.contains("*test-view-marker-many*")
+            },
+            5000,
+        )
+        .unwrap();
+
+    if !buffer_created {
+        let screen = harness.screen_to_string();
+        panic!("Buffer was not created within timeout. Screen:\n{screen}");
+    }
+
     // Wait for header to appear
     let header_seen = harness
         .wait_for_async(|h| h.screen_to_string().contains("HEADER AT BYTE 0"), 5000)
         .unwrap();
+
+    if !header_seen {
+        let screen = harness.screen_to_string();
+        println!("Screen when header not found:\n{screen}");
+    }
+
     assert!(
         header_seen,
         "Header should appear even with virtual pad lines"

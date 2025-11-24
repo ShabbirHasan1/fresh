@@ -546,13 +546,23 @@ impl SplitViewState {
 - View transform changes (plugin sends new tokens)
 - Scroll would move past current layout's source_range
 
-#### Current implementation snapshot (ongoing refactor)
+#### Long-term architecture (target; no short-term fallbacks)
 
-- `SplitViewState::ensure_layout` always returns a Layout, rebuilding lazily from the active view transform or base tokens. Rebuilds respect wrapping parameters from the viewport.
-- The viewport tracks `top_view_line` and a stable `anchor_byte`; `stabilize_after_layout_change` walks backward to include injected lines above the anchor so headers remain visible.
-- Vertical navigation and scroll events are routed through view-layout coordinates (no buffer-line fallback). Page/line motion expands layout ranges up or down when scrolling past existing source_range.
-- Rendering consumes a stored Layout from `SplitViewState` when present; the viewport is synchronized back to the view state after drawing so multiple splits stay consistent.
-- Outstanding: initial visibility for some injected-header transforms is still being exercised in tests (see `e2e::git::test_view_transform_scroll_with_many_virtual_lines`).
+We want a single, view-first model that supports both code and true WYSIWYG documents:
+
+- **Cursor/selection live in view coordinates**: `ViewPos { view_line, col, source: Option<ByteRange> }`. For code, `source = Some(byte_range)`; for injected/purely visual content, `source = None`.
+- **Layout is the single truth for navigation/render**: scroll, cursor move, selection, hit-testing all operate on view lines/cols. No buffer-based fallbacks.
+- **Edits are routed by source mapping**:
+  - If `source: Some`, translate to buffer edits (code mode).
+  - If `source: None`, dispatch to a transform/plugin handler that owns that visual region (virtual/WYSIWYG). If unsupported, reject.
+- **View transforms can emit structural hints**: read-only spans, handlers for inserts/deletes in view-only regions, and initial viewport/cursor hints (`initial_top_view_line`, `initial_cursor_view_pos`). First render honors these hints; do not auto-scroll on transform install.
+- **Anchors for stability**: keep both a view anchor (view line/col) and an optional source anchor. On layout rebuild, reattach via view anchor; fall back to nearest view line if source mapping is absent.
+- **Single flow for all navigation**: key → layout move → view pos → (optional) source mapping for edits. Selections span view positions; mixed regions are allowed.
+- **Modes by data model, not by fallback**:
+  - Code buffers: byte-backed; transforms may add view-only decorations.
+  - WYSIWYG/virtual docs: structured model rendered to ViewLines with `source: None` segments; edits go back through the owning model/handler.
+
+No interim “reset to top” or buffer-line fallbacks: the view layer must always be authoritative and capable of representing cursor/selection everywhere, including injected regions.
 
 ### The Frame Flow
 
