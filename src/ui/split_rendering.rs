@@ -260,13 +260,23 @@ impl SplitRenderer {
                     }
                 }
 
+                // Render scrollbar
+                let (thumb_start, thumb_end) = Self::render_scrollbar(
+                    frame,
+                    layout.scrollbar_rect,
+                    &layout_for_render,
+                    state.viewport.top_view_line,
+                    state.viewport.visible_line_count(),
+                    theme,
+                );
+
                 split_areas.push((
                     split_id,
                     buffer_id,
                     layout.content_rect,
                     layout.scrollbar_rect,
-                    0,
-                    0,
+                    thumb_start,
+                    thumb_end,
                 ));
             }
         }
@@ -300,6 +310,62 @@ impl SplitRenderer {
             content_rect,
             scrollbar_rect,
         }
+    }
+
+    /// Render the scrollbar and return (thumb_start, thumb_end) for mouse handling
+    fn render_scrollbar(
+        frame: &mut Frame,
+        scrollbar_rect: Rect,
+        layout: &crate::ui::view_pipeline::Layout,
+        top_view_line: usize,
+        visible_lines: usize,
+        theme: &crate::theme::Theme,
+    ) -> (usize, usize) {
+        let total_lines = layout.lines.len();
+        let track_height = scrollbar_rect.height as usize;
+
+        if track_height == 0 || total_lines == 0 {
+            return (0, 0);
+        }
+
+        // Calculate thumb size (minimum 1 row)
+        let thumb_size = if total_lines <= visible_lines {
+            track_height // Full height if content fits
+        } else {
+            ((visible_lines as f64 / total_lines as f64) * track_height as f64)
+                .ceil()
+                .max(1.0) as usize
+        };
+
+        // Calculate thumb position
+        let max_scroll = total_lines.saturating_sub(visible_lines);
+        let thumb_start = if max_scroll == 0 {
+            0
+        } else {
+            let scroll_ratio = top_view_line as f64 / max_scroll as f64;
+            let max_thumb_start = track_height.saturating_sub(thumb_size);
+            (scroll_ratio * max_thumb_start as f64).round() as usize
+        };
+        let thumb_end = (thumb_start + thumb_size).min(track_height);
+
+        // Render the scrollbar
+        let buffer = frame.buffer_mut();
+        for row in 0..track_height {
+            let y = scrollbar_rect.y + row as u16;
+            let x = scrollbar_rect.x;
+
+            if row >= thumb_start && row < thumb_end {
+                // Thumb character
+                buffer[(x, y)].set_char('█');
+                buffer[(x, y)].set_fg(theme.scrollbar_thumb_fg);
+            } else {
+                // Track character
+                buffer[(x, y)].set_char('│');
+                buffer[(x, y)].set_fg(theme.scrollbar_track_fg);
+            }
+        }
+
+        (thumb_start, thumb_end)
     }
 
     fn split_buffers_for_tabs(
