@@ -164,10 +164,10 @@ impl Editor {
 
             // Suggestions popup (for command palette, autocomplete, etc.)
             if !prompt.suggestions.is_empty() {
-                // Position suggestions popup above the prompt line
+                // Position suggestions popup above the prompt line, full width, left-aligned
                 let popup_height = (prompt.suggestions.len() + 2).min(15) as u16;
-                let popup_width = (size.width / 2).max(40).min(size.width - 4);
-                let popup_x = (size.width - popup_width) / 2;
+                let popup_width = size.width;
+                let popup_x = 0;
                 let popup_y = main_chunks[prompt_line_idx]
                     .y
                     .saturating_sub(popup_height);

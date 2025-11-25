@@ -222,6 +222,18 @@ impl Editor {
                 }
                 Ok(())
             }
+            Action::InsertChar(c) => {
+                if let Some(prompt) = self.prompt_mut() {
+                    // Delete selection if any, then insert
+                    if prompt.has_selection() {
+                        prompt.delete_selection();
+                    }
+                    prompt.input.insert(prompt.cursor_pos, c);
+                    prompt.cursor_pos += c.len_utf8();
+                }
+                self.update_prompt_suggestions();
+                Ok(())
+            }
             _ => Ok(()), // Other prompt actions are no-ops or handled elsewhere.
         }
     }
@@ -506,12 +518,51 @@ impl Editor {
             crate::prompt::PromptType::GotoLine => {
                 self.handle_goto_line(input)
             }
+            crate::prompt::PromptType::Command => {
+                self.handle_command_palette(input)
+            }
+            crate::prompt::PromptType::Search => {
+                self.prompt_search();
+                Ok(())
+            }
+            crate::prompt::PromptType::OpenFile => {
+                if !input.is_empty() {
+                    let path = std::path::PathBuf::from(&input);
+                    self.open_file(&path)?;
+                }
+                Ok(())
+            }
+            crate::prompt::PromptType::SaveFileAs => {
+                if !input.is_empty() {
+                    let path = std::path::PathBuf::from(&input);
+                    // Set the file path and save
+                    self.active_state_mut().buffer.set_file_path(path);
+                    self.save()?;
+                }
+                Ok(())
+            }
             _ => {
                 // Other prompt types not yet implemented - placeholder
-                self.set_status_message("Prompt type not yet implemented".to_string());
+                self.set_status_message(format!("Prompt type {:?} not yet implemented", prompt_type));
                 Ok(())
             }
         }
+    }
+
+    /// Handle command palette selection
+    fn handle_command_palette(&mut self, input: String) -> std::io::Result<()> {
+        // Find the command that matches the input
+        let commands = self.command_registry.read().unwrap().get_all();
+        if let Some(cmd) = commands.iter().find(|c| c.name == input) {
+            // Record usage for history-based sorting
+            self.command_registry.write().unwrap().record_usage(&input);
+            // Execute the action
+            let action = cmd.action.clone();
+            self.handle_action(action)?;
+        } else {
+            self.set_status_message(format!("Unknown command: {}", input));
+        }
+        Ok(())
     }
 
     /// Handle goto line prompt (view-centric implementation).

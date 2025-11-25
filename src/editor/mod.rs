@@ -2950,9 +2950,17 @@ impl Editor {
 
     /// Open the command palette
     pub fn open_command_palette(&mut self) {
-        self.prompt = Some(Prompt::new(
+        let selection_active = self.has_active_selection();
+        let suggestions = self.command_registry.read().unwrap().filter(
+            "",
+            self.key_context,
+            &self.keybindings,
+            selection_active,
+        );
+        self.prompt = Some(Prompt::with_suggestions(
             "Command: ".to_string(),
             PromptType::Command,
+            suggestions,
         ));
     }
 

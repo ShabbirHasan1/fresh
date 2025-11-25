@@ -455,22 +455,52 @@ impl SplitRenderer {
         state.viewport.height = content_rect.height;
     }
 
-    /// Build base tokens for a viewport (simplified).
+    /// Build base tokens for a viewport.
+    ///
+    /// Properly tokenizes buffer content, splitting on newlines to create
+    /// separate Text and Newline tokens. This allows ViewLineIterator to
+    /// correctly identify line boundaries.
     pub fn build_base_tokens_for_hook(
         buffer: &mut Buffer,
         _top_view_line: usize,
-        estimated_line_length: usize,
-        visible_count: usize,
+        _estimated_line_length: usize,
+        _visible_count: usize,
     ) -> Vec<crate::plugin_api::ViewTokenWire> {
-        // Simplified: return the current visible window as a single token.
+        use crate::plugin_api::{ViewTokenWire, ViewTokenWireKind};
+
         let len = buffer.len();
         let text = buffer.get_text_range_mut(0, len).unwrap_or_default();
-        let content = String::from_utf8_lossy(&text).into_owned();
-        vec![crate::plugin_api::ViewTokenWire {
-            source_offset: Some(0),
-            kind: crate::plugin_api::ViewTokenWireKind::Text(content),
-            style: None,
-        }]
+        let content = String::from_utf8_lossy(&text);
+
+        let mut tokens = Vec::new();
+        let mut byte_offset = 0usize;
+
+        // Split content by newlines and create proper tokens
+        for (idx, line) in content.split('\n').enumerate() {
+            // Add text token for the line content (if non-empty)
+            if !line.is_empty() {
+                tokens.push(ViewTokenWire {
+                    source_offset: Some(byte_offset),
+                    kind: ViewTokenWireKind::Text(line.to_string()),
+                    style: None,
+                });
+                byte_offset += line.len();
+            }
+
+            // Check if there's a newline after this segment
+            // (all segments except the last one came from a split, so they had a newline)
+            let has_trailing_newline = idx < content.matches('\n').count();
+            if has_trailing_newline {
+                tokens.push(ViewTokenWire {
+                    source_offset: Some(byte_offset),
+                    kind: ViewTokenWireKind::Newline,
+                    style: None,
+                });
+                byte_offset += 1; // newline is 1 byte
+            }
+        }
+
+        tokens
     }
 
     fn build_contexts(
@@ -484,8 +514,22 @@ impl SplitRenderer {
             .copied()
             .unwrap_or((0, 0));
 
+        // Build selection ranges from all cursors
+        let mut ranges = Vec::new();
+        for (_cursor_id, cursor) in state.cursors.iter() {
+            if let Some(selection) = cursor.selection_range() {
+                // Convert selection view positions to source byte ranges
+                if let (Some(start_byte), Some(end_byte)) = (
+                    selection.start.source_byte,
+                    selection.end.source_byte,
+                ) {
+                    ranges.push(start_byte..end_byte);
+                }
+            }
+        }
+
         let selection = SelectionContext {
-            ranges: Vec::new(),
+            ranges,
             block_rects: Vec::new(),
             cursor_positions,
             primary_cursor_position,
@@ -506,6 +550,11 @@ impl SplitRenderer {
         let mut lines_out = Vec::new();
         let mut cursor_pos: Option<(u16, u16)> = None;
         let mut last_line_end: Option<LastLineEnd> = None;
+
+        // Helper to check if a source byte is within any selection range
+        let is_selected = |byte: usize| -> bool {
+            input.selection.ranges.iter().any(|range| range.contains(&byte))
+        };
 
         let mut rendered = 0usize;
         for (idx, view_line) in input
@@ -529,10 +578,57 @@ impl SplitRenderer {
                     .bg(input.theme.line_number_bg),
             )];
 
-            spans.push(Span::styled(
-                view_line.text.clone(),
-                Style::default().fg(input.theme.editor_fg),
-            ));
+            // Build content spans with selection highlighting
+            let text_chars: Vec<char> = view_line.text.chars().collect();
+            let mut char_idx = 0;
+            let mut current_span_start = 0;
+            let mut current_is_selected = false;
+
+            // Determine initial selection state
+            if !text_chars.is_empty() && char_idx < view_line.char_mappings.len() {
+                if let Some(byte) = view_line.char_mappings[char_idx] {
+                    current_is_selected = is_selected(byte);
+                }
+            }
+
+            for (i, _ch) in text_chars.iter().enumerate() {
+                let this_selected = if i < view_line.char_mappings.len() {
+                    view_line.char_mappings[i]
+                        .map(|b| is_selected(b))
+                        .unwrap_or(false)
+                } else {
+                    false
+                };
+
+                // If selection state changed, emit a span for the previous segment
+                if this_selected != current_is_selected && i > current_span_start {
+                    let segment: String = text_chars[current_span_start..i].iter().collect();
+                    let style = if current_is_selected {
+                        Style::default()
+                            .fg(input.theme.editor_fg)
+                            .bg(input.theme.selection_bg)
+                    } else {
+                        Style::default().fg(input.theme.editor_fg)
+                    };
+                    spans.push(Span::styled(segment, style));
+                    current_span_start = i;
+                    current_is_selected = this_selected;
+                }
+                char_idx = i + 1;
+            }
+
+            // Emit final segment
+            if current_span_start < text_chars.len() {
+                let segment: String = text_chars[current_span_start..].iter().collect();
+                let style = if current_is_selected {
+                    Style::default()
+                        .fg(input.theme.editor_fg)
+                        .bg(input.theme.selection_bg)
+                } else {
+                    Style::default().fg(input.theme.editor_fg)
+                };
+                spans.push(Span::styled(segment, style));
+            }
 
             let line = Line::from(spans);
             lines_out.push(line);
@@ -541,7 +637,7 @@ impl SplitRenderer {
                 let primary = input.state.cursors.primary();
                 if primary.position.view_line == global_line_idx {
                     cursor_pos = Some((
-                        input.gutter_width as u16 + primary.position.column as u16,
+                        input.render_area.x + gutter_len as u16 + primary.position.column as u16,
                         idx as u16 + input.render_area.y,
                     ));
                 }
