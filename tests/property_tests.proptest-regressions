@@ -5,3 +5,4 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc 827a95a1045c47f9e01438c0c267154e232a233440e0e603010a9cdb54ef9524 # shrinks to ops = [TypeChar('{'), Enter]
+cc a38c93cc659d67e6f8e8ea1ec2fc7b335aea65851abd25449b6b9c0ed173cad3 # shrinks to ops = [Left, TypeChar(' '), TypeChar(' ')]

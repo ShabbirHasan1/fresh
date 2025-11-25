@@ -116,9 +116,11 @@ impl Viewport {
             let new_top = cursor_line.saturating_sub(self.scroll_offset);
             self.top_view_line = new_top;
         } else if cursor_line > bottom.saturating_sub(self.scroll_offset) {
+            // Scroll so cursor is at position (visible - 1 - scroll_offset) from top,
+            // leaving scroll_offset lines visible below the cursor.
             let new_top = cursor_line
-                .saturating_sub(visible.saturating_sub(1))
-                .saturating_sub(self.scroll_offset);
+                .saturating_add(self.scroll_offset)
+                .saturating_sub(visible.saturating_sub(1));
             self.top_view_line = new_top;
         }
 
@@ -223,9 +225,11 @@ impl Viewport {
         if cursor_line < top + self.scroll_offset {
             self.top_view_line = cursor_line.saturating_sub(self.scroll_offset);
         } else if cursor_line > bottom.saturating_sub(self.scroll_offset) {
+            // Scroll so cursor is at position (visible - 1 - scroll_offset) from top,
+            // leaving scroll_offset lines visible below the cursor.
             self.top_view_line = cursor_line
-                .saturating_sub(visible.saturating_sub(1))
-                .saturating_sub(self.scroll_offset);
+                .saturating_add(self.scroll_offset)
+                .saturating_sub(visible.saturating_sub(1));
         }
         if let Some(src) = cursor.position.source_byte {
             self.anchor_byte = src;

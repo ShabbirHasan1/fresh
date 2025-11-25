@@ -162,7 +162,26 @@ impl SplitRenderer {
                             .ensure_layout(&mut state.buffer, estimated_line_length, wrap_params)
                             .clone();
 
-                        let primary_cursor = *state.cursors.primary();
+                        // Sync cursor view positions from source_byte using the layout.
+                        // After edits, source_byte is updated but view_line/column may be stale.
+                        // We must sync before ensure_visible_in_layout so scrolling goes to the right place.
+                        // Note: We sync view_state.cursors since it gets copied back to state at the end.
+                        let cursor_ids: Vec<_> =
+                            view_state.cursors.iter().map(|(id, _)| id).collect();
+                        for cursor_id in cursor_ids {
+                            if let Some(cursor) = view_state.cursors.get_mut(cursor_id) {
+                                if let Some(byte) = cursor.position.source_byte {
+                                    if let Some((view_line, column)) =
+                                        layout.source_byte_to_view_position(byte)
+                                    {
+                                        cursor.position.view_line = view_line;
+                                        cursor.position.column = column;
+                                    }
+                                }
+                            }
+                        }
+
+                        let primary_cursor = *view_state.cursors.primary();
                         view_state.viewport.ensure_visible_in_layout(
                             &primary_cursor,
                             &layout,
@@ -636,10 +655,20 @@ impl SplitRenderer {
             if input.is_active && cursor_pos.is_none() {
                 let primary = input.state.cursors.primary();
                 if primary.position.view_line == global_line_idx {
-                    cursor_pos = Some((
-                        input.render_area.x + gutter_len as u16 + primary.position.column as u16,
-                        idx as u16 + input.render_area.y,
-                    ));
+                    // Account for horizontal scroll (left_column) when calculating screen x
+                    let left_col = input.state.viewport.left_column;
+                    let content_width = input.render_area.width.saturating_sub(gutter_len as u16);
+
+                    // Only show cursor if it's within the visible horizontal range
+                    if primary.position.column >= left_col
+                        && primary.position.column < left_col + content_width as usize
+                    {
+                        let adjusted_col = primary.position.column.saturating_sub(left_col);
+                        cursor_pos = Some((
+                            input.render_area.x + gutter_len as u16 + adjusted_col as u16,
+                            idx as u16 + input.render_area.y,
+                        ));
+                    }
                 }
             }
 
