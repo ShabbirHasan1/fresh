@@ -570,7 +570,7 @@ impl SplitRenderer {
             } else {
                 "      │ ".to_string()
             };
-            let gutter_len = gutter.len();  // Save length before moving
+            let gutter_len = gutter.chars().count();  // Use char count, not byte length (│ is multi-byte)
             let mut spans = vec![Span::styled(
                 gutter,
                 Style::default()
