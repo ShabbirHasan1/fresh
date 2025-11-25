@@ -335,8 +335,30 @@ impl Layout {
         if col < line.char_mappings.len() {
             line.char_mappings[col]
         } else if !line.char_mappings.is_empty() {
-            // Past end of line, return last valid byte
-            line.char_mappings.iter().rev().find_map(|m| *m)
+            // Past end of line - return byte position AFTER the last character
+            // This is where text would be inserted at end of line
+            let last_byte = line.char_mappings.iter().rev().find_map(|m| *m)?;
+            // Use next line's start byte if available, accounting for newline
+            if line_idx + 1 < self.lines.len() {
+                if let Some(next_start) = self.lines[line_idx + 1]
+                    .char_mappings
+                    .iter()
+                    .find_map(|m| *m)
+                {
+                    // If current line ends with newline, end position is before the newline
+                    // (next_start - 1 is the newline, so we want next_start - 1)
+                    if line.ends_with_newline {
+                        Some(next_start.saturating_sub(1))
+                    } else {
+                        Some(next_start)
+                    }
+                } else {
+                    Some(last_byte + 1)
+                }
+            } else {
+                // Last line - use last_byte + 1 as approximation
+                Some(last_byte + 1)
+            }
         } else {
             None
         }
