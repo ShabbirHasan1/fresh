@@ -338,6 +338,17 @@ impl SplitRenderer {
         (vec![buffer_id], 0)
     }
 
+    /// Temporarily swap EditorState's cursors/viewport with SplitViewState's values
+    ///
+    /// For rendering inactive splits, we need to use each split's independent
+    /// cursor positions and viewport state. Since the rendering functions read
+    /// from EditorState, we temporarily replace EditorState's values with the
+    /// split's SplitViewState values during rendering.
+    ///
+    /// For the active split, EditorState already has the correct values
+    /// (from ongoing event processing), so no swap is needed.
+    ///
+    /// Returns saved values to restore after rendering via `restore_split_state()`.
     fn temporary_split_state(
         state: &mut EditorState,
         split_view_states: Option<
@@ -349,10 +360,12 @@ impl SplitRenderer {
         Option<crate::model::cursor::Cursors>,
         Option<crate::view::viewport::Viewport>,
     ) {
+        // Active split uses EditorState's values directly - no swap needed
         if is_active {
             return (None, None);
         }
 
+        // Inactive split: swap in SplitViewState's values for rendering
         if let Some(view_states) = split_view_states {
             if let Some(view_state) = view_states.get(&split_id) {
                 let saved_cursors = Some(std::mem::replace(
@@ -370,6 +383,7 @@ impl SplitRenderer {
         (None, None)
     }
 
+    /// Restore EditorState's cursors/viewport after rendering an inactive split
     fn restore_split_state(
         state: &mut EditorState,
         saved_state: (

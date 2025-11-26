@@ -946,20 +946,30 @@ Source-based scrolling thinks "cursor is at byte 0, which is source line 1, keep
 
 Layout-aware scrolling looks at view_lines: "cursor maps to view_line 121, viewport shows lines 0-30, need to scroll to line 121".
 
-### Migration Tasks
+### Implemented Architecture
 
-To reach the target architecture:
+The viewport ownership and view state architecture is fully implemented:
 
-1. **Move cursors to SplitViewState**: Each view has independent cursor positions
-2. **Remove EditorState.viewport**: Or keep only for dimension hints
-3. **Remove sync functions**: No more bidirectional state syncing
-4. **Single scrolling function**: Only Layout-aware `ensure_cursor_visible`
-5. **Scroll during render**: After building view_lines, before rendering
+1. **SplitViewState is authoritative**: Each split has independent cursor positions and viewport state in `SplitViewState`. This is the single source of truth for per-view state.
 
-### Temporary Workarounds
+2. **EditorState as working copy**: `EditorState.cursors` and `EditorState.viewport` serve as working copies during event processing. The `apply()` function modifies these fields.
 
-Until full migration, these workarounds maintain correctness:
+3. **One-way sync after events**: After each event is applied via `apply_event_to_active_buffer()`, the function `sync_editor_state_to_split_view_state()` persists changes back to the authoritative `SplitViewState`.
 
-1. `sync_viewport_from_split_view_state` only syncs DIMENSIONS, not scroll position
-2. `ensure_visible_in_layout` called in render phase with actual view_lines
-3. Editor.render() does NOT call sync_with_cursor (let split_rendering handle it)
+4. **Split-switch initialization**: When switching splits, `sync_split_view_state_to_editor_state()` initializes `EditorState` from the new split's `SplitViewState`.
+
+5. **Rendering uses SplitViewState**: For inactive splits, the `temporary_split_state()` pattern temporarily swaps `EditorState`'s values with `SplitViewState`'s values during rendering.
+
+**Data Flow:**
+```
+1. User switches to split B → SplitViewState[B] → EditorState (initialize)
+2. User types/navigates → Events modify EditorState.cursors/viewport
+3. After each event → EditorState → SplitViewState[B] (persist)
+4. Render split A (inactive) → swap in SplitViewState[A] → render → restore
+5. Render split B (active) → use EditorState directly → render
+```
+
+**Key files:**
+- `src/app/mod.rs`: View state sync functions (`sync_editor_state_to_split_view_state`, `sync_split_view_state_to_editor_state`)
+- `src/view/ui/split_rendering.rs`: Rendering with `temporary_split_state()` pattern
+- `src/view/split.rs`: `SplitViewState` definition
