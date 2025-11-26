@@ -674,8 +674,9 @@ impl Editor {
                 self.config.editor.line_wrap = !self.config.editor.line_wrap;
 
                 // Update all viewports to reflect the new line wrap setting
-                for state in self.buffers.values_mut() {
-                    state.viewport.line_wrap_enabled = self.config.editor.line_wrap;
+                // Viewports are stored in split_view_states (one per split)
+                for view_state in self.split_view_states.values_mut() {
+                    view_state.viewport.line_wrap_enabled = self.config.editor.line_wrap;
                 }
 
                 let state = if self.config.editor.line_wrap {
@@ -735,11 +736,7 @@ impl Editor {
                 {
                     let state = self.active_state_mut();
                     state.view_mode = view_mode.clone();
-                    // In Compose mode, disable builtin line wrap - plugin handles wrapping.
-                    state.viewport.line_wrap_enabled = match view_mode {
-                        crate::state::ViewMode::Compose => false,
-                        crate::state::ViewMode::Source => default_wrap,
-                    };
+                    // Note: viewport.line_wrap_enabled is managed in split_view_states above
                     // Clear compose state when switching to Source mode
                     if matches!(view_mode, crate::state::ViewMode::Source) {
                         state.compose_width = None;
@@ -1055,9 +1052,24 @@ impl Editor {
                     self.apply_event_to_active_buffer(&batch);
 
                     // Ensure the primary cursor is visible after removing secondary cursors
-                    let state = self.active_state_mut();
-                    let primary = *state.cursors.primary();
-                    state.viewport.ensure_visible(&mut state.buffer, &primary);
+                    // Cursors and viewport are in split_view_states, buffer is in buffers
+                    let split_id = self.split_manager.active_split();
+                    let primary = self
+                        .split_view_states
+                        .get(&split_id)
+                        .map(|vs| *vs.cursors.primary());
+
+                    if let Some(primary) = primary {
+                        let buffer_id = self.active_buffer;
+                        if let (Some(state), Some(view_state)) = (
+                            self.buffers.get_mut(&buffer_id),
+                            self.split_view_states.get_mut(&split_id),
+                        ) {
+                            view_state
+                                .viewport
+                                .ensure_visible(&mut state.buffer, &primary);
+                        }
+                    }
                 }
             }
 
@@ -1491,15 +1503,27 @@ impl Editor {
                                 Ok(line_num) if line_num > 0 => {
                                     let target_line = line_num.saturating_sub(1);
                                     let buffer_id = self.active_buffer;
+                                    let split_id = self.split_manager.active_split();
                                     let estimated_line_length =
                                         self.config.editor.estimated_line_length;
 
-                                    if let Some(state) = self.buffers.get(&buffer_id) {
-                                        let cursor_id = state.cursors.primary_id();
-                                        let old_position = state.cursors.primary().position;
-                                        let old_anchor = state.cursors.primary().anchor;
-                                        let old_sticky_column =
-                                            state.cursors.primary().sticky_column;
+                                    // Get cursor info from split_view_states (authoritative source)
+                                    let cursor_info = self
+                                        .split_view_states
+                                        .get(&split_id)
+                                        .map(|vs| {
+                                            let c = vs.cursors.primary();
+                                            (
+                                                vs.cursors.primary_id(),
+                                                c.position,
+                                                c.anchor,
+                                                c.sticky_column,
+                                            )
+                                        });
+
+                                    if let (Some(state), Some((cursor_id, old_position, old_anchor, old_sticky_column))) =
+                                        (self.buffers.get(&buffer_id), cursor_info)
+                                    {
                                         let is_large_file = state.buffer.line_count().is_none();
                                         let buffer_len = state.buffer.len();
 
@@ -1559,8 +1583,16 @@ impl Editor {
                                             old_sticky_column,
                                             new_sticky_column: 0,
                                         };
-                                        if let Some(state) = self.buffers.get_mut(&buffer_id) {
-                                            state.apply(&event);
+                                        // Apply event - cursors/viewport are in split_view_states
+                                        if let (Some(state), Some(view_state)) = (
+                                            self.buffers.get_mut(&buffer_id),
+                                            self.split_view_states.get_mut(&split_id),
+                                        ) {
+                                            state.apply(
+                                                &event,
+                                                &mut view_state.cursors,
+                                                &mut view_state.viewport,
+                                            );
                                         }
                                         self.set_status_message(status_message);
                                     }
@@ -1888,10 +1920,16 @@ impl Editor {
                 if let Some(text) = completion_text {
                     use crate::primitives::word_navigation::find_completion_word_start;
 
+                    // Get cursor info from split_view_states (authoritative source)
+                    let split_id = self.split_manager.active_split();
                     let (cursor_id, cursor_pos, word_start) = {
+                        let view_state = self
+                            .split_view_states
+                            .get(&split_id)
+                            .expect("active split should have view state");
+                        let cursor_id = view_state.cursors.primary_id();
+                        let cursor_pos = view_state.cursors.primary().position;
                         let state = self.active_state();
-                        let cursor_id = state.cursors.primary_id();
-                        let cursor_pos = state.cursors.primary().position;
                         let word_start = find_completion_word_start(&state.buffer, cursor_pos);
                         (cursor_id, cursor_pos, word_start)
                     };
@@ -2485,14 +2523,14 @@ impl Editor {
                 // Click on thumb - start drag from current position (don't jump)
                 self.mouse_state.dragging_scrollbar = Some(split_id);
                 self.mouse_state.drag_start_row = Some(row);
-                // Record the current viewport position
-                if let Some(state) = self.buffers.get(&buffer_id) {
-                    self.mouse_state.drag_start_top_byte = Some(state.viewport.top_byte);
+                // Record the current viewport position from split_view_states
+                if let Some(view_state) = self.split_view_states.get(&split_id) {
+                    self.mouse_state.drag_start_top_byte = Some(view_state.viewport.top_byte);
                 }
             } else {
                 // Click on track - jump to position
                 self.mouse_state.dragging_scrollbar = Some(split_id);
-                self.handle_scrollbar_jump(col, row, buffer_id, scrollbar_rect)?;
+                self.handle_scrollbar_jump(col, row, split_id, buffer_id, scrollbar_rect)?;
             }
             return Ok(());
         }
@@ -2665,10 +2703,10 @@ impl Editor {
                     // Check if we started dragging from the thumb (have drag_start_row)
                     if self.mouse_state.drag_start_row.is_some() {
                         // Relative drag from thumb
-                        self.handle_scrollbar_drag_relative(row, *buffer_id, *scrollbar_rect)?;
+                        self.handle_scrollbar_drag_relative(row, *split_id, *buffer_id, *scrollbar_rect)?;
                     } else {
                         // Jump drag (started from track)
-                        self.handle_scrollbar_jump(col, row, *buffer_id, *scrollbar_rect)?;
+                        self.handle_scrollbar_jump(col, row, *split_id, *buffer_id, *scrollbar_rect)?;
                     }
                     return Ok(());
                 }
@@ -2851,6 +2889,7 @@ impl Editor {
     pub(super) fn handle_scrollbar_drag_relative(
         &mut self,
         row: u16,
+        split_id: crate::model::event::SplitId,
         buffer_id: BufferId,
         scrollbar_rect: ratatui::layout::Rect,
     ) -> std::io::Result<()> {
@@ -2867,8 +2906,15 @@ impl Editor {
         // Calculate the offset in rows
         let row_offset = (row as i32) - (drag_start_row as i32);
 
+        // Get viewport height from split_view_states
+        let viewport_height = self
+            .split_view_states
+            .get(&split_id)
+            .map(|vs| vs.viewport.height as usize)
+            .unwrap_or(24);
+
         // Get the buffer state
-        if let Some(state) = self.buffers.get_mut(&buffer_id) {
+        let new_top_byte = if let Some(state) = self.buffers.get_mut(&buffer_id) {
             let scrollbar_height = scrollbar_rect.height as usize;
             if scrollbar_height == 0 {
                 return Ok(());
@@ -2876,7 +2922,6 @@ impl Editor {
 
             let buffer_len = state.buffer.len();
             let large_file_threshold = self.config.editor.large_file_threshold_bytes as usize;
-            let viewport_height = state.viewport.height as usize;
 
             // For small files, use precise line-based calculations
             // For large files, fall back to byte-based estimation
@@ -2948,14 +2993,18 @@ impl Editor {
 
             // Find the line start for this byte position
             let iter = state.buffer.line_iterator(new_top_byte, 80);
-            let line_start = iter.current_position();
+            iter.current_position()
+        } else {
+            return Ok(());
+        };
 
-            // Set viewport top to this position
-            state.viewport.top_byte = line_start;
+        // Set viewport top_byte in split_view_states
+        if let Some(view_state) = self.split_view_states.get_mut(&split_id) {
+            view_state.viewport.top_byte = new_top_byte;
         }
 
         // Move cursor to be visible in the new viewport (after releasing the state borrow)
-        self.move_cursor_to_visible_area(buffer_id);
+        self.move_cursor_to_visible_area(split_id, buffer_id);
 
         Ok(())
     }
@@ -2965,6 +3014,7 @@ impl Editor {
         &mut self,
         _col: u16,
         row: u16,
+        split_id: crate::model::event::SplitId,
         buffer_id: BufferId,
         scrollbar_rect: ratatui::layout::Rect,
     ) -> std::io::Result<()> {
@@ -2983,11 +3033,17 @@ impl Editor {
             0.0
         };
 
+        // Get viewport height from split_view_states
+        let viewport_height = self
+            .split_view_states
+            .get(&split_id)
+            .map(|vs| vs.viewport.height as usize)
+            .unwrap_or(24);
+
         // Get the buffer state
-        if let Some(state) = self.buffers.get_mut(&buffer_id) {
+        let limited_line_start = if let Some(state) = self.buffers.get_mut(&buffer_id) {
             let buffer_len = state.buffer.len();
             let large_file_threshold = self.config.editor.large_file_threshold_bytes as usize;
-            let viewport_height = state.viewport.height as usize;
 
             // For small files, use precise line-based calculations
             // For large files, fall back to byte-based estimation
@@ -3048,48 +3104,68 @@ impl Editor {
             } else {
                 buffer_len.saturating_sub(1)
             };
-            let limited_line_start = line_start.min(max_top_byte);
+            line_start.min(max_top_byte)
+        } else {
+            return Ok(());
+        };
 
-            // Set viewport top to this position
-            state.viewport.top_byte = limited_line_start;
+        // Set viewport top_byte in split_view_states
+        if let Some(view_state) = self.split_view_states.get_mut(&split_id) {
+            view_state.viewport.top_byte = limited_line_start;
         }
 
         // Move cursor to be visible in the new viewport (after releasing the state borrow)
-        self.move_cursor_to_visible_area(buffer_id);
+        self.move_cursor_to_visible_area(split_id, buffer_id);
 
         Ok(())
     }
 
     /// Move the cursor to a visible position within the current viewport
     /// This is called after scrollbar operations to ensure the cursor is in view
-    pub(super) fn move_cursor_to_visible_area(&mut self, buffer_id: BufferId) {
-        if let Some(state) = self.buffers.get_mut(&buffer_id) {
-            let top_byte = state.viewport.top_byte;
-            let viewport_height = state.viewport.height as usize;
+    pub(super) fn move_cursor_to_visible_area(
+        &mut self,
+        split_id: crate::model::event::SplitId,
+        buffer_id: BufferId,
+    ) {
+        // Get viewport info from split_view_states
+        let (top_byte, viewport_height) = self
+            .split_view_states
+            .get(&split_id)
+            .map(|vs| (vs.viewport.top_byte, vs.viewport.height as usize))
+            .unwrap_or((0, 24));
+
+        // Calculate bottom_byte from buffer
+        let bottom_byte = if let Some(state) = self.buffers.get_mut(&buffer_id) {
             let buffer_len = state.buffer.len();
 
             // Find the bottom byte of the viewport
             // We iterate through viewport_height lines starting from top_byte
             let mut iter = state.buffer.line_iterator(top_byte, 80);
-            let mut bottom_byte = buffer_len;
+            let mut bottom = buffer_len;
 
             // Consume viewport_height lines to find where the visible area ends
             for _ in 0..viewport_height {
                 if let Some((pos, line)) = iter.next() {
                     // The bottom of this line is at pos + line.len()
-                    bottom_byte = pos + line.len();
+                    bottom = pos + line.len();
                 } else {
                     // Reached end of buffer
-                    bottom_byte = buffer_len;
+                    bottom = buffer_len;
                     break;
                 }
             }
+            bottom
+        } else {
+            return;
+        };
 
-            // Check if cursor is outside visible range and move it if needed
-            let cursor_pos = state.cursors.primary().position;
+        // Check if cursor is outside visible range and move it if needed
+        // Cursors are in split_view_states
+        if let Some(view_state) = self.split_view_states.get_mut(&split_id) {
+            let cursor_pos = view_state.cursors.primary().position;
             if cursor_pos < top_byte || cursor_pos > bottom_byte {
                 // Move cursor to the top of the viewport
-                let cursor = state.cursors.primary_mut();
+                let cursor = view_state.cursors.primary_mut();
                 cursor.position = top_byte;
                 // Keep the existing sticky_column value so vertical navigation preserves column
             }
@@ -3163,6 +3239,12 @@ impl Editor {
         }
 
         // Calculate clicked position in buffer
+        // Get viewport from split_view_states (authoritative source)
+        let view_state = self.split_view_states.get(&split_id);
+        let (left_column, top_byte) = view_state
+            .map(|vs| (vs.viewport.left_column, vs.viewport.top_byte))
+            .unwrap_or((0, 0));
+
         if let Some(state) = self.buffers.get_mut(&buffer_id) {
             // Account for left margin (line numbers)
             let gutter_width = state.margins.left_total_width() as u16;
@@ -3179,14 +3261,14 @@ impl Editor {
             // Adjust for gutter
             let text_col = content_col.saturating_sub(gutter_width);
 
-            // Account for horizontal scroll
-            let actual_col = (text_col as usize) + state.viewport.left_column;
+            // Account for horizontal scroll (viewport from split_view_states)
+            let actual_col = (text_col as usize) + left_column;
 
             // Find the byte position for this line and column
-            let mut line_iter = state.buffer.line_iterator(state.viewport.top_byte, 80);
+            let mut line_iter = state.buffer.line_iterator(top_byte, 80);
 
             // Navigate to the clicked line
-            let mut line_start = state.viewport.top_byte;
+            let mut line_start = top_byte;
             let target_position;
             for _ in 0..content_row {
                 if let Some((pos, _content)) = line_iter.next() {
@@ -3242,28 +3324,43 @@ impl Editor {
                 return Ok(());
             }
 
-            // Move the primary cursor to this position
-            let primary_cursor_id = state.cursors.primary_id();
-            let event = Event::MoveCursor {
-                cursor_id: primary_cursor_id,
-                old_position: 0, // TODO: Get actual old position
-                new_position: target_position,
-                old_anchor: None, // TODO: Get actual old anchor
-                new_anchor: None,
-                old_sticky_column: 0,
-                new_sticky_column: 0, // Reset sticky column for goto line
-            };
+            // Get cursor info from split_view_states for the event
+            let cursor_info = self
+                .split_view_states
+                .get(&split_id)
+                .map(|vs| {
+                    let c = vs.cursors.primary();
+                    (vs.cursors.primary_id(), c.position, c.anchor, c.sticky_column)
+                });
 
-            // Apply the event
-            if let Some(event_log) = self.event_logs.get_mut(&buffer_id) {
-                event_log.append(event.clone());
-            }
-            state.apply(&event);
+            if let Some((primary_cursor_id, old_position, old_anchor, old_sticky_column)) = cursor_info {
+                let event = Event::MoveCursor {
+                    cursor_id: primary_cursor_id,
+                    old_position,
+                    new_position: target_position,
+                    old_anchor,
+                    new_anchor: None,
+                    old_sticky_column,
+                    new_sticky_column: 0, // Reset sticky column for goto line
+                };
 
-            // Track position history
-            if !self.in_navigation {
-                self.position_history
-                    .record_movement(buffer_id, target_position, None);
+                // Apply the event
+                if let Some(event_log) = self.event_logs.get_mut(&buffer_id) {
+                    event_log.append(event.clone());
+                }
+                // Apply with cursors/viewport from split_view_states
+                if let (Some(state), Some(view_state)) = (
+                    self.buffers.get_mut(&buffer_id),
+                    self.split_view_states.get_mut(&split_id),
+                ) {
+                    state.apply(&event, &mut view_state.cursors, &mut view_state.viewport);
+                }
+
+                // Track position history
+                if !self.in_navigation {
+                    self.position_history
+                        .record_movement(buffer_id, target_position, None);
+                }
             }
         }
 

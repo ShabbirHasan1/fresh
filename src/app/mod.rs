@@ -413,16 +413,8 @@ impl Editor {
         let mut event_logs = HashMap::new();
 
         let buffer_id = BufferId(0);
-        let mut state = EditorState::new(
-            width,
-            height,
-            config.editor.large_file_threshold_bytes as usize,
-        );
-        state.viewport.line_wrap_enabled = config.editor.line_wrap;
-        tracing::info!(
-            "EditorState created with viewport height: {}",
-            state.viewport.height
-        );
+        // EditorState no longer contains viewport - that's in SplitViewState
+        let state = EditorState::new(config.editor.large_file_threshold_bytes as usize);
         buffers.insert(buffer_id, state);
         event_logs.insert(buffer_id, EventLog::new());
 
@@ -889,25 +881,20 @@ impl Editor {
         };
 
         // Create the editor state - either load from file or create empty buffer
-        let mut state = if file_exists {
+        // Note: viewport/cursors are managed in SplitViewState, not EditorState
+        let state = if file_exists {
             EditorState::from_file(
                 path,
-                self.terminal_width,
-                self.terminal_height,
                 self.config.editor.large_file_threshold_bytes as usize,
             )?
         } else {
             // File doesn't exist - create empty buffer with the file path set
-            let mut new_state = EditorState::new(
-                self.terminal_width,
-                self.terminal_height,
-                self.config.editor.large_file_threshold_bytes as usize,
-            );
+            let mut new_state =
+                EditorState::new(self.config.editor.large_file_threshold_bytes as usize);
             // Set the file path so saving will create the file
             new_state.buffer.set_file_path(path.to_path_buf());
             new_state
         };
-        state.viewport.line_wrap_enabled = self.config.editor.line_wrap;
         self.buffers.insert(buffer_id, state);
         self.event_logs.insert(buffer_id, EventLog::new());
 
@@ -1068,11 +1055,14 @@ impl Editor {
             self.position_history.commit_pending_movement();
 
             // Explicitly record current position before switching
-            let current_state = self.active_state();
-            let position = current_state.cursors.primary().position;
-            let anchor = current_state.cursors.primary().anchor;
-            self.position_history
-                .record_movement(self.active_buffer, position, anchor);
+            // Cursor positions are in split_view_states
+            let active_split = self.split_manager.active_split();
+            if let Some(view_state) = self.split_view_states.get(&active_split) {
+                let position = view_state.cursors.primary().position;
+                let anchor = view_state.cursors.primary().anchor;
+                self.position_history
+                    .record_movement(self.active_buffer, position, anchor);
+            }
             self.position_history.commit_pending_movement();
         }
 
@@ -1106,22 +1096,21 @@ impl Editor {
         self.position_history.commit_pending_movement();
 
         // Explicitly record current position before switching
-        let current_state = self.active_state();
-        let position = current_state.cursors.primary().position;
-        let anchor = current_state.cursors.primary().anchor;
-        self.position_history
-            .record_movement(self.active_buffer, position, anchor);
+        // Cursor positions are in split_view_states
+        let active_split = self.split_manager.active_split();
+        if let Some(view_state) = self.split_view_states.get(&active_split) {
+            let position = view_state.cursors.primary().position;
+            let anchor = view_state.cursors.primary().anchor;
+            self.position_history
+                .record_movement(self.active_buffer, position, anchor);
+        }
         self.position_history.commit_pending_movement();
 
         let buffer_id = BufferId(self.next_buffer_id);
         self.next_buffer_id += 1;
 
-        let mut state = EditorState::new(
-            self.terminal_width,
-            self.terminal_height,
-            self.config.editor.large_file_threshold_bytes as usize,
-        );
-        state.viewport.line_wrap_enabled = self.config.editor.line_wrap;
+        // EditorState no longer contains viewport - that's in SplitViewState
+        let state = EditorState::new(self.config.editor.large_file_threshold_bytes as usize);
         self.buffers.insert(buffer_id, state);
         self.event_logs.insert(buffer_id, EventLog::new());
 
@@ -1149,12 +1138,8 @@ impl Editor {
         let buffer_id = BufferId(self.next_buffer_id);
         self.next_buffer_id += 1;
 
-        let mut state = EditorState::new(
-            self.terminal_width,
-            self.terminal_height,
-            self.config.editor.large_file_threshold_bytes as usize,
-        );
-        state.viewport.line_wrap_enabled = self.config.editor.line_wrap;
+        // EditorState no longer contains viewport - that's in SplitViewState
+        let mut state = EditorState::new(self.config.editor.large_file_threshold_bytes as usize);
 
         // Set syntax highlighting based on buffer name (e.g., "*OURS*.c" will get C highlighting)
         state.set_language_from_name(&name);
@@ -1213,9 +1198,18 @@ impl Editor {
         // Set text properties
         state.text_properties = properties;
 
-        // Reset cursor to beginning
-        state.cursors.primary_mut().position = 0;
-        state.cursors.primary_mut().anchor = None;
+        // Reset cursor to beginning in the appropriate split_view_state
+        // Find which split is viewing this buffer
+        for (split_id, view_state) in self.split_view_states.iter_mut() {
+            if self
+                .split_manager
+                .get_buffer(*split_id)
+                .is_some_and(|b| b == buffer_id)
+            {
+                view_state.cursors.primary_mut().position = 0;
+                view_state.cursors.primary_mut().anchor = None;
+            }
+        }
 
         Ok(())
     }
@@ -1225,7 +1219,13 @@ impl Editor {
         &self,
     ) -> Option<Vec<&crate::primitives::text_property::TextProperty>> {
         let state = self.buffers.get(&self.active_buffer)?;
-        let cursor_pos = state.cursors.primary().position;
+        // Get cursor position from active split's view_state
+        let active_split = self.split_manager.active_split();
+        let cursor_pos = self
+            .split_view_states
+            .get(&active_split)
+            .map(|vs| vs.cursors.primary().position)
+            .unwrap_or(0);
         Some(state.text_properties.get_at(cursor_pos))
     }
 
@@ -1321,11 +1321,14 @@ impl Editor {
             self.position_history.commit_pending_movement();
 
             // Also explicitly record current position (in case there was no pending movement)
-            let current_state = self.active_state();
-            let position = current_state.cursors.primary().position;
-            let anchor = current_state.cursors.primary().anchor;
-            self.position_history
-                .record_movement(self.active_buffer, position, anchor);
+            // Cursor positions are in split_view_states
+            let active_split = self.split_manager.active_split();
+            if let Some(view_state) = self.split_view_states.get(&active_split) {
+                let position = view_state.cursors.primary().position;
+                let anchor = view_state.cursors.primary().anchor;
+                self.position_history
+                    .record_movement(self.active_buffer, position, anchor);
+            }
             self.position_history.commit_pending_movement();
 
             self.set_active_buffer(id);
@@ -1355,12 +1358,13 @@ impl Editor {
                 // Save current position before switching
                 self.position_history.commit_pending_movement();
 
-                // Also explicitly record current position
-                let current_state = self.active_state();
-                let position = current_state.cursors.primary().position;
-                let anchor = current_state.cursors.primary().anchor;
-                self.position_history
-                    .record_movement(self.active_buffer, position, anchor);
+                // Also explicitly record current position from split_view_states
+                if let Some(view_state) = self.split_view_states.get(&active_split) {
+                    let position = view_state.cursors.primary().position;
+                    let anchor = view_state.cursors.primary().anchor;
+                    self.position_history
+                        .record_movement(self.active_buffer, position, anchor);
+                }
                 self.position_history.commit_pending_movement();
 
                 self.set_active_buffer(ids[next_idx]);
@@ -1391,12 +1395,13 @@ impl Editor {
                 // Save current position before switching
                 self.position_history.commit_pending_movement();
 
-                // Also explicitly record current position
-                let current_state = self.active_state();
-                let position = current_state.cursors.primary().position;
-                let anchor = current_state.cursors.primary().anchor;
-                self.position_history
-                    .record_movement(self.active_buffer, position, anchor);
+                // Also explicitly record current position from split_view_states
+                if let Some(view_state) = self.split_view_states.get(&active_split) {
+                    let position = view_state.cursors.primary().position;
+                    let anchor = view_state.cursors.primary().anchor;
+                    self.position_history
+                        .record_movement(self.active_buffer, position, anchor);
+                }
                 self.position_history.commit_pending_movement();
 
                 self.set_active_buffer(ids[prev_idx]);
@@ -1415,11 +1420,14 @@ impl Editor {
         // If we're at the end of history (haven't used back yet), save current position
         // so we can navigate forward to it later
         if self.position_history.can_go_back() && !self.position_history.can_go_forward() {
-            let current_state = self.active_state();
-            let position = current_state.cursors.primary().position;
-            let anchor = current_state.cursors.primary().anchor;
-            self.position_history
-                .record_movement(self.active_buffer, position, anchor);
+            // Get cursor position from split_view_states
+            let active_split = self.split_manager.active_split();
+            if let Some(view_state) = self.split_view_states.get(&active_split) {
+                let position = view_state.cursors.primary().position;
+                let anchor = view_state.cursors.primary().anchor;
+                self.position_history
+                    .record_movement(self.active_buffer, position, anchor);
+            }
             self.position_history.commit_pending_movement();
         }
 
@@ -1434,21 +1442,34 @@ impl Editor {
                 self.set_active_buffer(target_buffer);
 
                 // Move cursor to the saved position
-                let state = self.active_state_mut();
-                let cursor_id = state.cursors.primary_id();
-                let old_position = state.cursors.primary().position;
-                let old_anchor = state.cursors.primary().anchor;
-                let old_sticky_column = state.cursors.primary().sticky_column;
-                let event = Event::MoveCursor {
-                    cursor_id,
-                    old_position,
-                    new_position: target_position,
-                    old_anchor,
-                    new_anchor: target_anchor,
-                    old_sticky_column,
-                    new_sticky_column: 0, // Reset sticky column for navigation
-                };
-                state.apply(&event);
+                // Cursor info comes from split_view_states
+                let active_split = self.split_manager.active_split();
+                let cursor_info = self
+                    .split_view_states
+                    .get(&active_split)
+                    .map(|vs| {
+                        let c = vs.cursors.primary();
+                        (vs.cursors.primary_id(), c.position, c.anchor, c.sticky_column)
+                    });
+
+                if let Some((cursor_id, old_position, old_anchor, old_sticky_column)) = cursor_info {
+                    let event = Event::MoveCursor {
+                        cursor_id,
+                        old_position,
+                        new_position: target_position,
+                        old_anchor,
+                        new_anchor: target_anchor,
+                        old_sticky_column,
+                        new_sticky_column: 0, // Reset sticky column for navigation
+                    };
+                    // Apply with cursors/viewport from split_view_states
+                    if let (Some(state), Some(view_state)) = (
+                        self.buffers.get_mut(&target_buffer),
+                        self.split_view_states.get_mut(&active_split),
+                    ) {
+                        state.apply(&event, &mut view_state.cursors, &mut view_state.viewport);
+                    }
+                }
             }
         }
 
@@ -1471,21 +1492,34 @@ impl Editor {
                 self.set_active_buffer(target_buffer);
 
                 // Move cursor to the saved position
-                let state = self.active_state_mut();
-                let cursor_id = state.cursors.primary_id();
-                let old_position = state.cursors.primary().position;
-                let old_anchor = state.cursors.primary().anchor;
-                let old_sticky_column = state.cursors.primary().sticky_column;
-                let event = Event::MoveCursor {
-                    cursor_id,
-                    old_position,
-                    new_position: target_position,
-                    old_anchor,
-                    new_anchor: target_anchor,
-                    old_sticky_column,
-                    new_sticky_column: 0, // Reset sticky column for navigation
-                };
-                state.apply(&event);
+                // Cursor info comes from split_view_states
+                let active_split = self.split_manager.active_split();
+                let cursor_info = self
+                    .split_view_states
+                    .get(&active_split)
+                    .map(|vs| {
+                        let c = vs.cursors.primary();
+                        (vs.cursors.primary_id(), c.position, c.anchor, c.sticky_column)
+                    });
+
+                if let Some((cursor_id, old_position, old_anchor, old_sticky_column)) = cursor_info {
+                    let event = Event::MoveCursor {
+                        cursor_id,
+                        old_position,
+                        new_position: target_position,
+                        old_anchor,
+                        new_anchor: target_anchor,
+                        old_sticky_column,
+                        new_sticky_column: 0, // Reset sticky column for navigation
+                    };
+                    // Apply with cursors/viewport from split_view_states
+                    if let (Some(state), Some(view_state)) = (
+                        self.buffers.get_mut(&target_buffer),
+                        self.split_view_states.get_mut(&active_split),
+                    ) {
+                        state.apply(&event, &mut view_state.cursors, &mut view_state.viewport);
+                    }
+                }
             }
         }
 
@@ -2517,39 +2551,42 @@ impl Editor {
             return Ok(false);
         }
 
-        // Save scroll position and cursor positions before reloading
-        let old_top_byte = self.active_state().viewport.top_byte;
-        let old_left_column = self.active_state().viewport.left_column;
-        let old_cursors = self.active_state().cursors.clone();
+        // Save scroll position and cursor positions from split_view_states before reloading
+        let active_split = self.split_manager.active_split();
+        let (old_top_byte, old_left_column, old_cursors) = self
+            .split_view_states
+            .get(&active_split)
+            .map(|vs| (vs.viewport.top_byte, vs.viewport.left_column, vs.cursors.clone()))
+            .unwrap_or((0, 0, crate::model::cursor::Cursors::new()));
 
         // Load the file content fresh from disk
-        let mut new_state = EditorState::from_file(
+        let new_state = EditorState::from_file(
             &path,
-            self.terminal_width,
-            self.terminal_height,
             self.config.editor.large_file_threshold_bytes as usize,
         )?;
 
-        // Restore scroll position (clamped to valid range for new file size)
+        // Get new file size for clamping positions
         let new_file_size = new_state.buffer.len();
-        new_state.viewport.top_byte = old_top_byte.min(new_file_size);
-        new_state.viewport.left_column = old_left_column;
-
-        // Restore cursor positions (clamped to valid range for new file size)
-        let mut restored_cursors = old_cursors;
-        restored_cursors.map(|cursor| {
-            cursor.position = cursor.position.min(new_file_size);
-            // Clear selection since the content may have changed
-            cursor.clear_selection();
-        });
-        new_state.cursors = restored_cursors;
 
         // Replace the current buffer with the new state
         let buffer_id = self.active_buffer;
         if let Some(state) = self.buffers.get_mut(&buffer_id) {
             *state = new_state;
-            // Apply line wrap setting from config
-            state.viewport.line_wrap_enabled = self.config.editor.line_wrap;
+        }
+
+        // Restore scroll/cursor positions to split_view_states (clamped to valid range)
+        if let Some(view_state) = self.split_view_states.get_mut(&active_split) {
+            view_state.viewport.top_byte = old_top_byte.min(new_file_size);
+            view_state.viewport.left_column = old_left_column;
+
+            // Restore cursor positions (clamped to valid range for new file size)
+            let mut restored_cursors = old_cursors;
+            restored_cursors.map(|cursor| {
+                cursor.position = cursor.position.min(new_file_size);
+                // Clear selection since the content may have changed
+                cursor.clear_selection();
+            });
+            view_state.cursors = restored_cursors;
         }
 
         // Clear the undo/redo history for this buffer

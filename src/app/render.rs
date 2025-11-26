@@ -9,11 +9,16 @@ impl Editor {
         // NOTE: Viewport sync with cursor is handled by split_rendering.rs which knows the
         // correct content area dimensions. Don't sync here with incorrect EditorState viewport size.
 
-        // Prepare all buffers for rendering (pre-load viewport data for lazy loading)
-        for (_, state) in &mut self.buffers {
-            if let Err(e) = state.prepare_for_render() {
-                tracing::error!("Failed to prepare buffer for render: {}", e);
-                // Continue with partial rendering
+        // Prepare active buffer for rendering (pre-load viewport data for lazy loading)
+        // We only prepare the active buffer since we have the viewport for the active split
+        let split_id = self.split_manager.active_split();
+        if let Some(view_state) = self.split_view_states.get(&split_id) {
+            let viewport = &view_state.viewport;
+            if let Some(state) = self.buffers.get_mut(&self.active_buffer) {
+                if let Err(e) = state.prepare_for_render(viewport) {
+                    tracing::error!("Failed to prepare buffer for render: {}", e);
+                    // Continue with partial rendering
+                }
             }
         }
 
@@ -1200,17 +1205,21 @@ impl Editor {
     /// Convert an action into a list of events to apply to the active buffer
     /// Returns None for actions that don't generate events (like Quit)
     pub fn action_to_events(&mut self, action: Action) -> Option<Vec<Event>> {
-        // Sync viewport from SplitViewState to EditorState BEFORE action conversion
-        // This ensures action_to_events sees correct viewport dimensions for PageDown/PageUp
-        // (since scroll events now update SplitViewState's viewport directly)
-        // Note: We only sync viewport, NOT cursors - EditorState has authoritative cursor state
-        self.sync_viewport_from_split_view_state();
-
         let tab_size = self.config.editor.tab_size;
         let auto_indent = self.config.editor.auto_indent;
         let estimated_line_length = self.config.editor.estimated_line_length;
+
+        // Get cursors and viewport from SplitViewState (the authoritative source)
+        let split_id = self.split_manager.active_split();
+        let view_state = self.split_view_states.get_mut(&split_id)?;
+        let cursors = &mut view_state.cursors;
+        let viewport = &view_state.viewport;
+
+        let state = self.buffers.get_mut(&self.active_buffer)?;
         convert_action_to_events(
-            self.active_state_mut(),
+            state,
+            cursors,
+            viewport,
             action,
             tab_size,
             auto_indent,

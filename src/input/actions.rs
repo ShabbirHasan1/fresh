@@ -44,6 +44,7 @@ fn pos_2d_to_byte(buffer: &Buffer, pos: Position2D) -> usize {
 /// Handle block selection movement
 fn block_select_action(
     state: &mut EditorState,
+    cursors: &mut crate::model::cursor::Cursors,
     events: &mut Vec<Event>,
     direction: BlockDirection,
 ) {
@@ -57,7 +58,7 @@ fn block_select_action(
         }
     };
 
-    for (cursor_id, cursor) in state.cursors.iter() {
+    for (cursor_id, cursor) in cursors.iter() {
         let current_2d = byte_to_2d(&state.buffer, cursor.position);
 
         // If not in block mode, start block selection
@@ -134,7 +135,7 @@ fn block_select_action(
     // Note: We update the cursors here to set block_anchor BEFORE the events are applied
     // This way the events will move the cursor, but the anchor remains fixed
     let buffer_ref = &state.buffer;
-    state.cursors.map(|cursor| {
+    cursors.map(|cursor| {
         if cursor.selection_mode != SelectionMode::Block || cursor.block_anchor.is_none() {
             let current_2d = byte_to_2d(buffer_ref, cursor.position);
             cursor.start_block_selection(current_2d.line, current_2d.column);
@@ -144,8 +145,8 @@ fn block_select_action(
 
 /// Clear block selection when performing normal operations
 /// This should be called when the user performs a non-block action
-pub fn clear_block_selection_if_active(state: &mut EditorState) {
-    state.cursors.map(|cursor| {
+pub fn clear_block_selection_if_active(cursors: &mut crate::model::cursor::Cursors) {
+    cursors.map(|cursor| {
         if cursor.selection_mode == SelectionMode::Block {
             cursor.clear_block_selection();
         }
@@ -174,6 +175,8 @@ fn max_cursor_position(buffer: &Buffer) -> usize {
 /// * `None` - If the action doesn't generate events (like Quit, Save, etc.)
 pub fn action_to_events(
     state: &mut EditorState,
+    cursors: &mut crate::model::cursor::Cursors,
+    viewport: &crate::view::viewport::Viewport,
     action: Action,
     tab_size: usize,
     auto_indent: bool,
@@ -187,7 +190,7 @@ pub fn action_to_events(
             // Collect cursors and sort by position (reverse order)
             // This ensures insertions at later positions happen first,
             // avoiding position shifts that would affect earlier insertions
-            let mut cursor_vec: Vec<_> = state.cursors.iter().collect();
+            let mut cursor_vec: Vec<_> = cursors.iter().collect();
             cursor_vec.sort_by_key(|(_, c)| std::cmp::Reverse(c.position));
 
             // Check if this is a closing delimiter that should trigger auto-dedent
@@ -396,7 +399,7 @@ pub fn action_to_events(
 
         Action::InsertNewline => {
             // Sort cursors by position (reverse order) to avoid position shifts
-            let mut cursor_vec: Vec<_> = state.cursors.iter().collect();
+            let mut cursor_vec: Vec<_> = cursors.iter().collect();
             cursor_vec.sort_by_key(|(_, c)| std::cmp::Reverse(c.position));
 
             // Collect deletions and positions for indentation
@@ -469,7 +472,7 @@ pub fn action_to_events(
         Action::InsertTab => {
             let tab_str = " ".repeat(tab_size);
             // Sort cursors by position (reverse order) to avoid position shifts
-            let mut cursor_vec: Vec<_> = state.cursors.iter().collect();
+            let mut cursor_vec: Vec<_> = cursors.iter().collect();
             cursor_vec.sort_by_key(|(_, c)| std::cmp::Reverse(c.position));
 
             // Collect deletions and insert positions
@@ -507,7 +510,7 @@ pub fn action_to_events(
 
         // Basic movement - move each cursor
         Action::MoveLeft => {
-            for (cursor_id, cursor) in state.cursors.iter() {
+            for (cursor_id, cursor) in cursors.iter() {
                 // Use prev_char_boundary to ensure we land on a valid UTF-8 character boundary
                 let new_pos = state.buffer.prev_char_boundary(cursor.position);
                 // Preserve anchor if deselect_on_move is false (Emacs mark mode)
@@ -529,7 +532,7 @@ pub fn action_to_events(
         }
 
         Action::MoveRight => {
-            for (cursor_id, cursor) in state.cursors.iter() {
+            for (cursor_id, cursor) in cursors.iter() {
                 let max_pos = max_cursor_position(&state.buffer);
                 // Use next_char_boundary to ensure we land on a valid UTF-8 character boundary
                 let new_pos = state
@@ -555,7 +558,7 @@ pub fn action_to_events(
         }
 
         Action::MoveUp => {
-            for (cursor_id, cursor) in state.cursors.iter() {
+            for (cursor_id, cursor) in cursors.iter() {
                 // Use iterator to navigate to previous line
                 // line_iterator positions us at the start of the current line
                 let mut iter = state
@@ -597,7 +600,7 @@ pub fn action_to_events(
         }
 
         Action::MoveDown => {
-            for (cursor_id, cursor) in state.cursors.iter() {
+            for (cursor_id, cursor) in cursors.iter() {
                 let mut iter = state
                     .buffer
                     .line_iterator(cursor.position, estimated_line_length);
@@ -638,7 +641,7 @@ pub fn action_to_events(
         }
 
         Action::MoveLineStart => {
-            for (cursor_id, cursor) in state.cursors.iter() {
+            for (cursor_id, cursor) in cursors.iter() {
                 let mut iter = state
                     .buffer
                     .line_iterator(cursor.position, estimated_line_length);
@@ -663,7 +666,7 @@ pub fn action_to_events(
         }
 
         Action::MoveLineEnd => {
-            for (cursor_id, cursor) in state.cursors.iter() {
+            for (cursor_id, cursor) in cursors.iter() {
                 let mut iter = state
                     .buffer
                     .line_iterator(cursor.position, estimated_line_length);
@@ -692,7 +695,7 @@ pub fn action_to_events(
         }
 
         Action::MoveWordLeft => {
-            for (cursor_id, cursor) in state.cursors.iter() {
+            for (cursor_id, cursor) in cursors.iter() {
                 let new_pos = find_word_start_left(&state.buffer, cursor.position);
                 // Preserve anchor if deselect_on_move is false (Emacs mark mode)
                 let new_anchor = if cursor.deselect_on_move {
@@ -713,7 +716,7 @@ pub fn action_to_events(
         }
 
         Action::MoveWordRight => {
-            for (cursor_id, cursor) in state.cursors.iter() {
+            for (cursor_id, cursor) in cursors.iter() {
                 let new_pos = find_word_start_right(&state.buffer, cursor.position);
                 // Preserve anchor if deselect_on_move is false (Emacs mark mode)
                 let new_anchor = if cursor.deselect_on_move {
@@ -734,7 +737,7 @@ pub fn action_to_events(
         }
 
         Action::MoveDocumentStart => {
-            for (cursor_id, cursor) in state.cursors.iter() {
+            for (cursor_id, cursor) in cursors.iter() {
                 // Preserve anchor if deselect_on_move is false (Emacs mark mode)
                 let new_anchor = if cursor.deselect_on_move {
                     None
@@ -754,7 +757,7 @@ pub fn action_to_events(
         }
 
         Action::MoveDocumentEnd => {
-            for (cursor_id, cursor) in state.cursors.iter() {
+            for (cursor_id, cursor) in cursors.iter() {
                 let max_pos = max_cursor_position(&state.buffer);
                 // Preserve anchor if deselect_on_move is false (Emacs mark mode)
                 let new_anchor = if cursor.deselect_on_move {
@@ -775,9 +778,9 @@ pub fn action_to_events(
         }
 
         Action::MovePageUp => {
-            for (cursor_id, cursor) in state.cursors.iter() {
+            for (cursor_id, cursor) in cursors.iter() {
                 // Move up by viewport height
-                let lines_to_move = state.viewport.height.saturating_sub(1);
+                let lines_to_move = viewport.height.saturating_sub(1);
                 let mut iter = state
                     .buffer
                     .line_iterator(cursor.position, estimated_line_length);
@@ -821,9 +824,9 @@ pub fn action_to_events(
         }
 
         Action::MovePageDown => {
-            for (cursor_id, cursor) in state.cursors.iter() {
+            for (cursor_id, cursor) in cursors.iter() {
                 // Move down by viewport height
-                let lines_to_move = state.viewport.height.saturating_sub(1);
+                let lines_to_move = viewport.height.saturating_sub(1);
                 let mut iter = state
                     .buffer
                     .line_iterator(cursor.position, estimated_line_length);
@@ -872,7 +875,7 @@ pub fn action_to_events(
 
         // Selection movement - same as regular movement but keeps anchor
         Action::SelectLeft => {
-            for (cursor_id, cursor) in state.cursors.iter() {
+            for (cursor_id, cursor) in cursors.iter() {
                 // Use prev_char_boundary to ensure we land on a valid UTF-8 character boundary
                 let new_pos = state.buffer.prev_char_boundary(cursor.position);
                 let anchor = cursor.anchor.unwrap_or(cursor.position);
@@ -889,7 +892,7 @@ pub fn action_to_events(
         }
 
         Action::SelectRight => {
-            for (cursor_id, cursor) in state.cursors.iter() {
+            for (cursor_id, cursor) in cursors.iter() {
                 let max_pos = max_cursor_position(&state.buffer);
                 // Use next_char_boundary to ensure we land on a valid UTF-8 character boundary
                 let new_pos = state
@@ -910,7 +913,7 @@ pub fn action_to_events(
         }
 
         Action::SelectUp => {
-            for (cursor_id, cursor) in state.cursors.iter() {
+            for (cursor_id, cursor) in cursors.iter() {
                 let mut iter = state
                     .buffer
                     .line_iterator(cursor.position, estimated_line_length);
@@ -943,7 +946,7 @@ pub fn action_to_events(
         }
 
         Action::SelectDown => {
-            for (cursor_id, cursor) in state.cursors.iter() {
+            for (cursor_id, cursor) in cursors.iter() {
                 let mut iter = state
                     .buffer
                     .line_iterator(cursor.position, estimated_line_length);
@@ -978,7 +981,7 @@ pub fn action_to_events(
         }
 
         Action::SelectLineStart => {
-            for (cursor_id, cursor) in state.cursors.iter() {
+            for (cursor_id, cursor) in cursors.iter() {
                 let mut iter = state
                     .buffer
                     .line_iterator(cursor.position, estimated_line_length);
@@ -999,7 +1002,7 @@ pub fn action_to_events(
         }
 
         Action::SelectLineEnd => {
-            for (cursor_id, cursor) in state.cursors.iter() {
+            for (cursor_id, cursor) in cursors.iter() {
                 let mut iter = state
                     .buffer
                     .line_iterator(cursor.position, estimated_line_length);
@@ -1024,7 +1027,7 @@ pub fn action_to_events(
         }
 
         Action::SelectWordLeft => {
-            for (cursor_id, cursor) in state.cursors.iter() {
+            for (cursor_id, cursor) in cursors.iter() {
                 let new_pos = find_word_start_left(&state.buffer, cursor.position);
                 let anchor = cursor.anchor.unwrap_or(cursor.position);
                 events.push(Event::MoveCursor {
@@ -1040,7 +1043,7 @@ pub fn action_to_events(
         }
 
         Action::SelectWordRight => {
-            for (cursor_id, cursor) in state.cursors.iter() {
+            for (cursor_id, cursor) in cursors.iter() {
                 let new_pos = find_word_start_right(&state.buffer, cursor.position);
                 let anchor = cursor.anchor.unwrap_or(cursor.position);
                 events.push(Event::MoveCursor {
@@ -1056,7 +1059,7 @@ pub fn action_to_events(
         }
 
         Action::SelectDocumentStart => {
-            for (cursor_id, cursor) in state.cursors.iter() {
+            for (cursor_id, cursor) in cursors.iter() {
                 let anchor = cursor.anchor.unwrap_or(cursor.position);
                 events.push(Event::MoveCursor {
                     cursor_id,
@@ -1071,7 +1074,7 @@ pub fn action_to_events(
         }
 
         Action::SelectDocumentEnd => {
-            for (cursor_id, cursor) in state.cursors.iter() {
+            for (cursor_id, cursor) in cursors.iter() {
                 let max_pos = max_cursor_position(&state.buffer);
                 let anchor = cursor.anchor.unwrap_or(cursor.position);
                 events.push(Event::MoveCursor {
@@ -1087,8 +1090,8 @@ pub fn action_to_events(
         }
 
         Action::SelectPageUp => {
-            for (cursor_id, cursor) in state.cursors.iter() {
-                let lines_to_move = state.viewport.height.saturating_sub(1);
+            for (cursor_id, cursor) in cursors.iter() {
+                let lines_to_move = viewport.height.saturating_sub(1);
                 let mut iter = state
                     .buffer
                     .line_iterator(cursor.position, estimated_line_length);
@@ -1127,8 +1130,8 @@ pub fn action_to_events(
         }
 
         Action::SelectPageDown => {
-            for (cursor_id, cursor) in state.cursors.iter() {
-                let lines_to_move = state.viewport.height.saturating_sub(1);
+            for (cursor_id, cursor) in cursors.iter() {
+                let lines_to_move = viewport.height.saturating_sub(1);
                 let mut iter = state
                     .buffer
                     .line_iterator(cursor.position, estimated_line_length);
@@ -1172,8 +1175,8 @@ pub fn action_to_events(
 
         Action::SelectAll => {
             // Select entire buffer for primary cursor only
-            let primary_id = state.cursors.primary_id();
-            let primary_cursor = state.cursors.primary();
+            let primary_id = cursors.primary_id();
+            let primary_cursor = cursors.primary();
             let max_pos = max_cursor_position(&state.buffer);
             events.push(Event::MoveCursor {
                 cursor_id: primary_id,
@@ -1188,7 +1191,7 @@ pub fn action_to_events(
         }
 
         Action::SelectWord => {
-            for (cursor_id, cursor) in state.cursors.iter() {
+            for (cursor_id, cursor) in cursors.iter() {
                 // Find word boundaries at current position
                 // First find the start of the word we're in/adjacent to
                 let word_start = find_word_start(&state.buffer, cursor.position);
@@ -1212,7 +1215,7 @@ pub fn action_to_events(
 
         Action::DeleteBackward => {
             // Sort cursors by position (reverse order) to avoid position shifts
-            let mut cursor_vec: Vec<_> = state.cursors.iter().collect();
+            let mut cursor_vec: Vec<_> = cursors.iter().collect();
             cursor_vec.sort_by_key(|(_, c)| std::cmp::Reverse(c.position));
 
             // Collect all deletions first, checking for auto-pair deletion
@@ -1276,7 +1279,7 @@ pub fn action_to_events(
 
         Action::DeleteForward => {
             // Sort cursors by position (reverse order) to avoid position shifts
-            let mut cursor_vec: Vec<_> = state.cursors.iter().collect();
+            let mut cursor_vec: Vec<_> = cursors.iter().collect();
             cursor_vec.sort_by_key(|(_, c)| std::cmp::Reverse(c.position));
 
             let buffer_len = state.buffer.len();
@@ -1468,7 +1471,7 @@ pub fn action_to_events(
         Action::OpenLine => {
             // Insert a newline at cursor position but don't move cursor
             // (like pressing Enter but staying on current line)
-            for (cursor_id, cursor) in state.cursors.iter() {
+            for (cursor_id, cursor) in cursors.iter() {
                 events.push(Event::Insert {
                     position: cursor.position,
                     text: "\n".to_string(),
@@ -1486,7 +1489,7 @@ pub fn action_to_events(
         Action::SetMark => {
             // Set the selection anchor at the current cursor position
             // This starts a selection that extends as the cursor moves
-            for (cursor_id, cursor) in state.cursors.iter() {
+            for (cursor_id, cursor) in cursors.iter() {
                 events.push(Event::SetAnchor {
                     cursor_id,
                     position: cursor.position,
@@ -1505,7 +1508,7 @@ pub fn action_to_events(
                 .min_by_key(|id| id.0)
                 .expect("Should have at least one cursor");
 
-            for (cursor_id, cursor) in state.cursors.iter() {
+            for (cursor_id, cursor) in cursors.iter() {
                 if cursor_id != first_id {
                     events.push(Event::RemoveCursor {
                         cursor_id,
@@ -1674,24 +1677,24 @@ pub fn action_to_events(
 
         // Block/rectangular selection actions
         Action::BlockSelectLeft => {
-            block_select_action(state, &mut events, BlockDirection::Left);
+            block_select_action(state, cursors, &mut events, BlockDirection::Left);
         }
 
         Action::BlockSelectRight => {
-            block_select_action(state, &mut events, BlockDirection::Right);
+            block_select_action(state, cursors, &mut events, BlockDirection::Right);
         }
 
         Action::BlockSelectUp => {
-            block_select_action(state, &mut events, BlockDirection::Up);
+            block_select_action(state, cursors, &mut events, BlockDirection::Up);
         }
 
         Action::BlockSelectDown => {
-            block_select_action(state, &mut events, BlockDirection::Down);
+            block_select_action(state, cursors, &mut events, BlockDirection::Down);
         }
 
         Action::SelectLine => {
             // Select the entire line for each cursor
-            for (cursor_id, cursor) in state.cursors.iter() {
+            for (cursor_id, cursor) in cursors.iter() {
                 // Use iterator to get line bounds
                 let mut iter = state
                     .buffer
@@ -1715,7 +1718,7 @@ pub fn action_to_events(
 
         Action::ExpandSelection => {
             // Expand selection for each cursor
-            for (cursor_id, cursor) in state.cursors.iter() {
+            for (cursor_id, cursor) in cursors.iter() {
                 if let Some(anchor) = cursor.anchor {
                     // Already have a selection - expand by one word to the right
                     // First move to the start of the next word, then to its end
@@ -1785,7 +1788,7 @@ mod tests {
         });
 
         assert_eq!(state.buffer.to_string(), "Hello\nWorld");
-        assert_eq!(state.cursors.primary().position, 11);
+        assert_eq!(cursors.primary().position, 11);
 
         // Move cursor to position 6 (beginning of "World")
         state.apply(&Event::MoveCursor {
@@ -1798,7 +1801,7 @@ mod tests {
             new_sticky_column: 0,
         });
 
-        assert_eq!(state.cursors.primary().position, 6);
+        assert_eq!(cursors.primary().position, 6);
 
         // Press Backspace - should delete the newline at position 5
         let events = action_to_events(&mut state, Action::DeleteBackward, 4, false, 80).unwrap();
@@ -1809,7 +1812,7 @@ mod tests {
         }
 
         assert_eq!(state.buffer.to_string(), "HelloWorld");
-        assert_eq!(state.cursors.primary().position, 5);
+        assert_eq!(cursors.primary().position, 5);
     }
 
     #[test]
@@ -1835,7 +1838,7 @@ mod tests {
             new_sticky_column: 0,
         });
 
-        assert_eq!(state.cursors.primary().position, 0);
+        assert_eq!(cursors.primary().position, 0);
 
         // Move down - should go to position 6 (start of Line2)
         let events = action_to_events(&mut state, Action::MoveDown, 4, false, 80).unwrap();
@@ -1848,7 +1851,7 @@ mod tests {
         }
 
         state.apply(&events[0]);
-        assert_eq!(state.cursors.primary().position, 6);
+        assert_eq!(cursors.primary().position, 6);
 
         // Move down again - should go to position 12 (start of Line3)
         let events = action_to_events(&mut state, Action::MoveDown, 4, false, 80).unwrap();
@@ -1876,7 +1879,7 @@ mod tests {
         // Cursor is at end (position 17)
         // Text structure: "Line1\nLine2\nLine3"
         // Positions: 0-4 (Line1), 5 (\n), 6-10 (Line2), 11 (\n), 12-16 (Line3)
-        assert_eq!(state.cursors.primary().position, 17);
+        assert_eq!(cursors.primary().position, 17);
         assert_eq!(state.buffer.to_string(), "Line1\nLine2\nLine3");
 
         // Move up - cursor is at end of Line3 (position 17, column 5)
@@ -1940,7 +1943,7 @@ mod tests {
             new_sticky_column: 0,
         });
 
-        assert_eq!(state.cursors.primary().position, 3);
+        assert_eq!(cursors.primary().position, 3);
 
         // Move down - should go to position 9 (column 3 of second line, which is end of "123")
         let events = action_to_events(&mut state, Action::MoveDown, 4, false, 80).unwrap();
@@ -2006,7 +2009,7 @@ mod tests {
             new_sticky_column: 0,
         });
 
-        assert_eq!(state.cursors.primary().position, 13);
+        assert_eq!(cursors.primary().position, 13);
 
         // Move up - should go to position 9 (column 3 of second line, which is end of "123")
         let events = action_to_events(&mut state, Action::MoveUp, 4, false, 80).unwrap();
@@ -2301,12 +2304,12 @@ mod tests {
 
         println!(
             "After MoveLineEnd: cursor at {}",
-            state.cursors.primary().position
+            cursors.primary().position
         );
         // "HelloNew Line\n" - the visible part is 13 chars (0-12)
         // MoveLineEnd should put cursor at position 13 (after the visible text, before/on the newline)
         assert_eq!(
-            state.cursors.primary().position,
+            cursors.primary().position,
             13,
             "MoveLineEnd should position at end of visible text"
         );
@@ -2325,7 +2328,7 @@ mod tests {
         });
 
         // Cursor is at EOF (position 20)
-        assert_eq!(state.cursors.primary().position, 20);
+        assert_eq!(cursors.primary().position, 20);
         println!("Starting at EOF: position 20");
 
         // Check what line_iterator does at EOF
@@ -2344,11 +2347,11 @@ mod tests {
 
         println!(
             "After MoveLineStart from EOF: cursor at {}",
-            state.cursors.primary().position
+            cursors.primary().position
         );
         // Should move to position 14 (start of "World!" line)
         assert_eq!(
-            state.cursors.primary().position,
+            cursors.primary().position,
             14,
             "MoveLineStart from EOF should go to start of last line"
         );
@@ -2395,7 +2398,7 @@ mod tests {
 
         println!(
             "Cursor at line 90, position: {}",
-            state.cursors.primary().position
+            cursors.primary().position
         );
 
         // Try to move up - this should work even if chunks aren't loaded
@@ -2413,10 +2416,10 @@ mod tests {
 
         println!(
             "After MoveUp: cursor at {}",
-            state.cursors.primary().position
+            cursors.primary().position
         );
         assert!(
-            state.cursors.primary().position < target_line_start,
+            cursors.primary().position < target_line_start,
             "Cursor should have moved up"
         );
 
@@ -2452,7 +2455,7 @@ mod tests {
             new_sticky_column: 0,
         });
 
-        assert_eq!(state.cursors.primary().position, 13);
+        assert_eq!(cursors.primary().position, 13);
         println!("Starting position: 13 (on the newline)");
 
         // line_iterator(13) should position at...?
@@ -2475,13 +2478,13 @@ mod tests {
         }
         println!(
             "After MoveDown from position 13: cursor at {}",
-            state.cursors.primary().position
+            cursors.primary().position
         );
 
         // We expect to be at position 14 (start of "World!" line) or somewhere on that line
         // NOT at position 20 (EOF)
         assert!(
-            state.cursors.primary().position >= 14 && state.cursors.primary().position <= 20,
+            cursors.primary().position >= 14 && cursors.primary().position <= 20,
             "After MoveDown from newline, cursor should be on the next line, not at EOF"
         );
     }
@@ -2502,7 +2505,7 @@ mod tests {
         // Text structure: "HelloNew Line\nWorld!"
         // Positions: 0-12 (HelloNew Line), 13 (\n), 14-19 (World!)
         assert_eq!(state.buffer.to_string(), "HelloNew Line\nWorld!");
-        assert_eq!(state.cursors.primary().position, 20); // End of text
+        assert_eq!(cursors.primary().position, 20); // End of text
 
         // Move up to first line
         let events = action_to_events(&mut state, Action::MoveUp, 4, false, 80).unwrap();
@@ -2511,7 +2514,7 @@ mod tests {
         }
         println!(
             "After MoveUp: cursor at {}",
-            state.cursors.primary().position
+            cursors.primary().position
         );
 
         // Move to end of first line
@@ -2520,7 +2523,7 @@ mod tests {
             state.apply(&event);
         }
         assert_eq!(
-            state.cursors.primary().position,
+            cursors.primary().position,
             13,
             "Should be at end of first line (position 13, the newline)"
         );
@@ -2532,7 +2535,7 @@ mod tests {
         }
         println!(
             "After MoveDown: cursor at {}",
-            state.cursors.primary().position
+            cursors.primary().position
         );
 
         // Move to start of line (Home)
@@ -2540,9 +2543,9 @@ mod tests {
         for event in events {
             state.apply(&event);
         }
-        println!("After Home: cursor at {}", state.cursors.primary().position);
+        println!("After Home: cursor at {}", cursors.primary().position);
         assert_eq!(
-            state.cursors.primary().position,
+            cursors.primary().position,
             14,
             "Should be at start of second line (position 14)"
         );
@@ -2557,7 +2560,7 @@ mod tests {
         println!("After backspace: buffer = {:?}", state.buffer.to_string());
         println!(
             "After backspace: cursor at {}",
-            state.cursors.primary().position
+            cursors.primary().position
         );
         assert_eq!(
             state.buffer.to_string(),
@@ -2565,7 +2568,7 @@ mod tests {
             "Lines should be joined"
         );
         assert_eq!(
-            state.cursors.primary().position,
+            cursors.primary().position,
             13,
             "Cursor should be at join point"
         );
@@ -2577,7 +2580,7 @@ mod tests {
             EditorState::new(80, 24, crate::config::LARGE_FILE_THRESHOLD_BYTES as usize);
 
         // Cursor is at position 0 initially
-        assert_eq!(state.cursors.primary().position, 0);
+        assert_eq!(cursors.primary().position, 0);
 
         // Insert opening parenthesis with auto_indent=true
         let events = action_to_events(&mut state, Action::InsertChar('('), 4, true, 80).unwrap();
@@ -2593,7 +2596,7 @@ mod tests {
 
         assert_eq!(state.buffer.to_string(), "()");
         assert_eq!(
-            state.cursors.primary().position,
+            cursors.primary().position,
             1,
             "Cursor should be between brackets"
         );
@@ -2613,7 +2616,7 @@ mod tests {
 
         assert_eq!(state.buffer.to_string(), "{}");
         assert_eq!(
-            state.cursors.primary().position,
+            cursors.primary().position,
             1,
             "Cursor should be between braces"
         );
@@ -2632,7 +2635,7 @@ mod tests {
         }
 
         assert_eq!(state.buffer.to_string(), "[]");
-        assert_eq!(state.cursors.primary().position, 1);
+        assert_eq!(cursors.primary().position, 1);
     }
 
     #[test]
@@ -2648,7 +2651,7 @@ mod tests {
         }
 
         assert_eq!(state.buffer.to_string(), "\"\"");
-        assert_eq!(state.cursors.primary().position, 1);
+        assert_eq!(cursors.primary().position, 1);
     }
 
     #[test]
@@ -2665,7 +2668,7 @@ mod tests {
 
         // Should only insert the opening character, no auto-close
         assert_eq!(state.buffer.to_string(), "(");
-        assert_eq!(state.cursors.primary().position, 1);
+        assert_eq!(cursors.primary().position, 1);
     }
 
     #[test]
@@ -2700,7 +2703,7 @@ mod tests {
 
         // Should NOT auto-close because 'a' is alphanumeric
         assert_eq!(state.buffer.to_string(), "(abc");
-        assert_eq!(state.cursors.primary().position, 1);
+        assert_eq!(cursors.primary().position, 1);
     }
 
     #[test]
@@ -2778,7 +2781,7 @@ mod tests {
         });
 
         assert_eq!(state.buffer.to_string(), "()");
-        assert_eq!(state.cursors.primary().position, 1);
+        assert_eq!(cursors.primary().position, 1);
 
         // Delete backward with auto_indent=true - should delete both characters
         let events = action_to_events(&mut state, Action::DeleteBackward, 4, true, 80).unwrap();
@@ -2788,7 +2791,7 @@ mod tests {
         }
 
         assert_eq!(state.buffer.to_string(), "");
-        assert_eq!(state.cursors.primary().position, 0);
+        assert_eq!(cursors.primary().position, 0);
     }
 
     #[test]
@@ -2888,7 +2891,7 @@ mod tests {
         }
 
         assert_eq!(state.buffer.to_string(), ")");
-        assert_eq!(state.cursors.primary().position, 0);
+        assert_eq!(cursors.primary().position, 0);
     }
 
     #[test]
@@ -2922,7 +2925,7 @@ mod tests {
         }
 
         assert_eq!(state.buffer.to_string(), "]");
-        assert_eq!(state.cursors.primary().position, 0);
+        assert_eq!(cursors.primary().position, 0);
     }
 
     #[test]
