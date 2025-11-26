@@ -2289,15 +2289,18 @@ impl Editor {
 
     /// Copy the current selection to clipboard
     pub fn copy_selection(&mut self) {
-        // Collect ranges first
-        let ranges: Vec<_> = {
-            let state = self.active_state();
-            state
-                .cursors
-                .iter()
-                .filter_map(|(_, cursor)| cursor.selection_range())
-                .collect()
-        };
+        // Collect selection ranges from split_view_states (authoritative source)
+        let active_split = self.split_manager.active_split();
+        let ranges: Vec<_> = self
+            .split_view_states
+            .get(&active_split)
+            .map(|vs| {
+                vs.cursors
+                    .iter()
+                    .filter_map(|(_, cursor)| cursor.selection_range())
+                    .collect()
+            })
+            .unwrap_or_default();
 
         let mut text = String::new();
         let state = self.active_state_mut();
@@ -2319,19 +2322,23 @@ impl Editor {
     pub fn cut_selection(&mut self) {
         self.copy_selection();
 
-        // Get deletions from state
-        let deletions: Vec<_> = {
-            let state = self.active_state();
-            state
-                .cursors
-                .iter()
-                .filter_map(|(_, c)| c.selection_range())
-                .collect()
-        };
+        // Get deletions and primary_id from split_view_states
+        let active_split = self.split_manager.active_split();
+        let (deletions, primary_id): (Vec<_>, _) = self
+            .split_view_states
+            .get(&active_split)
+            .map(|vs| {
+                let deletions = vs
+                    .cursors
+                    .iter()
+                    .filter_map(|(_, c)| c.selection_range())
+                    .collect();
+                (deletions, vs.cursors.primary_id())
+            })
+            .unwrap_or_default();
 
-        // Get deleted text and cursor id
+        // Get deleted text from buffer
         let state = self.active_state_mut();
-        let primary_id = state.cursors.primary_id();
         let events: Vec<_> = deletions
             .iter()
             .rev()
@@ -2364,20 +2371,25 @@ impl Editor {
             None => return,
         };
 
-        let state = self.active_state();
-        let cursor_id = state.cursors.primary_id();
-        let position = state.cursors.primary().position;
+        // Get cursor info from split_view_states
+        let active_split = self.split_manager.active_split();
+        let cursor_info = self
+            .split_view_states
+            .get(&active_split)
+            .map(|vs| (vs.cursors.primary_id(), vs.cursors.primary().position));
 
-        let event = Event::Insert {
-            position,
-            text: paste_text,
-            cursor_id,
-        };
+        if let Some((cursor_id, position)) = cursor_info {
+            let event = Event::Insert {
+                position,
+                text: paste_text,
+                cursor_id,
+            };
 
-        self.active_event_log_mut().append(event.clone());
-        self.apply_event_to_active_buffer(&event);
+            self.active_event_log_mut().append(event.clone());
+            self.apply_event_to_active_buffer(&event);
 
-        self.status_message = Some("Pasted".to_string());
+            self.status_message = Some("Pasted".to_string());
+        }
     }
 
     /// Add a cursor at the next occurrence of the selected text
