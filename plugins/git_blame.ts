@@ -3,11 +3,16 @@
 /**
  * Git Blame Plugin - Magit-style Git Blame Interface
  *
- * Provides an interactive git blame view using the Annotated Views architecture:
+ * Provides an interactive git blame view using Virtual Lines (Emacs-like model):
  * - Virtual buffer contains pure file content (for syntax highlighting)
- * - View transform injects styled header lines above each blame block
+ * - Virtual lines are added above each blame block using addVirtualLine API
  * - Headers have dark gray background and no line numbers
  * - Content lines preserve source line numbers and syntax highlighting
+ *
+ * This uses the persistent state model where:
+ * - Plugin adds virtual lines when blame data loads (async)
+ * - Render loop reads virtual lines synchronously from memory
+ * - No view transform hooks needed - eliminates frame lag issues
  *
  * Features:
  * - 'b' to go back in history (show blame at parent commit)
@@ -324,8 +329,10 @@ function groupIntoBlocks(lines: BlameLine[]): BlameBlock[] {
 }
 
 // =============================================================================
-// View Transform Hook
+// Virtual Lines (Emacs-like persistent state model)
 // =============================================================================
+
+const BLAME_NAMESPACE = "git-blame";
 
 /**
  * Format a header line for a blame block
@@ -353,127 +360,34 @@ function findBlockForByteOffset(byteOffset: number): BlameBlock | null {
 }
 
 /**
- * View transform hook - injects styled header lines above blame blocks
+ * Add virtual lines for all blame block headers
+ * Called when blame data is loaded or updated
  */
-globalThis.onViewTransformRequest = function(args: {
-  buffer_id: number;
-  split_id: number;
-  viewport_start: number;
-  viewport_end: number;
-  tokens: ViewTokenWire[];
-}): void {
-  editor.debug(`view_transform_request: buffer_id=${args.buffer_id}, blameState.bufferId=${blameState.bufferId}, isOpen=${blameState.isOpen}`);
+function addBlameHeaders(): void {
+  if (blameState.bufferId === null) return;
 
-  // Only transform our blame buffer
-  if (args.buffer_id !== blameState.bufferId || !blameState.isOpen) {
-    editor.debug(`view_transform_request: skipping (buffer mismatch or not open)`);
-    return;
-  }
+  // Clear existing headers first
+  editor.clearVirtualTextNamespace(blameState.bufferId, BLAME_NAMESPACE);
 
-  editor.debug(`view_transform_request: processing viewport ${args.viewport_start}-${args.viewport_end}, ${blameState.blocks.length} blocks`);
-
-  const transformed: ViewTokenWire[] = [];
-  const processedBlocks = new Set<string>();
-
-  // Track which blocks we need headers for based on viewport
-  const blocksInViewport: BlameBlock[] = [];
+  // Add a virtual line above each block
   for (const block of blameState.blocks) {
-    // Check if block overlaps with viewport
-    if (block.endByte > args.viewport_start && block.startByte < args.viewport_end) {
-      blocksInViewport.push(block);
-      editor.debug(`Block in viewport: hash=${block.shortHash}, startByte=${block.startByte}, endByte=${block.endByte}`);
-    }
-  }
-  editor.debug(`Total blocks in viewport: ${blocksInViewport.length}, tokens: ${args.tokens.length}`);
+    const headerText = formatBlockHeader(block);
 
-  // Process tokens and inject headers
-  // We need to inject a header when:
-  // 1. We encounter a token at the exact start of a block (byteOffset === block.startByte)
-  // 2. OR the block starts before the viewport but extends into it (first visible token of that block)
-
-  let lastByteOffset: number | null = null;
-
-  // Debug: log first few tokens
-  for (let i = 0; i < Math.min(5, args.tokens.length); i++) {
-    const t = args.tokens[i];
-    editor.debug(`Token[${i}]: source_offset=${t.source_offset}, kind=${JSON.stringify(t.kind)}`);
+    editor.addVirtualLine(
+      blameState.bufferId,
+      block.startByte,        // anchor position
+      headerText,             // text content
+      colors.headerFg[0],     // r
+      colors.headerFg[1],     // g
+      colors.headerFg[2],     // b
+      true,                   // above (LineAbove)
+      BLAME_NAMESPACE,        // namespace for bulk removal
+      0                       // priority
+    );
   }
 
-  for (const token of args.tokens) {
-    const byteOffset = token.source_offset;
-
-    // Check if we need to inject headers before this token
-    if (byteOffset !== null && byteOffset !== lastByteOffset) {
-      for (const block of blocksInViewport) {
-        const blockKey = block.hash + block.startByte;
-
-        // Inject header if:
-        // 1. This token is at the exact start of the block, OR
-        // 2. This token is the first visible token within this block
-        //    (block started before viewport, so header wasn't shown yet)
-        const isBlockStart = byteOffset === block.startByte;
-        const isFirstVisibleInBlock = byteOffset >= block.startByte &&
-                                       byteOffset < block.endByte &&
-                                       block.startByte < args.viewport_start;
-
-        if ((isBlockStart || isFirstVisibleInBlock) && !processedBlocks.has(blockKey)) {
-          const headerText = formatBlockHeader(block);
-          editor.debug(`INJECT: block=${block.shortHash}, byteOffset=${byteOffset}, headerText="${headerText.substring(0, 40)}..."`);
-          processedBlocks.add(blockKey);
-
-          // Add header token (source_offset: null = no line number)
-          transformed.push({
-            source_offset: null,
-            kind: { Text: headerText },
-            style: {
-              fg: colors.headerFg,
-              bg: colors.headerBg,
-              bold: true,
-              italic: false,
-            },
-          });
-
-          // Add newline after header (also with no source mapping)
-          transformed.push({
-            source_offset: null,
-            kind: "Newline",
-            style: {
-              fg: colors.headerFg,
-              bg: colors.headerBg,
-              bold: false,
-              italic: false,
-            },
-          });
-        }
-      }
-    }
-
-    // Pass through the original token (preserves source mapping for line numbers + syntax highlighting)
-    transformed.push(token);
-    lastByteOffset = byteOffset;
-  }
-
-  // Submit the transformed view
-  editor.debug(`Submitting view transform: original=${args.tokens.length} tokens, transformed=${transformed.length} tokens`);
-  // Log first 5 transformed tokens
-  for (let i = 0; i < Math.min(5, transformed.length); i++) {
-    const t = transformed[i];
-    const kindStr = typeof t.kind === 'string' ? t.kind : `Text:"${(t.kind as {Text:string}).Text.substring(0, 30)}"`;
-    editor.debug(`OUT[${i}]: source_offset=${t.source_offset}, kind=${kindStr}`);
-  }
-  const result = editor.submitViewTransform(
-    args.buffer_id,
-    args.split_id,
-    args.viewport_start,
-    args.viewport_end,
-    transformed,
-    null // no layout hints
-  );
-  editor.debug(`submitViewTransform result: ${result}`);
-};
-
-// Register for the view transform hook
-editor.on("view_transform_request", "onViewTransformRequest");
+  editor.debug(`Added ${blameState.blocks.length} blame header virtual lines`);
+}
 
 // =============================================================================
 // Public Commands
@@ -529,7 +443,7 @@ globalThis.show_git_blame = async function(): Promise<void> {
   const bufferName = `*blame:${editor.pathBasename(filePath)}*`;
 
   // Create virtual buffer with PURE file content (for syntax highlighting)
-  // The view transform hook will inject headers during rendering
+  // Virtual lines will be added after buffer creation
   const entries: TextPropertyEntry[] = [];
 
   // We need to track which line belongs to which block for text properties
@@ -571,8 +485,11 @@ globalThis.show_git_blame = async function(): Promise<void> {
     blameState.isOpen = true;
     blameState.bufferId = bufferId;
 
+    // Add virtual lines for blame headers (persistent state model)
+    addBlameHeaders();
+
     editor.setStatus(`Git blame: ${blameState.blocks.length} blocks | b: blame at parent | q: close`);
-    editor.debug("Git blame panel opened with view transform architecture");
+    editor.debug("Git blame panel opened with virtual lines architecture");
   } else {
     resetState();
     editor.setStatus("Failed to open git blame panel");
@@ -712,6 +629,9 @@ globalThis.git_blame_go_back = async function(): Promise<void> {
     }
 
     editor.setVirtualBufferContent(blameState.bufferId, entries);
+
+    // Re-add virtual lines for the new blame data
+    addBlameHeaders();
   }
 
   const depth = blameState.commitStack.length;
@@ -775,5 +695,5 @@ editor.registerCommand(
 // Plugin Initialization
 // =============================================================================
 
-editor.setStatus("Git Blame plugin loaded (view transform architecture)");
+editor.setStatus("Git Blame plugin loaded (virtual lines architecture)");
 editor.debug("Git Blame plugin initialized - Use 'Git Blame' command to open");

@@ -404,6 +404,20 @@ interface EditorAPI {
    */
   setLineNumbers(buffer_id: number, enabled: boolean): boolean;
   /**
+   * Add a virtual line above or below a source line
+   * @param buffer_id - The buffer ID
+   * @param position - Byte position to anchor the virtual line to
+   * @param text - The text content of the virtual line
+   * @param r - Red color component (0-255)
+   * @param g - Green color component (0-255)
+   * @param b - Blue color component (0-255)
+   * @param above - Whether to insert above (true) or below (false) the line
+   * @param namespace - Namespace for bulk removal (e.g., "git-blame")
+   * @param priority - Priority for ordering multiple lines at same position
+   * @returns true if virtual line was added
+   */
+  addVirtualLine(buffer_id: number, position: number, text: string, r: number, g: number, b: number, above: boolean, namespace: string, priority: number): boolean;
+  /**
    * Submit a transformed view stream for a viewport
    * @param buffer_id - Buffer to apply the transform to
    * @param start - Viewport start byte
@@ -580,6 +594,13 @@ interface EditorAPI {
    * @returns true if virtual texts were cleared
    */
   clearVirtualTexts(buffer_id: number): boolean;
+  /**
+   * Clear all virtual texts in a namespace
+   * @param buffer_id - The buffer ID
+   * @param namespace - The namespace to clear (e.g., "git-blame")
+   * @returns true if namespace was cleared
+   */
+  clearVirtualTextNamespace(buffer_id: number, namespace: string): boolean;
   /**
    * Force a refresh of line display for a buffer
    * @param buffer_id - The buffer ID

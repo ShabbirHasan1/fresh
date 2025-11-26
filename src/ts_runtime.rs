@@ -582,6 +582,72 @@ fn op_fresh_clear_virtual_texts(state: &mut OpState, buffer_id: u32) -> bool {
     false
 }
 
+/// Add a virtual line above or below a source line
+/// @param buffer_id - The buffer ID
+/// @param position - Byte position to anchor the virtual line to
+/// @param text - The text content of the virtual line
+/// @param r - Red color component (0-255)
+/// @param g - Green color component (0-255)
+/// @param b - Blue color component (0-255)
+/// @param above - Whether to insert above (true) or below (false) the line
+/// @param namespace - Namespace for bulk removal (e.g., "git-blame")
+/// @param priority - Priority for ordering multiple lines at same position
+/// @returns true if virtual line was added
+#[op2(fast)]
+#[allow(clippy::too_many_arguments)]
+fn op_fresh_add_virtual_line(
+    state: &mut OpState,
+    buffer_id: u32,
+    position: u32,
+    #[string] text: String,
+    r: u8,
+    g: u8,
+    b: u8,
+    above: bool,
+    #[string] namespace: String,
+    priority: i32,
+) -> bool {
+    if let Some(runtime_state) = state.try_borrow::<Rc<RefCell<TsRuntimeState>>>() {
+        let runtime_state = runtime_state.borrow();
+        let result = runtime_state
+            .command_sender
+            .send(PluginCommand::AddVirtualLine {
+                buffer_id: BufferId(buffer_id as usize),
+                position: position as usize,
+                text,
+                color: (r, g, b),
+                above,
+                namespace,
+                priority,
+            });
+        return result.is_ok();
+    }
+    false
+}
+
+/// Clear all virtual texts in a namespace
+/// @param buffer_id - The buffer ID
+/// @param namespace - The namespace to clear (e.g., "git-blame")
+/// @returns true if namespace was cleared
+#[op2(fast)]
+fn op_fresh_clear_virtual_text_namespace(
+    state: &mut OpState,
+    buffer_id: u32,
+    #[string] namespace: String,
+) -> bool {
+    if let Some(runtime_state) = state.try_borrow::<Rc<RefCell<TsRuntimeState>>>() {
+        let runtime_state = runtime_state.borrow();
+        let result = runtime_state
+            .command_sender
+            .send(PluginCommand::ClearVirtualTextNamespace {
+                buffer_id: BufferId(buffer_id as usize),
+                namespace,
+            });
+        return result.is_ok();
+    }
+    false
+}
+
 /// Force a refresh of line display for a buffer
 /// @param buffer_id - The buffer ID
 /// @returns true if refresh was triggered
@@ -2209,6 +2275,8 @@ extension!(
         op_fresh_remove_virtual_text,
         op_fresh_remove_virtual_texts_by_prefix,
         op_fresh_clear_virtual_texts,
+        op_fresh_add_virtual_line,
+        op_fresh_clear_virtual_text_namespace,
         op_fresh_submit_view_transform,
         op_fresh_clear_view_transform,
         op_fresh_refresh_lines,
@@ -2396,6 +2464,14 @@ impl TypeScriptRuntime {
                     },
                     clearVirtualTexts(bufferId) {
                         return core.ops.op_fresh_clear_virtual_texts(bufferId);
+                    },
+
+                    // Virtual lines (full lines above/below source lines - persistent state model)
+                    addVirtualLine(bufferId, position, text, r, g, b, above, namespace, priority = 0) {
+                        return core.ops.op_fresh_add_virtual_line(bufferId, position, text, r, g, b, above, namespace, priority);
+                    },
+                    clearVirtualTextNamespace(bufferId, namespace) {
+                        return core.ops.op_fresh_clear_virtual_text_namespace(bufferId, namespace);
                     },
 
                     // View transforms (for compose mode)

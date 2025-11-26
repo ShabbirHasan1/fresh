@@ -570,6 +570,28 @@ setLineNumbers(buffer_id: number, enabled: boolean): boolean
 | `buffer_id` | `number` | The buffer ID |
 | `enabled` | `boolean` | Whether to show line numbers |
 
+#### `addVirtualLine`
+
+Add a virtual line above or below a source line
+
+```typescript
+addVirtualLine(buffer_id: number, position: number, text: string, r: number, g: number, b: number, above: boolean, namespace: string, priority: number): boolean
+```
+
+**Parameters:**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `buffer_id` | `number` | The buffer ID |
+| `position` | `number` | Byte position to anchor the virtual line to |
+| `text` | `string` | The text content of the virtual line |
+| `r` | `number` | Red color component (0-255) |
+| `g` | `number` | Green color component (0-255) |
+| `b` | `number` | uffer_id - The buffer ID |
+| `above` | `boolean` | Whether to insert above (true) or below (false) the line |
+| `namespace` | `string` | Namespace for bulk removal (e.g., "git-blame") |
+| `priority` | `number` | Priority for ordering multiple lines at same position |
+
 #### `submitViewTransform`
 
 Submit a transformed view stream for a viewport
@@ -909,6 +931,21 @@ clearVirtualTexts(buffer_id: number): boolean
 | Name | Type | Description |
 |------|------|-------------|
 | `buffer_id` | `number` | The buffer ID |
+
+#### `clearVirtualTextNamespace`
+
+Clear all virtual texts in a namespace
+
+```typescript
+clearVirtualTextNamespace(buffer_id: number, namespace: string): boolean
+```
+
+**Parameters:**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `buffer_id` | `number` | The buffer ID |
+| `namespace` | `string` | The namespace to clear (e.g., "git-blame") |
 
 #### `refreshLines`
 

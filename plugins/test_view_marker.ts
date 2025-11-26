@@ -1,15 +1,18 @@
 /// <reference path="../types/fresh.d.ts" />
 
 /**
- * Minimal test plugin for view transform debugging.
+ * Test plugin for virtual lines (Emacs-like persistent state model).
  *
- * This plugin simply injects a header line at the very start of a buffer
- * to test if view transforms work correctly when startByte === 0.
+ * This plugin demonstrates the virtual lines API by injecting header lines
+ * above content. Virtual lines are added to persistent state and rendered
+ * synchronously from memory - no view transform hooks needed.
  */
 
 let activeBufferId: number | null = null;
 const padLinesByBuffer = new Map<number, number>();
 const interleavedModeByBuffer = new Map<number, boolean>();
+
+const TEST_NAMESPACE = "test-view-marker";
 
 // Define a simple mode for testing
 editor.defineMode(
@@ -22,148 +25,77 @@ editor.defineMode(
 );
 
 /**
- * View transform hook - injects a header at byte 0
+ * Add virtual header lines for a buffer
  */
-globalThis.onTestViewMarkerTransform = function(args: {
-  buffer_id: number;
-  split_id: number;
-  viewport_start: number;
-  viewport_end: number;
-  tokens: ViewTokenWire[];
-}): void {
-  // Only transform our test buffer
-  if (args.buffer_id !== activeBufferId || activeBufferId === null) {
-    return;
-  }
+function addTestHeaders(bufferId: number): void {
+  const padLines = padLinesByBuffer.get(bufferId) ?? 0;
+  const interleavedMode = interleavedModeByBuffer.get(bufferId) ?? false;
 
-  editor.debug(`[test_view_marker] transform request: viewport=${args.viewport_start}-${args.viewport_end}, tokens=${args.tokens.length}`);
-  const padLines = padLinesByBuffer.get(args.buffer_id) ?? 0;
-  const interleavedMode = interleavedModeByBuffer.get(args.buffer_id) ?? false;
+  // Clear existing headers first
+  editor.clearVirtualTextNamespace(bufferId, TEST_NAMESPACE);
 
-  // Log first few tokens for debugging
-  for (let i = 0; i < Math.min(3, args.tokens.length); i++) {
-    const t = args.tokens[i];
-    editor.debug(`[test_view_marker] IN[${i}]: offset=${t.source_offset}, kind=${JSON.stringify(t.kind)}`);
-  }
+  if (interleavedMode) {
+    // Interleaved mode: add a header above each source line
+    const content = "Line 1\nLine 2\nLine 3\n";
+    let byteOffset = 0;
+    let lineNum = 1;
 
-  const transformed: ViewTokenWire[] = [];
-  let headerInjected = false;
+    for (const line of content.split('\n')) {
+      if (line.length === 0 && byteOffset >= content.length - 1) break;
 
-  // Process tokens and inject header at byte 0
-  for (const token of args.tokens) {
-    const byteOffset = token.source_offset;
+      // Add header above this line
+      editor.addVirtualLine(
+        bufferId,
+        byteOffset,
+        `── Header before line ${lineNum} ──`,
+        200, 200, 100,  // Yellow-ish
+        true,           // above
+        TEST_NAMESPACE,
+        0
+      );
 
-    // Inject header before the first token
-    // - at byte 0 for non-interleaved mode
-    // - always for interleaved mode (before any content)
-    // Note: byteOffset can be null for tokens without source mapping
-    const isAtByteZero = byteOffset === 0;
-    if (!headerInjected && (isAtByteZero || interleavedMode)) {
-      const headerText = interleavedMode ? "== INTERLEAVED HEADER ==" : "== HEADER AT BYTE 0 ==";
-      editor.debug(`[test_view_marker] interleavedMode=${interleavedMode}, injecting header: ${headerText}`);
-
-      // Add header token (source_offset: null = no line number)
-      transformed.push({
-        source_offset: null,
-        kind: { Text: headerText },
-        style: {
-          fg: [255, 255, 0],   // Yellow
-          bg: [50, 50, 50],    // Dark gray
-          bold: true,
-          italic: false,
-        },
-      });
-
-      // Add newline after header
-      transformed.push({
-        source_offset: null,
-        kind: "Newline",
-        style: {
-          fg: [255, 255, 255],
-          bg: null,
-          bold: false,
-          italic: false,
-        },
-      });
-
-      headerInjected = true;
-
-      // Optionally inject many virtual pad lines (for scroll stress tests)
-      for (let i = 0; i < padLines; i++) {
-        const text = `Virtual pad ${i + 1}`;
-        transformed.push({
-          source_offset: null,
-          kind: { Text: text },
-          style: {
-            fg: [180, 180, 180],
-            bg: null,
-            bold: false,
-            italic: false,
-          },
-        });
-        transformed.push({
-          source_offset: null,
-          kind: "Newline",
-          style: {
-            fg: [255, 255, 255],
-            bg: null,
-            bold: false,
-            italic: false,
-          },
-        });
-      }
+      byteOffset += line.length + 1; // +1 for newline
+      lineNum++;
     }
 
-    // Pass through the original token
-    transformed.push(token);
+    // Also add initial header at byte 0
+    editor.addVirtualLine(
+      bufferId,
+      0,
+      "== INTERLEAVED HEADER ==",
+      255, 255, 0,  // Yellow
+      true,         // above
+      TEST_NAMESPACE,
+      -1  // lower priority to appear first
+    );
+  } else {
+    // Simple mode: just one header at byte 0
+    editor.addVirtualLine(
+      bufferId,
+      0,
+      "== HEADER AT BYTE 0 ==",
+      255, 255, 0,  // Yellow
+      true,         // above
+      TEST_NAMESPACE,
+      0
+    );
 
-    // In interleaved mode, inject a header after each Newline token
-    if (interleavedMode && token.kind === "Newline") {
-      const lineNum = transformed.filter(t => t.kind === "Newline").length;
-      transformed.push({
-        source_offset: null,
-        kind: { Text: `── Header before line ${lineNum + 1} ──` },
-        style: {
-          fg: [200, 200, 100],
-          bg: [40, 40, 40],
-          bold: true,
-          italic: false,
-        },
-      });
-      transformed.push({
-        source_offset: null,
-        kind: "Newline",
-        style: {
-          fg: [255, 255, 255],
-          bg: null,
-          bold: false,
-          italic: false,
-        },
-      });
+    // Optionally add many pad lines (for scroll stress tests)
+    for (let i = 0; i < padLines; i++) {
+      editor.addVirtualLine(
+        bufferId,
+        0,
+        `Virtual pad ${i + 1}`,
+        180, 180, 180,  // Light gray
+        true,           // above
+        TEST_NAMESPACE,
+        i + 1  // increasing priority so they appear in order after header
+      );
     }
   }
 
-  // Log first few output tokens
-  for (let i = 0; i < Math.min(5, transformed.length); i++) {
-    const t = transformed[i];
-    const kindStr = typeof t.kind === 'string' ? t.kind : `Text:"${(t.kind as {Text:string}).Text.substring(0, 30)}"`;
-    editor.debug(`[test_view_marker] OUT[${i}]: offset=${t.source_offset}, kind=${kindStr}`);
-  }
-
-  // Submit the transformed view
-  editor.debug(`[test_view_marker] submitting: ${args.tokens.length} -> ${transformed.length} tokens`);
-  editor.submitViewTransform(
-    args.buffer_id,
-    args.split_id,
-    args.viewport_start,
-    args.viewport_end,
-    transformed,
-    null
-  );
-};
-
-// Register for the view transform hook
-editor.on("view_transform_request", "onTestViewMarkerTransform");
+  editor.debug(`[test_view_marker] added ${interleavedMode ? 'interleaved' : 'simple'} headers with ${padLines} pad lines`);
+}
 
 async function open_test_view_marker(padLines: number, name: string): Promise<void> {
   const splitId = editor.getActiveSplitId();
@@ -193,6 +125,11 @@ async function open_test_view_marker(padLines: number, name: string): Promise<vo
   if (bufferId !== null) {
     activeBufferId = bufferId;
     padLinesByBuffer.set(bufferId, padLines);
+    interleavedModeByBuffer.set(bufferId, false);
+
+    // Add virtual header lines
+    addTestHeaders(bufferId);
+
     editor.debug(
       `[test_view_marker] buffer created with id ${bufferId}, padLines=${padLines}`
     );
@@ -230,6 +167,10 @@ async function open_test_view_marker_interleaved(name: string): Promise<void> {
     activeBufferId = bufferId;
     padLinesByBuffer.set(bufferId, 0);
     interleavedModeByBuffer.set(bufferId, true);
+
+    // Add virtual header lines in interleaved mode
+    addTestHeaders(bufferId);
+
     editor.debug(`[test_view_marker] interleaved buffer created with id ${bufferId}`);
     editor.setStatus("Test view marker (interleaved) active - press q to close");
   } else {
@@ -255,6 +196,9 @@ globalThis.show_test_view_marker_interleaved = async function(): Promise<void> {
  */
 globalThis.test_view_marker_close = function(): void {
   if (activeBufferId !== null) {
+    // Clear virtual lines before closing
+    editor.clearVirtualTextNamespace(activeBufferId, TEST_NAMESPACE);
+
     editor.closeBuffer(activeBufferId);
     padLinesByBuffer.delete(activeBufferId);
     interleavedModeByBuffer.delete(activeBufferId);
@@ -266,23 +210,23 @@ globalThis.test_view_marker_close = function(): void {
 // Register command
 editor.registerCommand(
   "Test View Marker",
-  "Test view transform with header at byte 0",
+  "Test virtual lines with header at byte 0",
   "show_test_view_marker",
   "normal"
 );
 
 editor.registerCommand(
   "Test View Marker (Many Virtual Lines)",
-  "Test view transform with many virtual header lines",
+  "Test virtual lines with many header lines",
   "show_test_view_marker_many_virtual_lines",
   "normal"
 );
 
 editor.registerCommand(
   "Test View Marker (Interleaved)",
-  "Test view transform with headers between each source line",
+  "Test virtual lines with headers between each source line",
   "show_test_view_marker_interleaved",
   "normal"
 );
 
-editor.setStatus("Test View Marker plugin loaded");
+editor.setStatus("Test View Marker plugin loaded (virtual lines)");
