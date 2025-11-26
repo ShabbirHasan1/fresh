@@ -576,3 +576,74 @@ fn test_load_edit_save_flow_small_and_large_files() {
         assert_eq!(saved_content.len(), 501, "Should be 501 bytes after edit");
     }
 }
+
+/// Test that saving a large file with unloaded regions preserves all data
+/// This is a regression test for a bug where save() would silently produce
+/// an empty file if any buffer regions were still unloaded.
+#[test]
+fn test_large_file_save_preserves_unloaded_regions() {
+    use fresh::model::buffer::TextBuffer;
+    use std::fs;
+    use tempfile::TempDir;
+
+    let temp_dir = TempDir::new().unwrap();
+    let file_path = temp_dir.path().join("large_save_test.txt");
+
+    // Create a file larger than the threshold
+    // Use a simple pattern so we can verify integrity: line numbers
+    let mut content = String::new();
+    for i in 0..1000 {
+        content.push_str(&format!("Line {:04}: This is test content for line {}\n", i, i));
+    }
+    let original_len = content.len();
+    fs::write(&file_path, &content).unwrap();
+
+    // Open with a threshold that will trigger large file mode
+    // The file is ~50KB, use 1KB threshold
+    let threshold = 1024;
+    let mut buffer = TextBuffer::load_from_file(&file_path, threshold).unwrap();
+
+    // Verify we're in large file mode (line_count returns None for large files)
+    assert!(
+        buffer.line_count().is_none(),
+        "Should be in large file mode (no line indexing)"
+    );
+
+    // Make a small edit at the beginning - this should only load a small region
+    buffer.insert_bytes(0, b"EDITED: ".to_vec());
+
+    // Save the file
+    buffer.save().unwrap();
+
+    // Read back and verify
+    let saved_content = fs::read_to_string(&file_path).unwrap();
+
+    // The file should have all original content plus our edit
+    let expected_len = original_len + 8; // "EDITED: " is 8 bytes
+    assert_eq!(
+        saved_content.len(),
+        expected_len,
+        "Saved file should preserve all content. Got {} bytes, expected {} bytes. \
+         If saved file is much smaller, unloaded regions were lost!",
+        saved_content.len(),
+        expected_len
+    );
+
+    // Verify the edit is there
+    assert!(
+        saved_content.starts_with("EDITED: Line 0000"),
+        "Should start with our edit"
+    );
+
+    // Verify content from the END of the file is preserved (this would be unloaded)
+    assert!(
+        saved_content.contains("Line 0999"),
+        "Should preserve content from end of file (Line 0999)"
+    );
+
+    // Verify content from the MIDDLE of the file is preserved
+    assert!(
+        saved_content.contains("Line 0500"),
+        "Should preserve content from middle of file (Line 0500)"
+    );
+}

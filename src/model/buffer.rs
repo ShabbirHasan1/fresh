@@ -1,11 +1,12 @@
 /// Text buffer that uses PieceTree with integrated line tracking
 /// Architecture where the tree is the single source of truth for text and line information
 use crate::model::piece_tree::{
-    BufferLocation, Cursor, PieceInfo, PieceRangeIter, PieceTree, Position, StringBuffer, TreeStats,
+    BufferData, BufferLocation, Cursor, PieceInfo, PieceRangeIter, PieceTree, Position,
+    StringBuffer, TreeStats,
 };
 use anyhow::{Context, Result};
 use regex::bytes::Regex;
-use std::io::{self, Read, Write};
+use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 
@@ -224,11 +225,88 @@ impl TextBuffer {
     }
 
     /// Save the buffer to a specific file
+    ///
+    /// This uses incremental saving for large files: instead of loading the entire
+    /// file into memory, it streams unmodified regions directly from the source file
+    /// and only keeps edited regions in memory.
     pub fn save_to_file<P: AsRef<Path>>(&mut self, path: P) -> io::Result<()> {
-        let mut file = std::fs::File::create(path.as_ref())?;
-        let content = self.get_all_text();
-        file.write_all(&content)?;
-        self.file_path = Some(path.as_ref().to_path_buf());
+        let dest_path = path.as_ref();
+        let total = self.total_bytes();
+
+        if total == 0 {
+            // Empty file - just create it
+            std::fs::File::create(dest_path)?;
+            self.file_path = Some(dest_path.to_path_buf());
+            self.modified = false;
+            return Ok(());
+        }
+
+        // Use a temp file to avoid corrupting the original if something goes wrong
+        let temp_path = dest_path.with_extension("tmp");
+        let mut out_file = std::fs::File::create(&temp_path)?;
+
+        // Cache for open source files (for streaming unloaded regions)
+        let mut source_file_cache: Option<(PathBuf, std::fs::File)> = None;
+
+        // Iterate through all pieces and write them
+        for piece_view in self.piece_tree.iter_pieces_in_range(0, total) {
+            let buffer_id = piece_view.location.buffer_id();
+            let buffer = self.buffers.get(buffer_id).ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("Buffer {} not found", buffer_id),
+                )
+            })?;
+
+            match &buffer.data {
+                BufferData::Loaded { data, .. } => {
+                    // Write from memory
+                    let start = piece_view.buffer_offset;
+                    let end = start + piece_view.bytes;
+                    out_file.write_all(&data[start..end])?;
+                }
+                BufferData::Unloaded {
+                    file_path,
+                    file_offset,
+                    ..
+                } => {
+                    // Stream from source file without loading into memory
+                    let source_file = match &mut source_file_cache {
+                        Some((cached_path, file)) if cached_path == file_path => file,
+                        _ => {
+                            let file = std::fs::File::open(file_path)?;
+                            source_file_cache = Some((file_path.clone(), file));
+                            &mut source_file_cache.as_mut().unwrap().1
+                        }
+                    };
+
+                    // Seek to the right position in source file
+                    let read_offset = *file_offset + piece_view.buffer_offset;
+                    source_file.seek(SeekFrom::Start(read_offset as u64))?;
+
+                    // Stream in chunks to avoid large memory allocation
+                    const STREAM_CHUNK_SIZE: usize = 64 * 1024; // 64KB chunks
+                    let mut remaining = piece_view.bytes;
+                    let mut chunk_buf = vec![0u8; STREAM_CHUNK_SIZE.min(remaining)];
+
+                    while remaining > 0 {
+                        let to_read = remaining.min(chunk_buf.len());
+                        source_file.read_exact(&mut chunk_buf[..to_read])?;
+                        out_file.write_all(&chunk_buf[..to_read])?;
+                        remaining -= to_read;
+                    }
+                }
+            }
+        }
+
+        // Ensure all data is written
+        out_file.sync_all()?;
+        drop(out_file);
+
+        // Atomically replace the original file
+        std::fs::rename(&temp_path, dest_path)?;
+
+        self.file_path = Some(dest_path.to_path_buf());
         self.modified = false;
         Ok(())
     }
@@ -2298,6 +2376,122 @@ mod tests {
 
                 offset += bytes_to_read;
             }
+        }
+
+        /// Test that save_to_file works correctly with partially loaded large files
+        /// This is a regression test for a bug where saving would silently produce
+        /// an empty file if any buffer regions were still unloaded.
+        #[test]
+        fn test_large_file_incremental_save() {
+            let temp_dir = TempDir::new().unwrap();
+            let file_path = temp_dir.path().join("large_save_test.txt");
+
+            // Create a small file but use tiny threshold to trigger large file mode
+            let chunk_size = 1000; // 1KB chunks
+            let file_size = chunk_size * 2; // 2KB total
+
+            let mut file = File::create(&file_path).unwrap();
+            // First half: 'A' repeated
+            file.write_all(&vec![b'A'; chunk_size]).unwrap();
+            // Second half: 'B' repeated
+            file.write_all(&vec![b'B'; chunk_size]).unwrap();
+            file.flush().unwrap();
+
+            // Load as large file (threshold of 100 bytes)
+            let mut buffer = TextBuffer::load_from_file(&file_path, 100).unwrap();
+            assert!(buffer.large_file);
+            assert_eq!(buffer.total_bytes(), file_size);
+
+            // Only read from the beginning - this loads only a small region
+            let first_bytes = buffer.get_text_range_mut(0, 50).unwrap();
+            assert!(first_bytes.iter().all(|&b| b == b'A'));
+
+            // Make an edit at the beginning
+            buffer.insert_bytes(0, b"PREFIX_".to_vec());
+
+            // Save to a new file (to avoid issues with reading while writing same file)
+            let save_path = temp_dir.path().join("saved.txt");
+            buffer.save_to_file(&save_path).unwrap();
+
+            // Verify the saved file
+            let saved_content = std::fs::read(&save_path).unwrap();
+
+            // Check total size: original + "PREFIX_" (7 bytes)
+            assert_eq!(
+                saved_content.len(),
+                file_size + 7,
+                "Saved file should be {} bytes, got {}",
+                file_size + 7,
+                saved_content.len()
+            );
+
+            // Check prefix
+            assert_eq!(
+                &saved_content[..7],
+                b"PREFIX_",
+                "Should start with PREFIX_"
+            );
+
+            // Check that first chunk (after prefix) contains A's
+            assert!(
+                saved_content[7..100].iter().all(|&b| b == b'A'),
+                "First chunk after prefix should be A's"
+            );
+
+            // Check that second chunk contains B's (this was unloaded!)
+            let second_chunk_start = 7 + chunk_size;
+            assert!(
+                saved_content[second_chunk_start..second_chunk_start + 100]
+                    .iter()
+                    .all(|&b| b == b'B'),
+                "Second chunk should be B's (was unloaded, should be preserved)"
+            );
+        }
+
+        /// Test that save_to_file handles edits at multiple positions
+        #[test]
+        fn test_large_file_save_with_multiple_edits() {
+            let temp_dir = TempDir::new().unwrap();
+            let file_path = temp_dir.path().join("multi_edit.txt");
+
+            // Create a ~5KB file with numbered lines for easier verification
+            let mut content = Vec::new();
+            for i in 0..100 {
+                content.extend_from_slice(format!("Line {:04}: padding to make it longer\n", i).as_bytes());
+            }
+            let original_len = content.len();
+            std::fs::write(&file_path, &content).unwrap();
+
+            // Load as large file (threshold of 500 bytes)
+            let mut buffer = TextBuffer::load_from_file(&file_path, 500).unwrap();
+            assert!(buffer.line_count().is_none(), "Should be in large file mode");
+
+            // Edit at the beginning
+            buffer.insert_bytes(0, b"[START]".to_vec());
+
+            // Edit somewhere in the middle (load that region first)
+            let mid_offset = original_len / 2;
+            let _mid_bytes = buffer.get_text_range_mut(mid_offset + 7, 10).unwrap(); // +7 for our insert
+            buffer.insert_bytes(mid_offset + 7, b"[MIDDLE]".to_vec());
+
+            // Save
+            let save_path = temp_dir.path().join("multi_edit_saved.txt");
+            buffer.save_to_file(&save_path).unwrap();
+
+            // Verify
+            let saved = std::fs::read_to_string(&save_path).unwrap();
+
+            assert!(saved.starts_with("[START]Line 0000"), "Should start with our edit");
+            assert!(saved.contains("[MIDDLE]"), "Should contain middle edit");
+            assert!(saved.contains("Line 0099"), "Should preserve end of file");
+
+            // Verify total length
+            let expected_len = original_len + 7 + 8; // [START] + [MIDDLE]
+            assert_eq!(
+                saved.len(),
+                expected_len,
+                "Length should be original + edits"
+            );
         }
     }
 
