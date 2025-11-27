@@ -508,7 +508,10 @@ fn test_large_file_save_preserves_unloaded_regions() {
     // Use a simple pattern so we can verify integrity: line numbers
     let mut content = String::new();
     for i in 0..1000 {
-        content.push_str(&format!("Line {:04}: This is test content for line {}\n", i, i));
+        content.push_str(&format!(
+            "Line {:04}: This is test content for line {}\n",
+            i, i
+        ));
     }
     let original_len = content.len();
     fs::write(&file_path, &content).unwrap();

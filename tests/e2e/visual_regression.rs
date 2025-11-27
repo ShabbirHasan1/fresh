@@ -54,8 +54,16 @@ fn long_function() {
 "#,
     )
     .unwrap();
-    fs::write(project_dir.join("README.md"), "# Test Project\n\nA test project for visual regression.\n").unwrap();
-    fs::write(project_dir.join("Cargo.toml"), "[package]\nname = \"test\"\nversion = \"0.1.0\"\n").unwrap();
+    fs::write(
+        project_dir.join("README.md"),
+        "# Test Project\n\nA test project for visual regression.\n",
+    )
+    .unwrap();
+    fs::write(
+        project_dir.join("Cargo.toml"),
+        "[package]\nname = \"test\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
 
     let mut flow = VisualFlow::new(
         "Comprehensive UI A",
@@ -74,17 +82,18 @@ fn long_function() {
     harness.render().unwrap();
 
     // Wait for file explorer to load
-    let _ = harness
-        .wait_for_async(
-            |h| h.screen_to_string().contains("File explorer ready"),
-            2000,
-        );
+    let _ = harness.wait_for_async(
+        |h| h.screen_to_string().contains("File explorer ready"),
+        2000,
+    );
     harness.render().unwrap();
 
     // Expand the src directory in the explorer
     harness.send_key(KeyCode::Down, KeyModifiers::NONE).unwrap();
     harness.render().unwrap();
-    harness.send_key(KeyCode::Enter, KeyModifiers::NONE).unwrap();
+    harness
+        .send_key(KeyCode::Enter, KeyModifiers::NONE)
+        .unwrap();
     harness.render().unwrap();
 
     // Focus back on the editor pane
@@ -107,8 +116,12 @@ fn long_function() {
         });
 
         // Add margin indicators
-        state.margins.set_diagnostic_indicator(10, "●".to_string(), Color::Red);
-        state.margins.set_diagnostic_indicator(11, "●".to_string(), Color::Yellow);
+        state
+            .margins
+            .set_diagnostic_indicator(10, "●".to_string(), Color::Red);
+        state
+            .margins
+            .set_diagnostic_indicator(11, "●".to_string(), Color::Yellow);
     }
 
     // Scroll down a bit to show scrolled state
@@ -119,13 +132,19 @@ fn long_function() {
 
     // Create multiple cursors by selecting "hello" occurrences
     // First, search for a word that appears multiple times
-    harness.send_key(KeyCode::Char('w'), KeyModifiers::CONTROL).unwrap();
+    harness
+        .send_key(KeyCode::Char('w'), KeyModifiers::CONTROL)
+        .unwrap();
     harness.render().unwrap();
 
     // Add next occurrence (Ctrl+D)
-    harness.send_key(KeyCode::Char('d'), KeyModifiers::CONTROL).unwrap();
+    harness
+        .send_key(KeyCode::Char('d'), KeyModifiers::CONTROL)
+        .unwrap();
     harness.render().unwrap();
-    harness.send_key(KeyCode::Char('d'), KeyModifiers::CONTROL).unwrap();
+    harness
+        .send_key(KeyCode::Char('d'), KeyModifiers::CONTROL)
+        .unwrap();
     harness.render().unwrap();
 
     // Capture the comprehensive state
@@ -197,7 +216,9 @@ fn helper() {
         .unwrap();
     harness.render().unwrap();
     harness.type_text("split horiz").unwrap();
-    harness.send_key(KeyCode::Enter, KeyModifiers::NONE).unwrap();
+    harness
+        .send_key(KeyCode::Enter, KeyModifiers::NONE)
+        .unwrap();
     harness.render().unwrap();
 
     // Open second file in the new split
@@ -205,7 +226,9 @@ fn helper() {
     harness.render().unwrap();
 
     // Go back to first pane and scroll right to show horizontal scroll
-    harness.send_key(KeyCode::Char('k'), KeyModifiers::CONTROL).unwrap();
+    harness
+        .send_key(KeyCode::Char('k'), KeyModifiers::CONTROL)
+        .unwrap();
     harness.render().unwrap();
 
     // Move to the long line (line 3)
@@ -282,22 +305,40 @@ fn test_lsp_rename_undo_restores_all() {
         vec![
             TextEdit {
                 range: Range {
-                    start: Position { line: 0, character: 13 },
-                    end: Position { line: 0, character: 18 },
+                    start: Position {
+                        line: 0,
+                        character: 13,
+                    },
+                    end: Position {
+                        line: 0,
+                        character: 18,
+                    },
                 },
                 new_text: "amount".to_string(),
             },
             TextEdit {
                 range: Range {
-                    start: Position { line: 1, character: 17 },
-                    end: Position { line: 1, character: 22 },
+                    start: Position {
+                        line: 1,
+                        character: 17,
+                    },
+                    end: Position {
+                        line: 1,
+                        character: 22,
+                    },
                 },
                 new_text: "amount".to_string(),
             },
             TextEdit {
                 range: Range {
-                    start: Position { line: 2, character: 28 },
-                    end: Position { line: 2, character: 33 },
+                    start: Position {
+                        line: 2,
+                        character: 28,
+                    },
+                    end: Position {
+                        line: 2,
+                        character: 33,
+                    },
                 },
                 new_text: "amount".to_string(),
             },
@@ -377,22 +418,86 @@ fn test_multi_language_highlighting() {
 
     // All supported languages with their test files
     let test_files = [
-        ("Rust", "hello.rs", include_str!("../fixtures/syntax_highlighting/hello.rs")),
-        ("Python", "hello.py", include_str!("../fixtures/syntax_highlighting/hello.py")),
-        ("JavaScript", "hello.js", include_str!("../fixtures/syntax_highlighting/hello.js")),
-        ("TypeScript", "hello.ts", include_str!("../fixtures/syntax_highlighting/hello.ts")),
-        ("HTML", "hello.html", include_str!("../fixtures/syntax_highlighting/hello.html")),
-        ("CSS", "hello.css", include_str!("../fixtures/syntax_highlighting/hello.css")),
-        ("C", "hello.c", include_str!("../fixtures/syntax_highlighting/hello.c")),
-        ("C++", "hello.cpp", include_str!("../fixtures/syntax_highlighting/hello.cpp")),
-        ("Go", "hello.go", include_str!("../fixtures/syntax_highlighting/hello.go")),
-        ("JSON", "hello.json", include_str!("../fixtures/syntax_highlighting/hello.json")),
-        ("Java", "hello.java", include_str!("../fixtures/syntax_highlighting/hello.java")),
-        ("C#", "hello.cs", include_str!("../fixtures/syntax_highlighting/hello.cs")),
-        ("PHP", "hello.php", include_str!("../fixtures/syntax_highlighting/hello.php")),
-        ("Ruby", "hello.rb", include_str!("../fixtures/syntax_highlighting/hello.rb")),
-        ("Bash", "hello.sh", include_str!("../fixtures/syntax_highlighting/hello.sh")),
-        ("Lua", "hello.lua", include_str!("../fixtures/syntax_highlighting/hello.lua")),
+        (
+            "Rust",
+            "hello.rs",
+            include_str!("../fixtures/syntax_highlighting/hello.rs"),
+        ),
+        (
+            "Python",
+            "hello.py",
+            include_str!("../fixtures/syntax_highlighting/hello.py"),
+        ),
+        (
+            "JavaScript",
+            "hello.js",
+            include_str!("../fixtures/syntax_highlighting/hello.js"),
+        ),
+        (
+            "TypeScript",
+            "hello.ts",
+            include_str!("../fixtures/syntax_highlighting/hello.ts"),
+        ),
+        (
+            "HTML",
+            "hello.html",
+            include_str!("../fixtures/syntax_highlighting/hello.html"),
+        ),
+        (
+            "CSS",
+            "hello.css",
+            include_str!("../fixtures/syntax_highlighting/hello.css"),
+        ),
+        (
+            "C",
+            "hello.c",
+            include_str!("../fixtures/syntax_highlighting/hello.c"),
+        ),
+        (
+            "C++",
+            "hello.cpp",
+            include_str!("../fixtures/syntax_highlighting/hello.cpp"),
+        ),
+        (
+            "Go",
+            "hello.go",
+            include_str!("../fixtures/syntax_highlighting/hello.go"),
+        ),
+        (
+            "JSON",
+            "hello.json",
+            include_str!("../fixtures/syntax_highlighting/hello.json"),
+        ),
+        (
+            "Java",
+            "hello.java",
+            include_str!("../fixtures/syntax_highlighting/hello.java"),
+        ),
+        (
+            "C#",
+            "hello.cs",
+            include_str!("../fixtures/syntax_highlighting/hello.cs"),
+        ),
+        (
+            "PHP",
+            "hello.php",
+            include_str!("../fixtures/syntax_highlighting/hello.php"),
+        ),
+        (
+            "Ruby",
+            "hello.rb",
+            include_str!("../fixtures/syntax_highlighting/hello.rb"),
+        ),
+        (
+            "Bash",
+            "hello.sh",
+            include_str!("../fixtures/syntax_highlighting/hello.sh"),
+        ),
+        (
+            "Lua",
+            "hello.lua",
+            include_str!("../fixtures/syntax_highlighting/hello.lua"),
+        ),
     ];
 
     // Create all test files

@@ -1190,10 +1190,7 @@ async fn op_fresh_kill_process(
 /// @returns true if process is running, false if not found or exited
 #[op2(fast)]
 #[allow(clippy::result_unit_err)]
-fn op_fresh_is_process_running(
-    state: &mut OpState,
-    #[bigint] process_id: u64,
-) -> bool {
+fn op_fresh_is_process_running(state: &mut OpState, #[bigint] process_id: u64) -> bool {
     if let Some(runtime_state) = state.try_borrow::<Rc<RefCell<TsRuntimeState>>>() {
         let runtime_state = runtime_state.borrow();
         let mut processes = runtime_state.background_processes.borrow_mut();
@@ -3506,7 +3503,9 @@ impl TypeScriptPluginManager {
                             ViewTokenWireKind::Newline => serde_json::json!("Newline"),
                             ViewTokenWireKind::Space => serde_json::json!("Space"),
                             ViewTokenWireKind::Break => serde_json::json!("Break"),
-                            ViewTokenWireKind::BinaryByte(b) => serde_json::json!({ "BinaryByte": b }),
+                            ViewTokenWireKind::BinaryByte(b) => {
+                                serde_json::json!({ "BinaryByte": b })
+                            }
                         };
                         serde_json::json!({
                             "source_offset": token.source_offset,

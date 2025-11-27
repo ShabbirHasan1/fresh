@@ -184,7 +184,11 @@ impl EditorTestHarness {
     }
 
     /// Create a test harness with a temporary project directory and custom config
-    pub fn with_temp_project_and_config(width: u16, height: u16, config: Config) -> io::Result<Self> {
+    pub fn with_temp_project_and_config(
+        width: u16,
+        height: u16,
+        config: Config,
+    ) -> io::Result<Self> {
         let temp_dir = TempDir::new()?;
 
         // Create a subdirectory with a constant name for deterministic paths

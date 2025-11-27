@@ -284,23 +284,22 @@ pub fn action_to_events(
                             // and we pressed Enter to get indent, then typed the closing delimiter
                             if is_closing_delimiter && only_spaces && insert_position > line_start {
                                 // Calculate correct indent
-                                let correct_indent =
-                                    if let Some(highlighter) = &state.highlighter {
-                                        let language = highlighter.language();
-                                        state
-                                            .indent_calculator
-                                            .borrow_mut()
-                                            .calculate_dedent_for_delimiter(
-                                                &state.buffer,
-                                                insert_position,
-                                                ch,
-                                                language,
-                                                tab_size,
-                                            )
-                                            .unwrap_or(0)
-                                    } else {
-                                        0
-                                    };
+                                let correct_indent = if let Some(highlighter) = &state.highlighter {
+                                    let language = highlighter.language();
+                                    state
+                                        .indent_calculator
+                                        .borrow_mut()
+                                        .calculate_dedent_for_delimiter(
+                                            &state.buffer,
+                                            insert_position,
+                                            ch,
+                                            language,
+                                            tab_size,
+                                        )
+                                        .unwrap_or(0)
+                                } else {
+                                    0
+                                };
 
                                 let current_indent = insert_position - line_start;
                                 if current_indent != correct_indent {
