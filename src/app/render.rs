@@ -138,12 +138,14 @@ impl Editor {
                     // Fire view_transform_request hook with base tokens
                     // This allows plugins to transform the view (e.g., soft breaks for markdown)
                     let visible_count = split_area.height as usize;
+                    let is_binary = state.buffer.is_binary();
                     let base_tokens =
                         crate::view::ui::split_rendering::SplitRenderer::build_base_tokens_for_hook(
                             &mut state.buffer,
                             state.viewport.top_byte,
                             self.config.editor.estimated_line_length,
                             visible_count,
+                            is_binary,
                         );
                     let viewport_start = state.viewport.top_byte;
                     let viewport_end = base_tokens
@@ -2705,6 +2707,7 @@ impl Editor {
                 lsp_enabled: false,
                 lsp_disabled_reason: Some("Virtual macro buffer".to_string()),
                 read_only: false, // Allow editing for saving
+                binary: false,
             };
             self.buffer_metadata.insert(buffer_id, metadata);
 
@@ -2779,6 +2782,7 @@ impl Editor {
             lsp_enabled: false,
             lsp_disabled_reason: Some("Virtual macro list buffer".to_string()),
             read_only: true,
+            binary: false,
         };
         self.buffer_metadata.insert(buffer_id, metadata);
 

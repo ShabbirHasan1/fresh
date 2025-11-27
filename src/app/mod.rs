@@ -908,14 +908,32 @@ impl Editor {
             new_state
         };
         state.viewport.line_wrap_enabled = self.config.editor.line_wrap;
+
+        // Check if the buffer contains binary content
+        let is_binary = state.buffer.is_binary();
+        if is_binary {
+            // Make binary buffers read-only
+            state.editing_disabled = true;
+            tracing::info!("Detected binary file: {}", path.display());
+        }
+
         self.buffers.insert(buffer_id, state);
         self.event_logs.insert(buffer_id, EventLog::new());
 
         // Create metadata for this buffer
         let mut metadata = BufferMetadata::with_file(path.to_path_buf(), &self.working_dir);
 
+        // Mark binary files in metadata and disable LSP
+        if is_binary {
+            metadata.binary = true;
+            metadata.read_only = true;
+            metadata.disable_lsp("Binary file".to_string());
+        }
+
         // Schedule LSP notification asynchronously to avoid blocking
         // This is especially important for large files
+        // Skip LSP for binary files
+        if !is_binary {
         if let Some(lsp) = &mut self.lsp {
             tracing::debug!("LSP manager available for file: {}", path.display());
             if let Some(language) = detect_language(path) {
@@ -1059,6 +1077,7 @@ impl Editor {
         } else {
             tracing::debug!("No LSP manager available");
         }
+        } // end if !is_binary
 
         // Store metadata for this buffer
         self.buffer_metadata.insert(buffer_id, metadata);
@@ -1083,7 +1102,16 @@ impl Editor {
             .get(&buffer_id)
             .map(|m| m.display_name.clone())
             .unwrap_or_else(|| path.display().to_string());
-        self.status_message = Some(format!("Opened {}", display_name));
+
+        // Show appropriate status message for binary vs regular files
+        if is_binary {
+            self.status_message = Some(format!(
+                "Opened {} [binary file, read-only]",
+                display_name
+            ));
+        } else {
+            self.status_message = Some(format!("Opened {}", display_name));
+        }
 
         // Emit control event
         self.emit_event(

@@ -87,6 +87,10 @@ pub struct BufferMetadata {
 
     /// Whether the buffer is read-only (typically true for virtual buffers)
     pub read_only: bool,
+
+    /// Whether the buffer contains binary content
+    /// Binary buffers are automatically read-only and render unprintable chars as code points
+    pub binary: bool,
 }
 
 impl BufferMetadata {
@@ -132,6 +136,7 @@ impl BufferMetadata {
             lsp_enabled: true,
             lsp_disabled_reason: None,
             read_only: false,
+            binary: false,
         }
     }
 
@@ -164,6 +169,7 @@ impl BufferMetadata {
             lsp_enabled: true,
             lsp_disabled_reason: None,
             read_only: false,
+            binary: false,
         }
     }
 
@@ -180,6 +186,7 @@ impl BufferMetadata {
             lsp_enabled: false, // Virtual buffers don't use LSP
             lsp_disabled_reason: Some("Virtual buffer".to_string()),
             read_only,
+            binary: false,
         }
     }
 

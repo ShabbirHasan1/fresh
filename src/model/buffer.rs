@@ -83,6 +83,10 @@ pub struct TextBuffer {
 
     /// Is this a large file (no line indexing, lazy loading enabled)?
     large_file: bool,
+
+    /// Is this a binary file? Binary files are opened read-only and render
+    /// unprintable characters as code points.
+    is_binary: bool,
 }
 
 impl TextBuffer {
@@ -96,6 +100,7 @@ impl TextBuffer {
             file_path: None,
             modified: false,
             large_file: false,
+            is_binary: false,
         }
     }
 
@@ -118,6 +123,7 @@ impl TextBuffer {
             file_path: None,
             modified: false,
             large_file: false,
+            is_binary: false,
         }
     }
 
@@ -135,6 +141,7 @@ impl TextBuffer {
             file_path: None,
             modified: false,
             large_file: false,
+            is_binary: false,
         }
     }
 
@@ -171,10 +178,14 @@ impl TextBuffer {
         let mut contents = Vec::new();
         file.read_to_end(&mut contents)?;
 
+        // Detect if this is a binary file
+        let is_binary = Self::detect_binary(&contents);
+
         let mut buffer = Self::from_bytes(contents);
         buffer.file_path = Some(path.to_path_buf());
         buffer.modified = false;
         buffer.large_file = false;
+        buffer.is_binary = is_binary;
         Ok(buffer)
     }
 
@@ -183,6 +194,16 @@ impl TextBuffer {
         use crate::model::piece_tree::{BufferData, BufferLocation};
 
         let path = path.as_ref();
+
+        // Read a sample of the file to detect if it's binary
+        // We read the first 8KB for binary detection
+        let is_binary = {
+            let mut file = std::fs::File::open(path)?;
+            let sample_size = file_size.min(8 * 1024);
+            let mut sample = vec![0u8; sample_size];
+            file.read_exact(&mut sample)?;
+            Self::detect_binary(&sample)
+        };
 
         // Create an unloaded buffer that references the entire file
         let buffer = StringBuffer {
@@ -209,6 +230,7 @@ impl TextBuffer {
             file_path: Some(path.to_path_buf()),
             modified: false,
             large_file: true,
+            is_binary,
         })
     }
 
@@ -810,6 +832,71 @@ impl TextBuffer {
     /// Used by undo/redo to restore the correct modified state
     pub fn set_modified(&mut self, modified: bool) {
         self.modified = modified;
+    }
+
+    /// Check if this buffer contains binary content
+    pub fn is_binary(&self) -> bool {
+        self.is_binary
+    }
+
+    /// Detect if the given bytes contain binary content.
+    ///
+    /// Binary content is detected by looking for:
+    /// - Null bytes (0x00)
+    /// - Non-printable control characters (except common ones like tab, newline, CR)
+    ///
+    /// ANSI escape sequences (ESC [ ...) are treated as text, not binary.
+    pub fn detect_binary(bytes: &[u8]) -> bool {
+        // Only check the first 8KB for binary detection
+        let check_len = bytes.len().min(8 * 1024);
+        let sample = &bytes[..check_len];
+
+        let mut i = 0;
+        while i < sample.len() {
+            let byte = sample[i];
+
+            // Check for ANSI escape sequence (ESC [ or ESC ])
+            // These are common in text files and should not trigger binary detection
+            if byte == 0x1B && i + 1 < sample.len() {
+                let next = sample[i + 1];
+                if next == b'[' || next == b']' {
+                    // Skip the escape sequence - find the terminator
+                    i += 2;
+                    while i < sample.len() {
+                        let c = sample[i];
+                        // ANSI sequences end with a letter (0x40-0x7E for CSI)
+                        if (0x40..=0x7E).contains(&c) {
+                            break;
+                        }
+                        i += 1;
+                    }
+                    i += 1;
+                    continue;
+                }
+            }
+
+            // Null byte is a strong indicator of binary content
+            if byte == 0x00 {
+                return true;
+            }
+
+            // Check for non-printable control characters
+            // Allow: tab (0x09), newline (0x0A), carriage return (0x0D)
+            // Also allow: form feed (0x0C), vertical tab (0x0B) - sometimes used in text
+            // ESC (0x1B) is handled above for ANSI sequences
+            if byte < 0x20 && byte != 0x09 && byte != 0x0A && byte != 0x0D && byte != 0x0C && byte != 0x0B && byte != 0x1B {
+                return true;
+            }
+
+            // DEL character (0x7F) is also a control character
+            if byte == 0x7F {
+                return true;
+            }
+
+            i += 1;
+        }
+
+        false
     }
 
     /// Get text for a specific line
@@ -3000,6 +3087,86 @@ mod property_tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn test_detect_binary_text_files() {
+        // Plain text should not be detected as binary
+        assert!(!TextBuffer::detect_binary(b"Hello, world!"));
+        assert!(!TextBuffer::detect_binary(b"Line 1\nLine 2\nLine 3"));
+        assert!(!TextBuffer::detect_binary(b"Tabs\tand\tnewlines\n"));
+        assert!(!TextBuffer::detect_binary(b"Carriage return\r\n"));
+
+        // Empty content is not binary
+        assert!(!TextBuffer::detect_binary(b""));
+
+        // ANSI CSI escape sequences should be treated as text
+        assert!(!TextBuffer::detect_binary(b"\x1b[31mRed text\x1b[0m"));
+    }
+
+    #[test]
+    fn test_detect_binary_binary_files() {
+        // Null bytes indicate binary
+        assert!(TextBuffer::detect_binary(b"Hello\x00World"));
+        assert!(TextBuffer::detect_binary(b"\x00"));
+
+        // Non-printable control characters (except tab, newline, CR, form feed, vertical tab)
+        assert!(TextBuffer::detect_binary(b"Text with \x01 control char"));
+        assert!(TextBuffer::detect_binary(b"\x02\x03\x04"));
+
+        // DEL character (0x7F)
+        assert!(TextBuffer::detect_binary(b"Text with DEL\x7F"));
+    }
+
+    #[test]
+    fn test_detect_binary_png_file() {
+        // PNG file signature: 89 50 4E 47 0D 0A 1A 0A
+        // The 0x1A byte (substitute character) is a control character that triggers binary detection
+        let png_header: &[u8] = &[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+        assert!(TextBuffer::detect_binary(png_header));
+
+        // Simulate a PNG file with more data after header
+        let mut png_data = vec![0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+        png_data.extend_from_slice(b"\x00\x00\x00\x0DIHDR"); // IHDR chunk with null bytes
+        assert!(TextBuffer::detect_binary(&png_data));
+    }
+
+    #[test]
+    fn test_detect_binary_other_image_formats() {
+        // JPEG signature: FF D8 FF
+        let jpeg_header: &[u8] = &[0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10];
+        assert!(TextBuffer::detect_binary(jpeg_header));
+
+        // GIF signature: GIF89a or GIF87a - contains valid ASCII but typically followed by binary
+        // GIF header is ASCII but the LSD (Logical Screen Descriptor) contains binary
+        let gif_data: &[u8] = &[
+            0x47, 0x49, 0x46, 0x38, 0x39, 0x61,  // GIF89a
+            0x01, 0x00, 0x01, 0x00,              // Width=1, Height=1 (little endian)
+            0x00,                                // Packed byte
+            0x00,                                // Background color index
+            0x00,                                // Pixel aspect ratio
+        ];
+        // The null bytes in the dimensions trigger binary detection
+        assert!(TextBuffer::detect_binary(gif_data));
+
+        // BMP signature: BM followed by file size (usually contains null bytes)
+        let bmp_header: &[u8] = &[0x42, 0x4D, 0x00, 0x00, 0x00, 0x00];
+        assert!(TextBuffer::detect_binary(bmp_header));
+    }
+
+    #[test]
+    fn test_detect_binary_executable_formats() {
+        // ELF signature (Linux executables)
+        let elf_header: &[u8] = &[0x7F, 0x45, 0x4C, 0x46, 0x02, 0x01, 0x01, 0x00];
+        assert!(TextBuffer::detect_binary(elf_header));
+
+        // Mach-O signature (macOS executables) - magic + cpu type/subtype contain null bytes
+        let macho_header: &[u8] = &[0xCF, 0xFA, 0xED, 0xFE, 0x07, 0x00, 0x00, 0x01];
+        assert!(TextBuffer::detect_binary(macho_header));
+
+        // PE/COFF (Windows executables) - MZ header
+        let pe_header: &[u8] = &[0x4D, 0x5A, 0x90, 0x00, 0x03, 0x00];
+        assert!(TextBuffer::detect_binary(pe_header));
     }
 }
 

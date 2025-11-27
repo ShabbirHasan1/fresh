@@ -83,6 +83,10 @@ pub enum ViewTokenWireKind {
     /// Visual line break inserted by wrapping (not from source)
     /// Always has source_offset: None
     Break,
+    /// A single binary byte that should be rendered as <XX>
+    /// Used in binary file mode to ensure cursor positioning works correctly
+    /// (all 4 display chars of <XX> map to the same source byte)
+    BinaryByte(u8),
 }
 
 /// Styling for view tokens (used for injected annotations)

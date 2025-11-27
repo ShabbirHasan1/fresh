@@ -79,6 +79,8 @@ pub struct ViewLineIterator<'a> {
     token_idx: usize,
     /// How the next line should start (based on what ended the previous line)
     next_line_start: LineStart,
+    /// Whether to render in binary mode (unprintable chars shown as code points)
+    binary_mode: bool,
 }
 
 impl<'a> ViewLineIterator<'a> {
@@ -87,8 +89,43 @@ impl<'a> ViewLineIterator<'a> {
             tokens,
             token_idx: 0,
             next_line_start: LineStart::Beginning,
+            binary_mode: false,
         }
     }
+
+    /// Create a new ViewLineIterator with binary mode enabled
+    pub fn with_binary_mode(tokens: &'a [ViewTokenWire], binary: bool) -> Self {
+        Self {
+            tokens,
+            token_idx: 0,
+            next_line_start: LineStart::Beginning,
+            binary_mode: binary,
+        }
+    }
+}
+
+/// Check if a byte is an unprintable control character that should be rendered as <XX>
+/// Returns true for control characters (0x00-0x1F, 0x7F) except tab and newline
+fn is_unprintable_byte(b: u8) -> bool {
+    // Only allow tab (0x09) and newline (0x0A) to render normally
+    // Everything else in control range should be shown as <XX>
+    if b == 0x09 || b == 0x0A {
+        return false;
+    }
+    // Control characters (0x00-0x1F) including CR, VT, FF, ESC are unprintable
+    if b < 0x20 {
+        return true;
+    }
+    // DEL character (0x7F) is also unprintable
+    if b == 0x7F {
+        return true;
+    }
+    false
+}
+
+/// Format an unprintable byte as a code point string like "<00>"
+fn format_unprintable_byte(b: u8) -> String {
+    format!("<{:02X}>", b)
 }
 
 impl<'a> Iterator for ViewLineIterator<'a> {
@@ -115,10 +152,78 @@ impl<'a> Iterator for ViewLineIterator<'a> {
             match &token.kind {
                 ViewTokenWireKind::Text(t) => {
                     let base = token.source_offset;
+                    let t_bytes = t.as_bytes();
                     let mut byte_idx = 0;
-                    for ch in t.chars() {
-                        let ch_len = ch.len_utf8();
+
+                    while byte_idx < t_bytes.len() {
+                        let b = t_bytes[byte_idx];
                         let source = base.map(|s| s + byte_idx);
+
+                        // In binary mode, render unprintable bytes as code points
+                        if self.binary_mode && is_unprintable_byte(b) {
+                            let formatted = format_unprintable_byte(b);
+                            for display_ch in formatted.chars() {
+                                text.push(display_ch);
+                                char_mappings.push(source);
+                                char_styles.push(token_style.clone());
+                                col += 1;
+                            }
+                            byte_idx += 1;
+                            continue;
+                        }
+
+                        // Decode the character at this position
+                        let ch = if b < 0x80 {
+                            // ASCII character
+                            byte_idx += 1;
+                            b as char
+                        } else {
+                            // Multi-byte UTF-8 - decode carefully
+                            let remaining = &t_bytes[byte_idx..];
+                            match std::str::from_utf8(remaining) {
+                                Ok(s) => {
+                                    if let Some(ch) = s.chars().next() {
+                                        byte_idx += ch.len_utf8();
+                                        ch
+                                    } else {
+                                        byte_idx += 1;
+                                        '\u{FFFD}'
+                                    }
+                                }
+                                Err(e) => {
+                                    // Invalid UTF-8 - in binary mode show as hex, otherwise replacement char
+                                    if self.binary_mode {
+                                        let formatted = format_unprintable_byte(b);
+                                        for display_ch in formatted.chars() {
+                                            text.push(display_ch);
+                                            char_mappings.push(source);
+                                            char_styles.push(token_style.clone());
+                                            col += 1;
+                                        }
+                                        byte_idx += 1;
+                                        continue;
+                                    } else {
+                                        // Try to get valid portion, then skip the bad byte
+                                        let valid_up_to = e.valid_up_to();
+                                        if valid_up_to > 0 {
+                                            if let Some(ch) = std::str::from_utf8(&remaining[..valid_up_to])
+                                                .ok()
+                                                .and_then(|s| s.chars().next())
+                                            {
+                                                byte_idx += ch.len_utf8();
+                                                ch
+                                            } else {
+                                                byte_idx += 1;
+                                                '\u{FFFD}'
+                                            }
+                                        } else {
+                                            byte_idx += 1;
+                                            '\u{FFFD}'
+                                        }
+                                    }
+                                }
+                            }
+                        };
 
                         if ch == '\t' {
                             let tab_start_pos = text.len();
@@ -136,7 +241,6 @@ impl<'a> Iterator for ViewLineIterator<'a> {
                             char_styles.push(token_style.clone());
                             col += 1;
                         }
-                        byte_idx += ch_len;
                     }
                     self.token_idx += 1;
                 }
@@ -173,6 +277,17 @@ impl<'a> Iterator for ViewLineIterator<'a> {
                     self.next_line_start = LineStart::AfterBreak;
                     self.token_idx += 1;
                     break;
+                }
+                ViewTokenWireKind::BinaryByte(b) => {
+                    // Binary byte rendered as <XX> - all 4 chars map to same source byte
+                    let formatted = format_unprintable_byte(*b);
+                    for display_ch in formatted.chars() {
+                        text.push(display_ch);
+                        char_mappings.push(token.source_offset);
+                        char_styles.push(token_style.clone());
+                        col += 1;
+                    }
+                    self.token_idx += 1;
                 }
             }
         }
@@ -511,5 +626,130 @@ mod tests {
 
         // Line 3 - yes line number
         assert!(should_show_line_number(&lines[4]));
+    }
+
+    #[test]
+    fn test_is_unprintable_byte() {
+        // Null byte is unprintable
+        assert!(is_unprintable_byte(0x00));
+
+        // Control characters 0x01-0x08 are unprintable
+        assert!(is_unprintable_byte(0x01));
+        assert!(is_unprintable_byte(0x02));
+        assert!(is_unprintable_byte(0x08));
+
+        // Tab (0x09), LF (0x0A), VT (0x0B), FF (0x0C), CR (0x0D) are allowed
+        assert!(!is_unprintable_byte(0x09)); // tab
+        assert!(!is_unprintable_byte(0x0A)); // newline
+        assert!(!is_unprintable_byte(0x0B)); // vertical tab
+        assert!(!is_unprintable_byte(0x0C)); // form feed
+        assert!(!is_unprintable_byte(0x0D)); // carriage return
+
+        // 0x0E-0x1A are unprintable (except ESC)
+        assert!(is_unprintable_byte(0x0E));
+        assert!(is_unprintable_byte(0x1A)); // SUB - this is in PNG headers
+
+        // ESC (0x1B) is allowed (for ANSI sequences)
+        assert!(!is_unprintable_byte(0x1B));
+
+        // 0x1C-0x1F are unprintable
+        assert!(is_unprintable_byte(0x1C));
+        assert!(is_unprintable_byte(0x1F));
+
+        // Printable ASCII (0x20-0x7E) is allowed
+        assert!(!is_unprintable_byte(0x20)); // space
+        assert!(!is_unprintable_byte(0x41)); // 'A'
+        assert!(!is_unprintable_byte(0x7E)); // '~'
+
+        // DEL (0x7F) is unprintable
+        assert!(is_unprintable_byte(0x7F));
+
+        // High bytes (0x80+) are allowed (could be UTF-8)
+        assert!(!is_unprintable_byte(0x80));
+        assert!(!is_unprintable_byte(0xFF));
+    }
+
+    #[test]
+    fn test_format_unprintable_byte() {
+        assert_eq!(format_unprintable_byte(0x00), "<00>");
+        assert_eq!(format_unprintable_byte(0x01), "<01>");
+        assert_eq!(format_unprintable_byte(0x1A), "<1A>");
+        assert_eq!(format_unprintable_byte(0x7F), "<7F>");
+        assert_eq!(format_unprintable_byte(0xFF), "<FF>");
+    }
+
+    #[test]
+    fn test_binary_mode_renders_control_chars() {
+        // Text with null byte and control character
+        let tokens = vec![
+            ViewTokenWire {
+                kind: ViewTokenWireKind::Text("Hello\x00World\x01End".to_string()),
+                source_offset: Some(0),
+                style: None,
+            },
+            make_newline_token(Some(15)),
+        ];
+
+        // Without binary mode - control chars would be rendered raw or as replacement
+        let lines_normal: Vec<_> = ViewLineIterator::new(&tokens).collect();
+        assert_eq!(lines_normal.len(), 1);
+        // In normal mode, we don't format control chars specially
+
+        // With binary mode - control chars should be formatted as <XX>
+        let lines_binary: Vec<_> = ViewLineIterator::with_binary_mode(&tokens, true).collect();
+        assert_eq!(lines_binary.len(), 1);
+        assert!(
+            lines_binary[0].text.contains("<00>"),
+            "Binary mode should format null byte as <00>, got: {}",
+            lines_binary[0].text
+        );
+        assert!(
+            lines_binary[0].text.contains("<01>"),
+            "Binary mode should format 0x01 as <01>, got: {}",
+            lines_binary[0].text
+        );
+    }
+
+    #[test]
+    fn test_binary_mode_png_header() {
+        // PNG-like content with SUB control char (0x1A)
+        // Using valid UTF-8 string with embedded control character
+        let png_like = "PNG\r\n\x1A\n";
+        let tokens = vec![
+            ViewTokenWire {
+                kind: ViewTokenWireKind::Text(png_like.to_string()),
+                source_offset: Some(0),
+                style: None,
+            },
+        ];
+
+        let lines: Vec<_> = ViewLineIterator::with_binary_mode(&tokens, true).collect();
+
+        // Should have rendered the 0x1A as <1A>
+        let combined: String = lines.iter().map(|l| l.text.as_str()).collect();
+        assert!(
+            combined.contains("<1A>"),
+            "PNG SUB byte (0x1A) should be rendered as <1A>, got: {:?}",
+            combined
+        );
+    }
+
+    #[test]
+    fn test_binary_mode_preserves_printable_chars() {
+        let tokens = vec![
+            ViewTokenWire {
+                kind: ViewTokenWireKind::Text("Normal text 123".to_string()),
+                source_offset: Some(0),
+                style: None,
+            },
+            make_newline_token(Some(15)),
+        ];
+
+        let lines: Vec<_> = ViewLineIterator::with_binary_mode(&tokens, true).collect();
+        assert_eq!(lines.len(), 1);
+        assert!(
+            lines[0].text.contains("Normal text 123"),
+            "Printable chars should be preserved in binary mode"
+        );
     }
 }

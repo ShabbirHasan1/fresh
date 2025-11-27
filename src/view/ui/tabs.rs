@@ -131,8 +131,13 @@ impl TabsRenderer {
                 .unwrap_or("[No Name]");
 
             let modified = if state.buffer.is_modified() { "*" } else { "" };
+            let binary_indicator = if buffer_metadata.get(id).map(|m| m.binary).unwrap_or(false) {
+                " [BIN]"
+            } else {
+                ""
+            };
             // Include close button (×) on each tab
-            let tab_text = format!(" {name}{modified} × ");
+            let tab_text = format!(" {name}{modified}{binary_indicator} × ");
             let display_width = tab_text.chars().count();
 
             let is_active = *id == active_buffer;

@@ -572,12 +572,16 @@ impl SplitRenderer {
         content_width: usize,
         gutter_width: usize,
     ) -> ViewData {
+        // Check if buffer is binary before building tokens
+        let is_binary = state.buffer.is_binary();
+
         // Build base token stream from source
         let base_tokens = Self::build_base_tokens(
             &mut state.buffer,
             state.viewport.top_byte,
             estimated_line_length,
             visible_count,
+            is_binary,
         );
 
         // Use plugin transform if available, otherwise use base tokens
@@ -590,7 +594,9 @@ impl SplitRenderer {
 
         // Convert tokens to display lines using the view pipeline
         // Each ViewLine preserves LineStart info for correct line number rendering
-        let source_lines: Vec<ViewLine> = ViewLineIterator::new(&tokens).collect();
+        // Use binary mode if the buffer contains binary content
+        let is_binary = state.buffer.is_binary();
+        let source_lines: Vec<ViewLine> = ViewLineIterator::with_binary_mode(&tokens, is_binary).collect();
 
         // Inject virtual lines (LineAbove/LineBelow) from VirtualTextManager
         let lines = Self::inject_virtual_lines(source_lines, state);
@@ -708,10 +714,18 @@ impl SplitRenderer {
         top_byte: usize,
         estimated_line_length: usize,
         visible_count: usize,
+        is_binary: bool,
     ) -> Vec<crate::services::plugins::api::ViewTokenWire> {
         use crate::services::plugins::api::{ViewTokenWire, ViewTokenWireKind};
 
         let mut tokens = Vec::new();
+
+        // For binary files, read raw bytes directly to preserve byte values
+        // (LineIterator uses String::from_utf8_lossy which loses high bytes)
+        if is_binary {
+            return Self::build_base_tokens_binary(buffer, top_byte, estimated_line_length, visible_count);
+        }
+
         let mut iter = buffer.line_iterator(top_byte, estimated_line_length);
         let mut lines_seen = 0usize;
         let max_lines = visible_count.saturating_add(4);
@@ -735,6 +749,22 @@ impl SplitRenderer {
                             tokens.push(ViewTokenWire {
                                 source_offset,
                                 kind: ViewTokenWireKind::Space,
+                                style: None,
+                            });
+                        }
+                        '\t' => {
+                            // Tab is safe, emit as Text
+                            tokens.push(ViewTokenWire {
+                                source_offset,
+                                kind: ViewTokenWireKind::Text(ch.to_string()),
+                                style: None,
+                            });
+                        }
+                        _ if Self::is_control_char(ch) => {
+                            // Control character - emit as BinaryByte to render as <XX>
+                            tokens.push(ViewTokenWire {
+                                source_offset,
+                                kind: ViewTokenWireKind::BinaryByte(ch as u8),
                                 style: None,
                             });
                         }
@@ -778,14 +808,177 @@ impl SplitRenderer {
         tokens
     }
 
+    /// Build tokens for binary files by reading raw bytes directly
+    /// This preserves byte values >= 0x80 that would be lost by String::from_utf8_lossy
+    fn build_base_tokens_binary(
+        buffer: &mut Buffer,
+        top_byte: usize,
+        estimated_line_length: usize,
+        visible_count: usize,
+    ) -> Vec<crate::services::plugins::api::ViewTokenWire> {
+        use crate::services::plugins::api::{ViewTokenWire, ViewTokenWireKind};
+
+        let mut tokens = Vec::new();
+        let max_lines = visible_count.saturating_add(4);
+        let buffer_len = buffer.len();
+
+        if top_byte >= buffer_len {
+            tokens.push(ViewTokenWire {
+                source_offset: Some(top_byte),
+                kind: ViewTokenWireKind::Text(String::new()),
+                style: None,
+            });
+            return tokens;
+        }
+
+        // Estimate how many bytes we need to read
+        let estimated_bytes = estimated_line_length * max_lines * 2;
+        let bytes_to_read = estimated_bytes.min(buffer_len - top_byte);
+
+        // Read raw bytes directly from buffer
+        let raw_bytes = buffer.slice_bytes(top_byte..top_byte + bytes_to_read);
+
+        let mut byte_offset = 0usize;
+        let mut lines_seen = 0usize;
+        let mut current_text = String::new();
+        let mut current_text_start: Option<usize> = None;
+
+        // Helper to flush accumulated text to tokens
+        let flush_text = |tokens: &mut Vec<ViewTokenWire>, text: &mut String, start: &mut Option<usize>| {
+            if !text.is_empty() {
+                tokens.push(ViewTokenWire {
+                    source_offset: *start,
+                    kind: ViewTokenWireKind::Text(std::mem::take(text)),
+                    style: None,
+                });
+                *start = None;
+            }
+        };
+
+        while byte_offset < raw_bytes.len() && lines_seen < max_lines {
+            let b = raw_bytes[byte_offset];
+            let source_offset = top_byte + byte_offset;
+
+            match b {
+                b'\n' => {
+                    flush_text(&mut tokens, &mut current_text, &mut current_text_start);
+                    tokens.push(ViewTokenWire {
+                        source_offset: Some(source_offset),
+                        kind: ViewTokenWireKind::Newline,
+                        style: None,
+                    });
+                    lines_seen += 1;
+                }
+                b' ' => {
+                    flush_text(&mut tokens, &mut current_text, &mut current_text_start);
+                    tokens.push(ViewTokenWire {
+                        source_offset: Some(source_offset),
+                        kind: ViewTokenWireKind::Space,
+                        style: None,
+                    });
+                }
+                _ => {
+                    // For binary files, emit unprintable bytes as BinaryByte tokens
+                    // This ensures view_pipeline.rs can map all 4 chars of <XX> to the same source byte
+                    if Self::is_binary_unprintable(b) {
+                        // Flush any accumulated printable text first
+                        flush_text(&mut tokens, &mut current_text, &mut current_text_start);
+                        // Emit as BinaryByte so cursor positioning works correctly
+                        tokens.push(ViewTokenWire {
+                            source_offset: Some(source_offset),
+                            kind: ViewTokenWireKind::BinaryByte(b),
+                            style: None,
+                        });
+                    } else {
+                        // Printable ASCII - accumulate into text token
+                        // Each printable char is 1 byte so accumulation works correctly
+                        if current_text_start.is_none() {
+                            current_text_start = Some(source_offset);
+                        }
+                        current_text.push(b as char);
+                    }
+                }
+            }
+            byte_offset += 1;
+        }
+
+        // Flush any remaining text
+        flush_text(&mut tokens, &mut current_text, &mut current_text_start);
+
+        // Handle empty buffer
+        if tokens.is_empty() {
+            tokens.push(ViewTokenWire {
+                source_offset: Some(top_byte),
+                kind: ViewTokenWireKind::Text(String::new()),
+                style: None,
+            });
+        }
+
+        tokens
+    }
+
+    /// Check if a byte should be displayed as <XX> in binary mode
+    /// Returns true for:
+    /// - Control characters (0x00-0x1F) except tab and newline
+    /// - DEL (0x7F)
+    /// - High bytes (0x80-0xFF) which are not valid single-byte UTF-8
+    ///
+    /// Note: In binary mode, we must be very strict about what characters we allow through,
+    /// because control characters can move the terminal cursor and corrupt the display:
+    /// - CR (0x0D) moves cursor to column 0, overwriting the gutter
+    /// - VT (0x0B) and FF (0x0C) move cursor vertically
+    /// - ESC (0x1B) starts ANSI escape sequences
+    fn is_binary_unprintable(b: u8) -> bool {
+        // Only allow: tab (0x09) and newline (0x0A)
+        // These are the only safe whitespace characters in binary mode
+        // All other control characters can corrupt terminal output
+        if b == 0x09 || b == 0x0A {
+            return false;
+        }
+        // All other control characters (0x00-0x1F) are unprintable in binary mode
+        // This includes CR, VT, FF, ESC which can move the cursor
+        if b < 0x20 {
+            return true;
+        }
+        // DEL character (0x7F) is unprintable
+        if b == 0x7F {
+            return true;
+        }
+        // High bytes (0x80-0xFF) are unprintable in binary mode
+        // (they're not valid single-byte UTF-8 and would be converted to replacement char)
+        if b >= 0x80 {
+            return true;
+        }
+        false
+    }
+
+    /// Check if a character is a control character that should be rendered as <XX>
+    /// This applies to ALL files (binary and non-binary) to prevent terminal corruption
+    fn is_control_char(ch: char) -> bool {
+        let code = ch as u32;
+        // Only check ASCII range
+        if code >= 128 {
+            return false;
+        }
+        let b = code as u8;
+        // Allow: tab (0x09), newline (0x0A), ESC (0x1B - for ANSI sequences)
+        if b == 0x09 || b == 0x0A || b == 0x1B {
+            return false;
+        }
+        // Other control characters (0x00-0x1F) and DEL (0x7F) are dangerous
+        // This includes CR (0x0D), VT (0x0B), FF (0x0C) which move the cursor
+        b < 0x20 || b == 0x7F
+    }
+
     /// Public wrapper for building base tokens - used by render.rs for the view_transform_request hook
     pub fn build_base_tokens_for_hook(
         buffer: &mut Buffer,
         top_byte: usize,
         estimated_line_length: usize,
         visible_count: usize,
+        is_binary: bool,
     ) -> Vec<crate::services::plugins::api::ViewTokenWire> {
-        Self::build_base_tokens(buffer, top_byte, estimated_line_length, visible_count)
+        Self::build_base_tokens(buffer, top_byte, estimated_line_length, visible_count, is_binary)
     }
 
     fn apply_wrapping_transform(
@@ -894,6 +1087,20 @@ impl SplitRenderer {
                     // Pass through existing breaks
                     wrapped.push(token);
                     current_line_width = 0;
+                }
+                ViewTokenWireKind::BinaryByte(_) => {
+                    // Binary bytes render as <XX> which is 4 characters
+                    let byte_display_width = 4;
+                    if current_line_width + byte_display_width > available_width {
+                        wrapped.push(ViewTokenWire {
+                            source_offset: None,
+                            kind: ViewTokenWireKind::Break,
+                            style: None,
+                        });
+                        current_line_width = 0;
+                    }
+                    wrapped.push(token);
+                    current_line_width += byte_display_width;
                 }
             }
         }
