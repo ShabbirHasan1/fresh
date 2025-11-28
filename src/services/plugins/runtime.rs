@@ -1743,8 +1743,34 @@ struct DirEntry {
 /// }
 #[op2]
 #[serde]
-fn op_fresh_read_dir(#[string] path: String) -> Result<Vec<DirEntry>, deno_core::error::AnyError> {
-    let entries = std::fs::read_dir(&path).map_err(|e| {
+fn op_fresh_read_dir(
+    state: &mut OpState,
+    #[string] path: String,
+) -> Result<Vec<DirEntry>, deno_core::error::AnyError> {
+    // Resolve relative paths against the editor's working directory
+    let resolved_path = if std::path::Path::new(&path).is_absolute() {
+        std::path::PathBuf::from(&path)
+    } else {
+        // Try to get the working directory from the editor state
+        let working_dir = state
+            .try_borrow::<Rc<RefCell<TsRuntimeState>>>()
+            .and_then(|runtime_state| {
+                let runtime_state = runtime_state.borrow();
+                runtime_state
+                    .state_snapshot
+                    .read()
+                    .ok()
+                    .map(|snapshot| snapshot.working_dir.clone())
+            });
+
+        if let Some(wd) = working_dir {
+            wd.join(&path)
+        } else {
+            std::path::PathBuf::from(&path)
+        }
+    };
+
+    let entries = std::fs::read_dir(&resolved_path).map_err(|e| {
         deno_core::error::generic_error(format!("Failed to read directory {}: {}", path, e))
     })?;
 

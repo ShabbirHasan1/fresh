@@ -3280,8 +3280,32 @@ impl Editor {
                     input,
                 };
 
-                if let Some(ref ts_manager) = self.ts_plugin_manager {
+                // Check if we need initial suggestions (prompt just opened with no suggestions)
+                let needs_initial_suggestions = self
+                    .prompt
+                    .as_ref()
+                    .is_some_and(|p| p.suggestions.is_empty());
+
+                if let Some(ref mut ts_manager) = self.ts_plugin_manager {
                     ts_manager.run_hook("prompt_changed", hook_args);
+
+                    // Poll briefly for plugin commands to ensure suggestions are available
+                    // Only do this when the prompt has no suggestions yet (initial open)
+                    // This fixes issue #193 where completions weren't shown immediately
+                    if needs_initial_suggestions {
+                        for _ in 0..10 {
+                            std::thread::sleep(std::time::Duration::from_millis(5));
+                            let commands = ts_manager.process_commands();
+                            if !commands.is_empty() {
+                                for command in commands {
+                                    if let Err(e) = self.handle_plugin_command(command) {
+                                        tracing::error!("Error handling plugin command: {}", e);
+                                    }
+                                }
+                                break;
+                            }
+                        }
+                    }
                 }
             }
             PromptType::Plugin { custom_type } => {
