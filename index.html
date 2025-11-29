@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Fresh - The Terminal Text Editor</title>
-    <!-- Load JetBrains Mono for the authentic terminal/code feel --><link href="https://fonts.googleapis.css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext x='12' y='70' font-family='monospace' font-size='60' font-weight='bold' fill='%23222'%3E%3E_%3C/text%3E%3C/svg%3E">
     <style>
         /* Color Variables based on the required palette */
         :root {
@@ -36,7 +36,7 @@
             justify-content: flex-start;
             margin: 0;
             padding: 0;
-            font-family: 'JetBrains Mono', monospace;
+            font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', 'JetBrains Mono', Consolas, 'Liberation Mono', Menlo, monospace;
             box-sizing: border-box;
             
             /* Structural changes for reliable scrolling */
@@ -148,6 +148,8 @@
             padding: 0;
             line-height: 1.0;
             flex-shrink: 0;
+            width: 1ch; /* Force uniform character width */
+            height: 1.1em;
         }
 
         .ascii-block.flippable {
