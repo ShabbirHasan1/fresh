@@ -4,6 +4,7 @@ use crate::model::piece_tree::{
     BufferData, BufferLocation, Cursor, PieceInfo, PieceRangeIter, PieceTree, Position,
     StringBuffer, TreeStats,
 };
+use crate::model::piece_tree_diff::PieceTreeDiff;
 use anyhow::{Context, Result};
 use regex::bytes::Regex;
 use std::io::{self, Read, Seek, SeekFrom, Write};
@@ -426,8 +427,23 @@ impl TextBuffer {
     }
 
     /// Diff the current piece tree against the last saved snapshot.
-    pub fn diff_since_saved(&self) -> crate::model::piece_tree_diff::PieceTreeDiff {
-        crate::model::piece_tree_diff::diff_piece_trees(&self.saved_root, &self.piece_tree.root())
+    pub fn diff_since_saved(&self) -> PieceTreeDiff {
+        crate::model::piece_tree_diff::diff_piece_trees(
+            &self.saved_root,
+            &self.piece_tree.root(),
+            &|leaf, start, len| {
+                if len == 0 {
+                    return Some(0);
+                }
+                let buf = self.buffers.get(leaf.location.buffer_id())?;
+                let data = buf.get_data()?;
+                let start = leaf.offset + start;
+                let end = start + len;
+                let slice = data.get(start..end)?;
+                let line_feeds = slice.iter().filter(|&&b| b == b'\n').count();
+                Some(line_feeds)
+            },
+        )
     }
 
     /// Convert a byte offset to a line/column position

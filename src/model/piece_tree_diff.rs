@@ -14,22 +14,26 @@ pub struct PieceTreeDiff {
     pub line_range: Option<Range<usize>>,
 }
 
-/// Compute a shallow diff between two piece tree roots.
+/// Compute a diff between two piece tree roots.
 ///
-/// This relies on piece sharing: if a piece (location+offset+bytes) appears
-/// in both versions at the same relative order, it is considered unchanged.
-/// The result identifies the minimal contiguous range in the "after" tree that
-/// differs from "before". If the trees are identical, `equal` is true and
-/// the ranges are empty.
+/// Comparison happens at the byte-span level (not whole leaves) so split leaves
+/// still align. The result identifies the minimal contiguous range in the
+/// "after" tree that differs from "before".
+///
+/// `line_counter` should return the number of line feeds in a slice of a leaf.
+/// If it returns None for any consulted slice, the diff will have line_range=None.
 pub fn diff_piece_trees(
     before: &Arc<PieceTreeNode>,
     after: &Arc<PieceTreeNode>,
+    line_counter: &dyn Fn(&LeafData, usize, usize) -> Option<usize>,
 ) -> PieceTreeDiff {
     let mut before_leaves = Vec::new();
     collect_leaves(before, &mut before_leaves);
+    let before_leaves = normalize_leaves(before_leaves);
 
     let mut after_leaves = Vec::new();
     collect_leaves(after, &mut after_leaves);
+    let after_leaves = normalize_leaves(after_leaves);
 
     // Fast-path: identical leaf sequences.
     if leaf_slices_equal(&before_leaves, &after_leaves) {
@@ -40,47 +44,28 @@ pub fn diff_piece_trees(
         };
     }
 
-    // Longest common prefix.
-    let mut prefix = 0;
-    while prefix < before_leaves.len()
-        && prefix < after_leaves.len()
-        && leaves_equal(&before_leaves[prefix], &after_leaves[prefix])
-    {
-        prefix += 1;
-    }
+    let before_spans = with_doc_offsets(&before_leaves);
+    let after_spans = with_doc_offsets(&after_leaves);
 
-    // Longest common suffix (without overlapping prefix).
-    let mut suffix = 0;
-    while suffix + prefix < before_leaves.len()
-        && suffix + prefix < after_leaves.len()
-        && leaves_equal(
-            &before_leaves[before_leaves.len() - 1 - suffix],
-            &after_leaves[after_leaves.len() - 1 - suffix],
-        ) {
-        suffix += 1;
-    }
+    let _total_before = sum_bytes(&before_leaves);
+    let total_after = sum_bytes(&after_leaves);
 
-    let after_changed = &after_leaves[prefix..after_leaves.len() - suffix];
+    // Longest common prefix at byte granularity.
+    let prefix = common_prefix_bytes(&before_spans, &after_spans);
+    // Longest common suffix without overlapping prefix.
+    let suffix = common_suffix_bytes(&before_spans, &after_spans, prefix);
 
-    // Byte offsets are measured in the "after" tree.
-    let start_byte = sum_bytes(&after_leaves[..prefix]);
-    let end_byte = start_byte + sum_bytes(after_changed);
+    let changed_start = prefix;
+    let changed_end = total_after.saturating_sub(suffix);
 
-    // Line offsets are also relative to the "after" tree.
-    let line_range = sum_line_feeds(&after_leaves[..prefix]).and_then(|lines_before| {
-        // If we have no bytes in the changed span (pure deletion),
-        // still mark a single line so callers have a location to attach to.
-        let lines_in_changed = if after_changed.is_empty() {
-            Some(1_usize)
-        } else {
-            lines_in_slice(after_changed)
-        }?;
-        Some(lines_before..lines_before + lines_in_changed)
-    });
+    let byte_range = changed_start..changed_end;
+
+    // Line ranges (best effort).
+    let line_range = line_ranges(&after_spans, changed_start, changed_end, line_counter);
 
     PieceTreeDiff {
         equal: false,
-        byte_range: start_byte..end_byte,
+        byte_range,
         line_range,
     }
 }
@@ -108,24 +93,203 @@ fn leaf_slices_equal(a: &[LeafData], b: &[LeafData]) -> bool {
     a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| leaves_equal(x, y))
 }
 
+fn normalize_leaves(mut leaves: Vec<LeafData>) -> Vec<LeafData> {
+    if leaves.is_empty() {
+        return leaves;
+    }
+
+    let mut normalized = Vec::with_capacity(leaves.len());
+    let mut current = leaves.remove(0);
+
+    for leaf in leaves.into_iter() {
+        let contiguous = current.location == leaf.location && current.offset + current.bytes == leaf.offset;
+        if contiguous {
+            // Merge by extending bytes and line feeds if known
+            current.bytes += leaf.bytes;
+            current.line_feed_cnt = match (current.line_feed_cnt, leaf.line_feed_cnt) {
+                (Some(a), Some(b)) => Some(a + b),
+                _ => None,
+            };
+        } else {
+            normalized.push(current);
+            current = leaf;
+        }
+    }
+
+    normalized.push(current);
+    normalized
+}
+
 fn sum_bytes(leaves: &[LeafData]) -> usize {
     leaves.iter().map(|leaf| leaf.bytes).sum()
 }
 
-fn sum_line_feeds(leaves: &[LeafData]) -> Option<usize> {
-    let mut total = 0;
-    for leaf in leaves {
-        total += leaf.line_feed_cnt?;
-    }
-    Some(total)
+#[derive(Clone)]
+struct Span {
+    leaf: LeafData,
+    doc_offset: usize,
 }
 
-fn lines_in_slice(leaves: &[LeafData]) -> Option<usize> {
-    if leaves.is_empty() {
+fn with_doc_offsets(leaves: &[LeafData]) -> Vec<Span> {
+    let mut spans = Vec::with_capacity(leaves.len());
+    let mut offset = 0;
+    for leaf in leaves {
+        spans.push(Span {
+            leaf: leaf.clone(),
+            doc_offset: offset,
+        });
+        offset += leaf.bytes;
+    }
+    spans
+}
+
+fn common_prefix_bytes(before: &[Span], after: &[Span]) -> usize {
+    let mut b_idx = 0;
+    let mut a_idx = 0;
+    let mut b_off = 0;
+    let mut a_off = 0;
+    let mut consumed = 0;
+
+    while b_idx < before.len() && a_idx < after.len() {
+        let b = &before[b_idx].leaf;
+        let a = &after[a_idx].leaf;
+
+        let b_pos = b.offset + b_off;
+        let a_pos = a.offset + a_off;
+
+        if b.location == a.location && b_pos == a_pos {
+            let b_rem = b.bytes - b_off;
+            let a_rem = a.bytes - a_off;
+            let take = b_rem.min(a_rem);
+
+            consumed += take;
+            b_off += take;
+            a_off += take;
+
+            if b_off == b.bytes {
+                b_idx += 1;
+                b_off = 0;
+            }
+            if a_off == a.bytes {
+                a_idx += 1;
+                a_off = 0;
+            }
+        } else {
+            break;
+        }
+    }
+
+    consumed
+}
+
+fn common_suffix_bytes(before: &[Span], after: &[Span], prefix_bytes: usize) -> usize {
+    let total_before = before.iter().map(|s| s.leaf.bytes).sum::<usize>();
+    let total_after = after.iter().map(|s| s.leaf.bytes).sum::<usize>();
+
+    let mut b_idx: isize = before.len() as isize - 1;
+    let mut a_idx: isize = after.len() as isize - 1;
+    let mut b_off = 0;
+    let mut a_off = 0;
+    let mut consumed = 0;
+
+    while b_idx >= 0
+        && a_idx >= 0
+        && (total_before - consumed) > prefix_bytes
+        && (total_after - consumed) > prefix_bytes
+    {
+        let b_leaf = &before[b_idx as usize].leaf;
+        let a_leaf = &after[a_idx as usize].leaf;
+
+        let b_pos = b_leaf.offset + b_leaf.bytes - b_off;
+        let a_pos = a_leaf.offset + a_leaf.bytes - a_off;
+
+        if b_leaf.location == a_leaf.location && b_pos == a_pos {
+            let b_rem = b_leaf.bytes - b_off;
+            let a_rem = a_leaf.bytes - a_off;
+            let take = b_rem.min(a_rem);
+
+            consumed += take;
+            b_off += take;
+            a_off += take;
+
+            if b_off == b_leaf.bytes {
+                b_idx -= 1;
+                b_off = 0;
+            }
+            if a_off == a_leaf.bytes {
+                a_idx -= 1;
+                a_off = 0;
+            }
+        } else {
+            break;
+        }
+    }
+
+    consumed.min(total_after.saturating_sub(prefix_bytes))
+}
+
+fn count_lines_in_range(
+    spans: &[Span],
+    start: usize,
+    len: usize,
+    line_counter: &dyn Fn(&LeafData, usize, usize) -> Option<usize>,
+) -> Option<usize> {
+    if len == 0 {
         return Some(0);
     }
-    let line_feeds = sum_line_feeds(leaves)?;
-    Some(line_feeds + 1)
+
+    let mut remaining = len;
+    let mut offset = start;
+    let mut line_feeds = 0usize;
+
+    for span in spans {
+        if remaining == 0 {
+            break;
+        }
+        let span_start = span.doc_offset;
+        let span_end = span_start + span.leaf.bytes;
+        if offset >= span_end {
+            continue;
+        }
+        let local_start = if offset > span_start {
+            offset - span_start
+        } else {
+            0
+        };
+        let available = span.leaf.bytes - local_start;
+        let take = available.min(remaining);
+
+        let chunk_lines = line_counter(&span.leaf, local_start, take)?;
+        line_feeds += chunk_lines;
+
+        offset += take;
+        remaining -= take;
+    }
+
+    Some(line_feeds)
+}
+
+fn line_ranges(
+    after_spans: &[Span],
+    changed_start: usize,
+    changed_end: usize,
+    line_counter: &dyn Fn(&LeafData, usize, usize) -> Option<usize>,
+) -> Option<Range<usize>> {
+    let total_bytes = after_spans.iter().map(|s| s.leaf.bytes).sum::<usize>();
+
+    let lf_total = count_lines_in_range(after_spans, 0, total_bytes, line_counter)?;
+    let lf_prefix = count_lines_in_range(after_spans, 0, changed_start, line_counter)?;
+    let lf_suffix =
+        count_lines_in_range(after_spans, changed_end, total_bytes.saturating_sub(changed_end), line_counter)?;
+
+    let lf_changed = lf_total.saturating_sub(lf_prefix).saturating_sub(lf_suffix);
+    let changed_lines = if changed_end == changed_start {
+        1
+    } else {
+        lf_changed + 1
+    };
+
+    Some(lf_prefix..lf_prefix + changed_lines)
 }
 
 #[cfg(test)]
@@ -163,10 +327,27 @@ mod tests {
 
         Arc::new(PieceTreeNode::Internal {
             left_bytes: sum_bytes(&leaves[..mid]),
-            lf_left: sum_line_feeds(&leaves[..mid]),
+            lf_left: leaves[..mid]
+                .iter()
+                .map(|l| l.line_feed_cnt)
+                .fold(Some(0usize), |acc, v| match (acc, v) {
+                    (Some(a), Some(b)) => Some(a + b),
+                    _ => None,
+                }),
             left,
             right,
         })
+    }
+
+    fn count_line_feeds(leaf: &LeafData, start: usize, len: usize) -> Option<usize> {
+        if len == 0 {
+            return Some(0);
+        }
+        // If we know total LFs, assume uniform distribution only when full coverage.
+        if start == 0 && len == leaf.bytes {
+            return leaf.line_feed_cnt;
+        }
+        None
     }
 
     #[test]
@@ -175,7 +356,7 @@ mod tests {
         let before = build(&leaves);
         let after = build(&leaves);
 
-        let diff = diff_piece_trees(&before, &after);
+        let diff = diff_piece_trees(&before, &after, &count_line_feeds);
         assert!(diff.equal);
         assert_eq!(diff.byte_range, 0..0);
         assert_eq!(diff.line_range, Some(0..0));
@@ -186,7 +367,7 @@ mod tests {
         let before = build(&[leaf(BufferLocation::Stored(0), 0, 5, Some(0))]);
         let after = build(&[leaf(BufferLocation::Added(1), 0, 5, Some(0))]);
 
-        let diff = diff_piece_trees(&before, &after);
+        let diff = diff_piece_trees(&before, &after, &count_line_feeds);
         assert!(!diff.equal);
         assert_eq!(diff.byte_range, 0..5);
         assert_eq!(diff.line_range, Some(0..1)); // same line, different content
@@ -197,7 +378,7 @@ mod tests {
         let before = build(&[leaf(BufferLocation::Stored(0), 0, 6, Some(0))]);
         let after = build(&[leaf(BufferLocation::Added(1), 0, 6, Some(1))]); // introduces a newline
 
-        let diff = diff_piece_trees(&before, &after);
+        let diff = diff_piece_trees(&before, &after, &count_line_feeds);
         assert!(!diff.equal);
         assert_eq!(diff.byte_range, 0..6);
         assert_eq!(diff.line_range, Some(0..2)); // spans two lines after change
@@ -211,9 +392,24 @@ mod tests {
         ]);
         let after = build(&[leaf(BufferLocation::Stored(0), 0, 6, Some(1))]);
 
-        let diff = diff_piece_trees(&before, &after);
+        let diff = diff_piece_trees(&before, &after, &count_line_feeds);
         assert!(!diff.equal);
         assert_eq!(diff.byte_range, 6..6); // no bytes remain at the change site
-        assert_eq!(diff.line_range, Some(1..2)); // anchor on the line after the removed span
+        assert_eq!(diff.line_range, Some(1..2)); // anchor after deleted span
+    }
+
+    #[test]
+    fn tolerates_split_leaves_with_same_content_prefix() {
+        let before = build(&[leaf(BufferLocation::Stored(0), 0, 100, Some(1))]);
+        let after = build(&[
+            leaf(BufferLocation::Stored(0), 0, 50, Some(0)),
+            leaf(BufferLocation::Added(1), 0, 10, Some(0)),
+            leaf(BufferLocation::Stored(0), 50, 50, Some(1)),
+        ]);
+
+        let diff = diff_piece_trees(&before, &after, &count_line_feeds);
+        assert!(!diff.equal);
+        // Only the inserted span should be marked.
+        assert_eq!(diff.byte_range, 50..60);
     }
 }

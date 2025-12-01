@@ -954,6 +954,68 @@ fn test_unsaved_changes_get_indicators() {
     );
 }
 
+/// Test that reverting an edit clears the buffer_modified indicator on the same line (no off-by-one)
+#[test]
+fn test_buffer_modified_clears_after_undo_on_same_line() {
+    let repo = GitTestRepo::new();
+
+    // Create and commit a multi-line file
+    let initial_content = (1..=15)
+        .map(|i| format!("line {:02}\n", i))
+        .collect::<String>();
+    repo.create_file("test.txt", &initial_content);
+    repo.git_add_all();
+    repo.git_commit("Initial commit");
+
+    repo.setup_buffer_modified_plugin();
+
+    let mut harness = EditorTestHarness::with_config_and_working_dir(
+        120,
+        40,
+        Config::default(),
+        repo.path.clone(),
+    )
+    .unwrap();
+
+    open_file(&mut harness, &repo.path, "test.txt");
+    wait_for_async(&mut harness, 10);
+
+    // Move to line 1, append text
+    harness.send_key(KeyCode::Home, KeyModifiers::NONE).unwrap();
+    harness.send_key(KeyCode::End, KeyModifiers::NONE).unwrap();
+    harness.type_text(" MOD").unwrap();
+    harness.render().unwrap();
+    wait_for_async(&mut harness, 10);
+
+    let screen_after = harness.screen_to_string();
+    let indicators_after = get_indicator_lines(&screen_after, "│");
+    println!("=== After edit ===\n{}", screen_after);
+    assert_eq!(
+        indicators_after,
+        vec![0],
+        "Indicator should appear on edited line (line 0), got {:?}",
+        indicators_after
+    );
+
+    // Undo the edit (4 chars)
+    for _ in 0..4 {
+        harness
+            .send_key(KeyCode::Char('z'), KeyModifiers::CONTROL)
+            .unwrap();
+    }
+    harness.render().unwrap();
+    wait_for_async(&mut harness, 10);
+
+    let screen_after_undo = harness.screen_to_string();
+    let indicators_after_undo = get_indicator_lines(&screen_after_undo, "│");
+    println!("=== After undo ===\n{}", screen_after_undo);
+    assert!(
+        indicators_after_undo.is_empty(),
+        "Indicators should clear after undo to saved state, got {:?}",
+        indicators_after_undo
+    );
+}
+
 /// Test that adding lines shifts indicators correctly
 #[test]
 fn test_indicator_line_shifting() {
