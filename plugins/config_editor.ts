@@ -1205,35 +1205,9 @@ globalThis.onConfigEditorCursorMoved = function(data: {
 
 editor.on("cursor_moved", "onConfigEditorCursorMoved");
 
-/**
- * Track whether config editor commands are currently registered
- */
-let commandsRegistered = false;
-
-/**
- * Handle buffer activation - register commands when config editor becomes active
- */
-globalThis.onConfigEditorBufferActivated = function(data: { buffer_id: number }): boolean {
-  if (state.isOpen && state.bufferId === data.buffer_id && !commandsRegistered) {
-    registerConfigEditorCommands();
-    commandsRegistered = true;
-  }
-  return true;
-};
-
-/**
- * Handle buffer deactivation - unregister commands when config editor loses focus
- */
-globalThis.onConfigEditorBufferDeactivated = function(data: { buffer_id: number }): boolean {
-  if (state.isOpen && state.bufferId === data.buffer_id && commandsRegistered) {
-    unregisterConfigEditorCommands();
-    commandsRegistered = false;
-  }
-  return true;
-};
-
-editor.on("buffer_activated", "onConfigEditorBufferActivated");
-editor.on("buffer_deactivated", "onConfigEditorBufferDeactivated");
+// Buffer activation/deactivation hooks removed in favor of custom context system
+// Commands are now registered at startup with "config-editor" context requirement
+// The context is activated/deactivated when opening/closing the config editor
 
 // =============================================================================
 // Public Commands
@@ -1286,12 +1260,8 @@ globalThis.open_config_editor = async function(): Promise<void> {
     state.bufferId = result.buffer_id;
     state.splitId = result.split_id ?? null;
 
-    // Commands will be registered by buffer_activated hook
-    // Register them now as well in case the hook doesn't fire immediately
-    if (!commandsRegistered) {
-      registerConfigEditorCommands();
-      commandsRegistered = true;
-    }
+    // Activate the config-editor context to enable context-specific commands
+    editor.setContext("config-editor", true);
 
     applyHighlighting();
     editor.setStatus("Config Editor | ↑/↓: navigate | RET: edit | s: save | q: quit");
@@ -1312,6 +1282,9 @@ globalThis.config_editor_close = function(): void {
     editor.setStatus("Warning: Unsaved changes discarded");
   }
 
+  // Deactivate the config-editor context to hide context-specific commands
+  editor.setContext("config-editor", false);
+
   // Close split
   if (state.splitId !== null) {
     editor.closeSplit(state.splitId);
@@ -1320,12 +1293,6 @@ globalThis.config_editor_close = function(): void {
   // Focus source
   if (state.sourceSplitId !== null) {
     editor.focusSplit(state.sourceSplitId);
-  }
-
-  // Unregister commands since config editor is closed
-  if (commandsRegistered) {
-    unregisterConfigEditorCommands();
-    commandsRegistered = false;
   }
 
   // Reset state
@@ -1491,87 +1458,70 @@ globalThis.config_editor_show_help = function(): void {
 // Command Registration
 // =============================================================================
 
-/**
- * Register commands that should only be available when config editor is open
- */
-function registerConfigEditorCommands(): void {
-  editor.registerCommand(
-    "config_editor_close",
-    "Close the config editor",
-    "config_editor_close",
-    "normal"
-  );
-
-  editor.registerCommand(
-    "config_editor_edit_field",
-    "Edit the selected field",
-    "config_editor_edit_field",
-    "normal"
-  );
-
-  editor.registerCommand(
-    "config_editor_toggle_or_edit",
-    "Toggle boolean or edit field",
-    "config_editor_toggle_or_edit",
-    "normal"
-  );
-
-  editor.registerCommand(
-    "config_editor_toggle_section",
-    "Expand or collapse section",
-    "config_editor_toggle_section",
-    "normal"
-  );
-
-  editor.registerCommand(
-    "config_editor_reset_to_default",
-    "Reset field to default value",
-    "config_editor_reset_to_default",
-    "normal"
-  );
-
-  editor.registerCommand(
-    "config_editor_save",
-    "Save configuration",
-    "config_editor_save",
-    "normal"
-  );
-
-  editor.registerCommand(
-    "config_editor_reload",
-    "Reload configuration from file",
-    "config_editor_reload",
-    "normal"
-  );
-
-  editor.registerCommand(
-    "config_editor_show_help",
-    "Show config editor help",
-    "config_editor_show_help",
-    "normal"
-  );
-}
-
-/**
- * Unregister commands when config editor is closed
- */
-function unregisterConfigEditorCommands(): void {
-  editor.unregisterCommand("config_editor_close");
-  editor.unregisterCommand("config_editor_edit_field");
-  editor.unregisterCommand("config_editor_toggle_or_edit");
-  editor.unregisterCommand("config_editor_toggle_section");
-  editor.unregisterCommand("config_editor_reset_to_default");
-  editor.unregisterCommand("config_editor_save");
-  editor.unregisterCommand("config_editor_reload");
-  editor.unregisterCommand("config_editor_show_help");
-}
-
-// Register the open command permanently (always available)
+// Register the open command permanently (always available, no custom context required)
 editor.registerCommand(
   "Edit Configuration",
   "Open the configuration editor",
   "open_config_editor",
   "normal"
+);
+
+// Register config editor commands with "config-editor" custom context
+// These commands will only be enabled when the config-editor context is active
+editor.registerCommand(
+  "Config: Close Editor",
+  "Close the config editor",
+  "config_editor_close",
+  "normal,config-editor"  // Requires both normal context AND config-editor custom context
+);
+
+editor.registerCommand(
+  "Config: Edit Field",
+  "Edit the selected field",
+  "config_editor_edit_field",
+  "normal,config-editor"
+);
+
+editor.registerCommand(
+  "Config: Toggle/Edit",
+  "Toggle boolean or edit field",
+  "config_editor_toggle_or_edit",
+  "normal,config-editor"
+);
+
+editor.registerCommand(
+  "Config: Toggle Section",
+  "Expand or collapse section",
+  "config_editor_toggle_section",
+  "normal,config-editor"
+);
+
+editor.registerCommand(
+  "Config: Reset to Default",
+  "Reset field to default value",
+  "config_editor_reset_to_default",
+  "normal,config-editor"
+);
+
+editor.registerCommand(
+  "Config: Save",
+  "Save configuration",
+  "config_editor_save",
+  "normal,config-editor"
+);
+
+editor.registerCommand(
+  "Config: Reload",
+  "Reload configuration from file",
+  "config_editor_reload",
+  "normal,config-editor"
+);
+
+editor.registerCommand(
+  "Config: Show Help",
+  "Show config editor help",
+  "config_editor_show_help",
+  "normal,config-editor"
 );
 
 // =============================================================================

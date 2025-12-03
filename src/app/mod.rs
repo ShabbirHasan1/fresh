@@ -374,6 +374,10 @@ pub struct Editor {
 
     /// Last auto-save time for rate limiting
     last_auto_save: std::time::Instant,
+
+    /// Active custom contexts for command visibility
+    /// Plugin-defined contexts like "config-editor" that control command availability
+    active_custom_contexts: HashSet<String>,
 }
 
 impl Editor {
@@ -723,6 +727,7 @@ impl Editor {
                 })
             },
             last_auto_save: std::time::Instant::now(),
+            active_custom_contexts: HashSet::new(),
         })
     }
 
@@ -3866,6 +3871,7 @@ impl Editor {
                         self.key_context,
                         &self.keybindings,
                         selection_active,
+                        &self.active_custom_contexts,
                     );
                     prompt.selected_suggestion = if prompt.suggestions.is_empty() {
                         None
@@ -4885,6 +4891,17 @@ impl Editor {
                             split_id: Some(split_id),
                         },
                     );
+                }
+            }
+
+            // ==================== Context Commands ====================
+            PluginCommand::SetContext { name, active } => {
+                if active {
+                    self.active_custom_contexts.insert(name.clone());
+                    tracing::debug!("Set custom context: {}", name);
+                } else {
+                    self.active_custom_contexts.remove(&name);
+                    tracing::debug!("Unset custom context: {}", name);
                 }
             }
         }

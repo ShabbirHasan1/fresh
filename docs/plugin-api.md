@@ -763,6 +763,7 @@ insertAtCursor(text: string): boolean
 #### `registerCommand`
 
 Register a custom command that can be triggered by keybindings or the command palette
+fileexplorer, menu) and custom plugin-defined contexts (e.g., "normal,config-editor")
 
 ```typescript
 registerCommand(name: string, description: string, action: string, contexts: string, source: string): boolean
@@ -775,7 +776,7 @@ registerCommand(name: string, description: string, action: string, contexts: str
 | `name` | `string` | Unique command name (e.g., "my_plugin_action") |
 | `description` | `string` | Human-readable description |
 | `action` | `string` | JavaScript function name to call when command is triggered |
-| `contexts` | `string` | Comma-separated list of contexts (e.g., "normal,prompt") |
+| `contexts` | `string` | Comma-separated list of contexts, including both built-in (normal, prompt, popup, |
 | `source` | `string` | Plugin source name (empty string for builtin) |
 
 #### `unregisterCommand`
@@ -791,6 +792,23 @@ unregisterCommand(name: string): boolean
 | Name | Type | Description |
 |------|------|-------------|
 | `name` | `string` | The name of the command to unregister |
+
+#### `setContext`
+
+Set or unset a custom context for command visibility
+Custom contexts allow plugins to control when their commands are available.
+For example, setting "config-editor" context makes config editor commands visible.
+
+```typescript
+setContext(name: string, active: boolean): boolean
+```
+
+**Parameters:**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `name` | `string` | Context name (e.g., "config-editor") |
+| `active` | `boolean` | Whether the context is active (true = set, false = unset) |
 
 #### `openFile`
 

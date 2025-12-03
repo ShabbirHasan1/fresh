@@ -583,6 +583,16 @@ pub enum PluginCommand {
     /// Delete the current selection in the active buffer
     /// This deletes all selected text across all cursors
     DeleteSelection,
+
+    /// Set or unset a custom context
+    /// Custom contexts are plugin-defined states that can be used to control command visibility
+    /// For example, "config-editor" context could make config editor commands available
+    SetContext {
+        /// Context name (e.g., "config-editor")
+        name: String,
+        /// Whether the context is active
+        active: bool,
+    },
 }
 
 /// Plugin API context - provides safe access to editor functionality

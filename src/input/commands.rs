@@ -22,6 +22,9 @@ pub struct Command {
     pub action: Action,
     /// Contexts where this command is available (empty = available in all contexts)
     pub contexts: Vec<KeyContext>,
+    /// Custom contexts required for this command (plugin-defined contexts like "config-editor")
+    /// If non-empty, all custom contexts must be active for the command to be available
+    pub custom_contexts: Vec<String>,
     /// Source of the command (builtin or plugin)
     pub source: CommandSource,
 }
@@ -128,6 +131,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Open a file in a new or existing buffer".to_string(),
             action: Action::Open,
             contexts: vec![],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         Command {
@@ -135,6 +139,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Save the current buffer to disk".to_string(),
             action: Action::Save,
             contexts: vec![KeyContext::Normal],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         Command {
@@ -142,6 +147,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Save the current buffer to a new file".to_string(),
             action: Action::SaveAs,
             contexts: vec![KeyContext::Normal],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         Command {
@@ -149,6 +155,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Create a new empty buffer".to_string(),
             action: Action::New,
             contexts: vec![],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         Command {
@@ -156,6 +163,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Close the current buffer".to_string(),
             action: Action::Close,
             contexts: vec![KeyContext::Normal],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         Command {
@@ -163,6 +171,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Discard changes and reload from disk".to_string(),
             action: Action::Revert,
             contexts: vec![KeyContext::Normal],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         Command {
@@ -170,6 +179,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Toggle automatic reloading when files change on disk".to_string(),
             action: Action::ToggleAutoRevert,
             contexts: vec![],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         Command {
@@ -177,6 +187,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Exit the editor".to_string(),
             action: Action::Quit,
             contexts: vec![],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         // Edit operations
@@ -185,6 +196,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Undo the last edit".to_string(),
             action: Action::Undo,
             contexts: vec![KeyContext::Normal],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         Command {
@@ -192,6 +204,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Redo the last undone edit".to_string(),
             action: Action::Redo,
             contexts: vec![KeyContext::Normal],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         Command {
@@ -199,6 +212,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Copy selection to clipboard".to_string(),
             action: Action::Copy,
             contexts: vec![KeyContext::Normal],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         Command {
@@ -206,6 +220,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Cut selection to clipboard".to_string(),
             action: Action::Cut,
             contexts: vec![KeyContext::Normal],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         Command {
@@ -213,6 +228,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Paste from clipboard".to_string(),
             action: Action::Paste,
             contexts: vec![KeyContext::Normal],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         Command {
@@ -220,6 +236,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Delete the current line".to_string(),
             action: Action::DeleteLine,
             contexts: vec![KeyContext::Normal],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         Command {
@@ -227,6 +244,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Delete the word before the cursor".to_string(),
             action: Action::DeleteWordBackward,
             contexts: vec![KeyContext::Normal],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         Command {
@@ -234,6 +252,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Delete the word after the cursor".to_string(),
             action: Action::DeleteWordForward,
             contexts: vec![KeyContext::Normal],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         Command {
@@ -241,6 +260,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Delete from cursor to the end of the line".to_string(),
             action: Action::DeleteToLineEnd,
             contexts: vec![KeyContext::Normal],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         Command {
@@ -248,6 +268,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Swap the character before cursor with the one at cursor".to_string(),
             action: Action::TransposeChars,
             contexts: vec![KeyContext::Normal],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         Command {
@@ -255,6 +276,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Insert newline at cursor without moving cursor".to_string(),
             action: Action::OpenLine,
             contexts: vec![KeyContext::Normal],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         Command {
@@ -262,6 +284,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Center the view on the cursor".to_string(),
             action: Action::Recenter,
             contexts: vec![KeyContext::Normal],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         Command {
@@ -269,6 +292,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Set selection anchor to start a selection".to_string(),
             action: Action::SetMark,
             contexts: vec![KeyContext::Normal],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         // Selection
@@ -277,6 +301,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Select all text in the buffer".to_string(),
             action: Action::SelectAll,
             contexts: vec![KeyContext::Normal],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         Command {
@@ -284,6 +309,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Select the word under the cursor".to_string(),
             action: Action::SelectWord,
             contexts: vec![KeyContext::Normal],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         Command {
@@ -291,6 +317,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Select the current line".to_string(),
             action: Action::SelectLine,
             contexts: vec![KeyContext::Normal],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         Command {
@@ -298,6 +325,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Expand the current selection by one word".to_string(),
             action: Action::ExpandSelection,
             contexts: vec![KeyContext::Normal],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         // Multi-cursor
@@ -306,6 +334,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Add a cursor on the line above".to_string(),
             action: Action::AddCursorAbove,
             contexts: vec![KeyContext::Normal],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         Command {
@@ -313,6 +342,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Add a cursor on the line below".to_string(),
             action: Action::AddCursorBelow,
             contexts: vec![KeyContext::Normal],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         Command {
@@ -320,6 +350,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Add a cursor at the next occurrence of the selection".to_string(),
             action: Action::AddCursorNextMatch,
             contexts: vec![KeyContext::Normal],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         Command {
@@ -327,6 +358,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Remove all cursors except the primary".to_string(),
             action: Action::RemoveSecondaryCursors,
             contexts: vec![KeyContext::Normal],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         // Buffer navigation
@@ -335,6 +367,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Switch to the next buffer".to_string(),
             action: Action::NextBuffer,
             contexts: vec![KeyContext::Normal],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         Command {
@@ -342,6 +375,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Switch to the previous buffer".to_string(),
             action: Action::PrevBuffer,
             contexts: vec![KeyContext::Normal],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         Command {
@@ -349,6 +383,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Switch to the most recently used tab".to_string(),
             action: Action::SwitchToPreviousTab,
             contexts: vec![KeyContext::Normal],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         Command {
@@ -356,6 +391,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Switch to a tab by selecting from a list".to_string(),
             action: Action::SwitchToTabByName,
             contexts: vec![KeyContext::Normal],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         // Split operations
@@ -364,6 +400,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Split the current view horizontally".to_string(),
             action: Action::SplitHorizontal,
             contexts: vec![KeyContext::Normal],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         Command {
@@ -371,6 +408,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Split the current view vertically".to_string(),
             action: Action::SplitVertical,
             contexts: vec![KeyContext::Normal],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         Command {
@@ -378,6 +416,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Close the current split pane".to_string(),
             action: Action::CloseSplit,
             contexts: vec![KeyContext::Normal],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         Command {
@@ -385,6 +424,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Move focus to the next split pane".to_string(),
             action: Action::NextSplit,
             contexts: vec![KeyContext::Normal],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         Command {
@@ -392,6 +432,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Move focus to the previous split pane".to_string(),
             action: Action::PrevSplit,
             contexts: vec![KeyContext::Normal],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         Command {
@@ -399,6 +440,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Increase the size of the current split".to_string(),
             action: Action::IncreaseSplitSize,
             contexts: vec![KeyContext::Normal],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         Command {
@@ -406,6 +448,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Decrease the size of the current split".to_string(),
             action: Action::DecreaseSplitSize,
             contexts: vec![KeyContext::Normal],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         // View toggles
@@ -414,6 +457,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Show or hide line numbers in the gutter".to_string(),
             action: Action::ToggleLineNumbers,
             contexts: vec![KeyContext::Normal],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         Command {
@@ -421,6 +465,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Scroll the view up without moving cursor".to_string(),
             action: Action::ScrollUp,
             contexts: vec![KeyContext::Normal],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         Command {
@@ -428,6 +473,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Scroll the view down without moving cursor".to_string(),
             action: Action::ScrollDown,
             contexts: vec![KeyContext::Normal],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         Command {
@@ -435,6 +481,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Scroll the tab bar to show tabs on the left".to_string(),
             action: Action::ScrollTabsLeft,
             contexts: vec![KeyContext::Normal],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         Command {
@@ -442,6 +489,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Scroll the tab bar to show tabs on the right".to_string(),
             action: Action::ScrollTabsRight,
             contexts: vec![KeyContext::Normal],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         Command {
@@ -449,6 +497,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Enable or disable mouse capture".to_string(),
             action: Action::ToggleMouseCapture,
             contexts: vec![KeyContext::Normal],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         // File explorer
@@ -457,6 +506,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Show or hide the file explorer".to_string(),
             action: Action::ToggleFileExplorer,
             contexts: vec![KeyContext::Normal, KeyContext::FileExplorer],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         Command {
@@ -464,6 +514,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Move focus to the file explorer".to_string(),
             action: Action::FocusFileExplorer,
             contexts: vec![KeyContext::Normal],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         Command {
@@ -471,6 +522,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Move focus back to the editor".to_string(),
             action: Action::FocusEditor,
             contexts: vec![KeyContext::FileExplorer],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         Command {
@@ -478,6 +530,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Refresh the file explorer".to_string(),
             action: Action::FileExplorerRefresh,
             contexts: vec![KeyContext::FileExplorer],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         Command {
@@ -485,6 +538,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Create a new file in the current directory".to_string(),
             action: Action::FileExplorerNewFile,
             contexts: vec![KeyContext::FileExplorer],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         Command {
@@ -492,6 +546,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Create a new directory".to_string(),
             action: Action::FileExplorerNewDirectory,
             contexts: vec![KeyContext::FileExplorer],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         Command {
@@ -499,6 +554,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Delete the selected file or directory".to_string(),
             action: Action::FileExplorerDelete,
             contexts: vec![KeyContext::FileExplorer],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         Command {
@@ -506,6 +562,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Rename the selected file or directory".to_string(),
             action: Action::FileExplorerRename,
             contexts: vec![KeyContext::FileExplorer],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         Command {
@@ -513,6 +570,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Show or hide hidden files in the file explorer".to_string(),
             action: Action::FileExplorerToggleHidden,
             contexts: vec![KeyContext::FileExplorer],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         Command {
@@ -520,6 +578,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Show or hide gitignored files in the file explorer".to_string(),
             action: Action::FileExplorerToggleGitignored,
             contexts: vec![KeyContext::FileExplorer],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         // View
@@ -528,6 +587,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Enable or disable line wrapping in the editor".to_string(),
             action: Action::ToggleLineWrap,
             contexts: vec![KeyContext::Normal],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         // Note: Compose mode commands removed - markdown_compose plugin provides these
@@ -536,6 +596,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Choose an ANSI art file to use as a faded background".to_string(),
             action: Action::SetBackground,
             contexts: vec![KeyContext::Normal],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         Command {
@@ -543,6 +604,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Adjust how strongly the background shows through (0-1)".to_string(),
             action: Action::SetBackgroundBlend,
             contexts: vec![KeyContext::Normal],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         // Note: Command Palette is intentionally not in the command list
@@ -553,6 +615,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Search for text in the current buffer".to_string(),
             action: Action::Search,
             contexts: vec![KeyContext::Normal],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         Command {
@@ -560,6 +623,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Search only within the current selection".to_string(),
             action: Action::FindInSelection,
             contexts: vec![KeyContext::Normal],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         Command {
@@ -567,6 +631,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Jump to the next search match".to_string(),
             action: Action::FindNext,
             contexts: vec![KeyContext::Normal],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         Command {
@@ -574,6 +639,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Jump to the previous search match".to_string(),
             action: Action::FindPrevious,
             contexts: vec![KeyContext::Normal],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         Command {
@@ -581,6 +647,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Replace text in the current buffer".to_string(),
             action: Action::Replace,
             contexts: vec![KeyContext::Normal],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         Command {
@@ -588,6 +655,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Interactive replace with y/n/!/q prompts for each match".to_string(),
             action: Action::QueryReplace,
             contexts: vec![KeyContext::Normal],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         // Navigation
@@ -596,6 +664,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Jump to a specific line number".to_string(),
             action: Action::GotoLine,
             contexts: vec![KeyContext::Normal],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         Command {
@@ -604,6 +673,7 @@ pub fn get_all_commands() -> Vec<Command> {
                 .to_string(),
             action: Action::SmartHome,
             contexts: vec![KeyContext::Normal],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         Command {
@@ -611,6 +681,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Trigger autocomplete suggestions at cursor".to_string(),
             action: Action::LspCompletion,
             contexts: vec![KeyContext::Normal],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         Command {
@@ -618,6 +689,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Jump to the definition of the symbol under cursor".to_string(),
             action: Action::LspGotoDefinition,
             contexts: vec![KeyContext::Normal],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         Command {
@@ -625,6 +697,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Show documentation for the symbol under cursor".to_string(),
             action: Action::LspHover,
             contexts: vec![KeyContext::Normal],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         Command {
@@ -632,6 +705,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Find all references to the symbol under cursor".to_string(),
             action: Action::LspReferences,
             contexts: vec![KeyContext::Normal],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         Command {
@@ -639,6 +713,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Show function parameter hints".to_string(),
             action: Action::LspSignatureHelp,
             contexts: vec![KeyContext::Normal],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         Command {
@@ -646,6 +721,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Show available code actions (quick fixes, refactorings)".to_string(),
             action: Action::LspCodeActions,
             contexts: vec![KeyContext::Normal],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         Command {
@@ -653,6 +729,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Start or restart the LSP server for the current language".to_string(),
             action: Action::LspRestart,
             contexts: vec![KeyContext::Normal],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         Command {
@@ -660,6 +737,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Stop a running LSP server (select from list)".to_string(),
             action: Action::LspStop,
             contexts: vec![KeyContext::Normal],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         Command {
@@ -667,6 +745,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Go back in navigation history".to_string(),
             action: Action::NavigateBack,
             contexts: vec![KeyContext::Normal],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         Command {
@@ -674,6 +753,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Go forward in navigation history".to_string(),
             action: Action::NavigateForward,
             contexts: vec![KeyContext::Normal],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         // Smart editing
@@ -682,6 +762,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Comment or uncomment the current line or selection".to_string(),
             action: Action::ToggleComment,
             contexts: vec![KeyContext::Normal],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         Command {
@@ -689,6 +770,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Increase indentation of selected lines".to_string(),
             action: Action::IndentSelection,
             contexts: vec![KeyContext::Normal],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         Command {
@@ -696,6 +778,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Decrease indentation of selected lines".to_string(),
             action: Action::DedentSelection,
             contexts: vec![KeyContext::Normal],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         Command {
@@ -703,6 +786,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Jump to the matching bracket, parenthesis, or brace".to_string(),
             action: Action::GoToMatchingBracket,
             contexts: vec![KeyContext::Normal],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         // Error navigation
@@ -711,6 +795,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Navigate to the next diagnostic error or warning".to_string(),
             action: Action::JumpToNextError,
             contexts: vec![KeyContext::Normal],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         Command {
@@ -718,6 +803,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Navigate to the previous diagnostic error or warning".to_string(),
             action: Action::JumpToPreviousError,
             contexts: vec![KeyContext::Normal],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         // LSP
@@ -726,6 +812,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Rename the symbol under cursor across the project".to_string(),
             action: Action::LspRename,
             contexts: vec![KeyContext::Normal],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         // Bookmarks and Macros
@@ -734,6 +821,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Show all defined bookmarks".to_string(),
             action: Action::ListBookmarks,
             contexts: vec![KeyContext::Normal],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         Command {
@@ -741,6 +829,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Show all recorded macros".to_string(),
             action: Action::ListMacros,
             contexts: vec![KeyContext::Normal],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         Command {
@@ -748,6 +837,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Toggle macro recording for a register (0-9)".to_string(),
             action: Action::PromptRecordMacro,
             contexts: vec![KeyContext::Normal],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         Command {
@@ -755,6 +845,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Stop the current macro recording".to_string(),
             action: Action::StopMacroRecording,
             contexts: vec![KeyContext::Normal],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         Command {
@@ -762,6 +853,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Play macro from a register (0-9)".to_string(),
             action: Action::PromptPlayMacro,
             contexts: vec![KeyContext::Normal],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         Command {
@@ -769,6 +861,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Play the last recorded macro (F12)".to_string(),
             action: Action::PlayLastMacro,
             contexts: vec![KeyContext::Normal],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         Command {
@@ -776,6 +869,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Set a bookmark at current position (0-9)".to_string(),
             action: Action::PromptSetBookmark,
             contexts: vec![KeyContext::Normal],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         Command {
@@ -783,6 +877,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Jump to a bookmark (0-9)".to_string(),
             action: Action::PromptJumpToBookmark,
             contexts: vec![KeyContext::Normal],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         // Help
@@ -791,6 +886,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Open the help manual".to_string(),
             action: Action::ShowHelp,
             contexts: vec![],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         Command {
@@ -798,6 +894,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Display all keyboard shortcuts".to_string(),
             action: Action::ShowKeyboardShortcuts,
             contexts: vec![],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         // Config
@@ -806,6 +903,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Save the current configuration to the user config file".to_string(),
             action: Action::DumpConfig,
             contexts: vec![],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         Command {
@@ -813,6 +911,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Show or hide LSP inlay hints (type hints, parameter hints)".to_string(),
             action: Action::ToggleInlayHints,
             contexts: vec![KeyContext::Normal],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         // Theme selection
@@ -821,6 +920,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Choose a color theme for the editor".to_string(),
             action: Action::SelectTheme,
             contexts: vec![],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         // Keybinding map switching
@@ -829,6 +929,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Switch to the default keybinding map".to_string(),
             action: Action::SwitchKeybindingMap("default".to_string()),
             contexts: vec![],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         Command {
@@ -836,6 +937,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Switch to Emacs-style keybindings".to_string(),
             action: Action::SwitchKeybindingMap("emacs".to_string()),
             contexts: vec![],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
         Command {
@@ -843,6 +945,7 @@ pub fn get_all_commands() -> Vec<Command> {
             description: "Switch to VSCode-style keybindings".to_string(),
             action: Action::SwitchKeybindingMap("vscode".to_string()),
             contexts: vec![],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         },
     ]

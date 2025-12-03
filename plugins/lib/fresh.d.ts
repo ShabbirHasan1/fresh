@@ -504,7 +504,8 @@ interface EditorAPI {
    * @param name - Unique command name (e.g., "my_plugin_action")
    * @param description - Human-readable description
    * @param action - JavaScript function name to call when command is triggered
-   * @param contexts - Comma-separated list of contexts (e.g., "normal,prompt")
+   * @param contexts - Comma-separated list of contexts, including both built-in (normal, prompt, popup,
+   * fileexplorer, menu) and custom plugin-defined contexts (e.g., "normal,config-editor")
    * @param source - Plugin source name (empty string for builtin)
    * @returns true if command was registered
    */
@@ -515,6 +516,15 @@ interface EditorAPI {
    * @returns true if the command was successfully unregistered
    */
   unregisterCommand(name: string): boolean;
+  /**
+   * Set or unset a custom context for command visibility
+   * Custom contexts allow plugins to control when their commands are available.
+   * For example, setting "config-editor" context makes config editor commands visible.
+   * @param name - Context name (e.g., "config-editor")
+   * @param active - Whether the context is active (true = set, false = unset)
+   * @returns true if the context was updated
+   */
+  setContext(name: string, active: boolean): boolean;
   /**
    * Open a file in the editor, optionally at a specific location
    * @param path - File path to open

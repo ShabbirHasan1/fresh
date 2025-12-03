@@ -700,6 +700,7 @@ impl Editor {
                     self.key_context,
                     &self.keybindings,
                     self.has_active_selection(),
+                    &self.active_custom_contexts,
                 );
                 self.start_prompt_with_suggestions(
                     "Command: ".to_string(),

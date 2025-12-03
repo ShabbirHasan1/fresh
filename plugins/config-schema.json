@@ -3,252 +3,6 @@
   "title": "Fresh Editor Configuration",
   "$ref": "#/$defs/Config",
   "$defs": {
-    "Keybinding": {
-      "type": "object",
-      "properties": {
-        "modifiers": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "description": "Modifiers (e.g., [\"ctrl\"], [\"ctrl\", \"shift\"]) - for single-key bindings"
-        },
-        "args": {
-          "type": "object",
-          "additionalProperties": {},
-          "description": "Optional arguments for the action"
-        },
-        "keys": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/KeyPress"
-          },
-          "description": "Key sequence for chord bindings (e.g., [{\"key\": \"x\", \"modifiers\": [\"ctrl\"]}, {\"key\": \"s\", \"modifiers\": [\"ctrl\"]}])\nIf present, takes precedence over key + modifiers"
-        },
-        "key": {
-          "type": "string",
-          "description": "Key name (e.g., \"a\", \"Enter\", \"F1\") - for single-key bindings"
-        },
-        "action": {
-          "type": "string",
-          "description": "Action to perform (e.g., \"insert_char\", \"move_left\")"
-        },
-        "when": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Optional condition (e.g., \"mode == insert\")"
-        }
-      },
-      "required": [
-        "action"
-      ],
-      "description": "Keybinding definition"
-    },
-    "KeyPress": {
-      "type": "object",
-      "properties": {
-        "key": {
-          "type": "string",
-          "description": "Key name (e.g., \"a\", \"Enter\", \"F1\")"
-        },
-        "modifiers": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "description": "Modifiers (e.g., [\"ctrl\"], [\"ctrl\", \"shift\"])"
-        }
-      },
-      "required": [
-        "key"
-      ],
-      "description": "A single key in a sequence"
-    },
-    "EditorConfig": {
-      "type": "object",
-      "properties": {
-        "estimated_line_length": {
-          "type": "integer",
-          "description": "Estimated average line length in bytes (used for large file line estimation)\nThis is used by LineIterator to estimate line positions in large files\nwithout line metadata. Typical values: 80-120 bytes."
-        },
-        "highlight_timeout_ms": {
-          "type": "integer"
-        },
-        "syntax_highlighting": {
-          "type": "boolean"
-        },
-        "snapshot_interval": {
-          "type": "integer"
-        },
-        "tab_size": {
-          "type": "integer"
-        },
-        "recovery_enabled": {
-          "type": "boolean",
-          "description": "Whether to enable file recovery (Emacs-style auto-save)\nWhen enabled, buffers are periodically saved to recovery files\nso they can be recovered if the editor crashes."
-        },
-        "large_file_threshold_bytes": {
-          "type": "integer",
-          "description": "File size threshold in bytes for \"large file\" behavior\nFiles larger than this will:\n- Skip LSP features\n- Use constant-size scrollbar thumb (1 char)\nFiles smaller will count actual lines for accurate scrollbar rendering"
-        },
-        "auto_save_interval_secs": {
-          "type": "integer",
-          "description": "Auto-save interval in seconds for file recovery\nModified buffers are saved to recovery files at this interval.\nDefault: 2 seconds for fast recovery with minimal data loss.\nSet to 0 to disable periodic auto-save (manual recovery only)."
-        },
-        "auto_indent": {
-          "type": "boolean"
-        },
-        "enable_inlay_hints": {
-          "type": "boolean",
-          "description": "Whether to enable LSP inlay hints (type hints, parameter hints, etc.)"
-        },
-        "line_numbers": {
-          "type": "boolean"
-        },
-        "relative_line_numbers": {
-          "type": "boolean"
-        },
-        "line_wrap": {
-          "type": "boolean"
-        },
-        "scroll_offset": {
-          "type": "integer"
-        }
-      },
-      "description": "Editor behavior configuration"
-    },
-    "FileExplorerConfig": {
-      "type": "object",
-      "properties": {
-        "show_gitignored": {
-          "type": "boolean",
-          "description": "Whether to show gitignored files by default"
-        },
-        "width": {
-          "type": "number",
-          "description": "Width of file explorer as percentage (0.0 to 1.0)"
-        },
-        "respect_gitignore": {
-          "type": "boolean",
-          "description": "Whether to respect .gitignore files"
-        },
-        "show_hidden": {
-          "type": "boolean",
-          "description": "Whether to show hidden files (starting with .) by default"
-        },
-        "custom_ignore_patterns": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "description": "Custom patterns to ignore (in addition to .gitignore)"
-        }
-      },
-      "description": "File explorer configuration"
-    },
-    "LanguageConfig": {
-      "type": "object",
-      "properties": {
-        "auto_indent": {
-          "type": "boolean",
-          "description": "Whether to auto-indent"
-        },
-        "extensions": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "description": "File extensions for this language"
-        },
-        "highlighter": {
-          "$ref": "#/$defs/HighlighterPreference",
-          "description": "Preferred highlighter backend (auto, tree-sitter, or textmate)"
-        },
-        "comment_prefix": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Comment prefix"
-        },
-        "textmate_grammar": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Path to custom TextMate grammar file (optional)\nIf specified, this grammar will be used when highlighter is \"textmate\""
-        },
-        "grammar": {
-          "type": "string",
-          "description": "Tree-sitter grammar name"
-        }
-      },
-      "required": [
-        "extensions",
-        "grammar"
-      ],
-      "description": "Language-specific configuration"
-    },
-    "MenuItem": {
-      "type": "string",
-      "enum": [
-        "separator",
-        "action",
-        "label: string",
-        "action: string",
-        "args: hashmap<string, serde_json::value>",
-        "when: option<string>",
-        "checkbox: option<string>"
-      ],
-      "description": "A menu item (action, separator, or submenu)"
-    },
-    "LspServerConfig": {
-      "type": "object",
-      "properties": {
-        "process_limits": {
-          "$ref": "#/$defs/ProcessLimits",
-          "description": "Process resource limits (memory and CPU)"
-        },
-        "auto_start": {
-          "type": "boolean",
-          "description": "Whether to auto-start this LSP server when opening matching files\nIf false (default), the server must be started manually via command palette"
-        },
-        "command": {
-          "type": "string",
-          "description": "Command to spawn the server"
-        },
-        "args": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "description": "Arguments to pass to the server"
-        },
-        "enabled": {
-          "type": "boolean",
-          "description": "Whether the server is enabled"
-        }
-      },
-      "required": [
-        "command",
-        "args"
-      ],
-      "description": "Configuration for a language server"
-    },
     "ProcessLimits": {
       "type": "object",
       "properties": {
@@ -281,6 +35,39 @@
       },
       "description": "Configuration for process resource limits"
     },
+    "LspServerConfig": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "type": "string",
+          "description": "Command to spawn the server"
+        },
+        "enabled": {
+          "type": "boolean",
+          "description": "Whether the server is enabled"
+        },
+        "process_limits": {
+          "$ref": "#/$defs/ProcessLimits",
+          "description": "Process resource limits (memory and CPU)"
+        },
+        "auto_start": {
+          "type": "boolean",
+          "description": "Whether to auto-start this LSP server when opening matching files\nIf false (default), the server must be started manually via command palette"
+        },
+        "args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Arguments to pass to the server"
+        }
+      },
+      "required": [
+        "command",
+        "args"
+      ],
+      "description": "Configuration for a language server"
+    },
     "Config": {
       "type": "object",
       "properties": {
@@ -290,17 +77,12 @@
             "$ref": "#/$defs/LanguageConfig"
           }
         },
-        "theme": {
-          "type": "string"
+        "active_keybinding_map": {
+          "type": "string",
+          "description": "Active keybinding map name (e.g., \"default\", \"emacs\", \"vscode\", or a custom name)"
         },
-        "editor": {
-          "$ref": "#/$defs/EditorConfig"
-        },
-        "lsp": {
-          "type": "object",
-          "additionalProperties": {
-            "$ref": "#/$defs/LspServerConfig"
-          }
+        "file_explorer": {
+          "$ref": "#/$defs/FileExplorerConfig"
         },
         "keybindings": {
           "type": "array",
@@ -309,11 +91,20 @@
           },
           "description": "Custom keybindings (overrides for the active map)"
         },
+        "theme": {
+          "type": "string"
+        },
+        "lsp": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/LspServerConfig"
+          }
+        },
         "menu": {
           "$ref": "#/$defs/MenuConfig"
         },
-        "file_explorer": {
-          "$ref": "#/$defs/FileExplorerConfig"
+        "editor": {
+          "$ref": "#/$defs/EditorConfig"
         },
         "keybinding_maps": {
           "type": "object",
@@ -321,13 +112,214 @@
             "$ref": "#/$defs/KeymapConfig"
           },
           "description": "Named keybinding maps (user can define custom maps here)\nEach map can optionally inherit from another map"
-        },
-        "active_keybinding_map": {
-          "type": "string",
-          "description": "Active keybinding map name (e.g., \"default\", \"emacs\", \"vscode\", or a custom name)"
         }
       },
       "description": "Main configuration structure"
+    },
+    "LanguageConfig": {
+      "type": "object",
+      "properties": {
+        "grammar": {
+          "type": "string",
+          "description": "Tree-sitter grammar name"
+        },
+        "auto_indent": {
+          "type": "boolean",
+          "description": "Whether to auto-indent"
+        },
+        "extensions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "File extensions for this language"
+        },
+        "comment_prefix": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Comment prefix"
+        },
+        "highlighter": {
+          "$ref": "#/$defs/HighlighterPreference",
+          "description": "Preferred highlighter backend (auto, tree-sitter, or textmate)"
+        },
+        "textmate_grammar": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Path to custom TextMate grammar file (optional)\nIf specified, this grammar will be used when highlighter is \"textmate\""
+        }
+      },
+      "required": [
+        "extensions",
+        "grammar"
+      ],
+      "description": "Language-specific configuration"
+    },
+    "KeymapConfig": {
+      "type": "object",
+      "properties": {
+        "inherits": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Optional parent keymap to inherit from"
+        },
+        "bindings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Keybinding"
+          },
+          "description": "Keybindings defined in this keymap"
+        }
+      },
+      "description": "Keymap configuration (for built-in and user-defined keymaps)"
+    },
+    "EditorConfig": {
+      "type": "object",
+      "properties": {
+        "relative_line_numbers": {
+          "type": "boolean"
+        },
+        "enable_inlay_hints": {
+          "type": "boolean",
+          "description": "Whether to enable LSP inlay hints (type hints, parameter hints, etc.)"
+        },
+        "estimated_line_length": {
+          "type": "integer",
+          "description": "Estimated average line length in bytes (used for large file line estimation)\nThis is used by LineIterator to estimate line positions in large files\nwithout line metadata. Typical values: 80-120 bytes."
+        },
+        "auto_save_interval_secs": {
+          "type": "integer",
+          "description": "Auto-save interval in seconds for file recovery\nModified buffers are saved to recovery files at this interval.\nDefault: 2 seconds for fast recovery with minimal data loss.\nSet to 0 to disable periodic auto-save (manual recovery only)."
+        },
+        "large_file_threshold_bytes": {
+          "type": "integer",
+          "description": "File size threshold in bytes for \"large file\" behavior\nFiles larger than this will:\n- Skip LSP features\n- Use constant-size scrollbar thumb (1 char)\nFiles smaller will count actual lines for accurate scrollbar rendering"
+        },
+        "auto_indent": {
+          "type": "boolean"
+        },
+        "tab_size": {
+          "type": "integer"
+        },
+        "scroll_offset": {
+          "type": "integer"
+        },
+        "syntax_highlighting": {
+          "type": "boolean"
+        },
+        "line_wrap": {
+          "type": "boolean"
+        },
+        "line_numbers": {
+          "type": "boolean"
+        },
+        "snapshot_interval": {
+          "type": "integer"
+        },
+        "recovery_enabled": {
+          "type": "boolean",
+          "description": "Whether to enable file recovery (Emacs-style auto-save)\nWhen enabled, buffers are periodically saved to recovery files\nso they can be recovered if the editor crashes."
+        },
+        "highlight_timeout_ms": {
+          "type": "integer"
+        }
+      },
+      "description": "Editor behavior configuration"
+    },
+    "KeyPress": {
+      "type": "object",
+      "properties": {
+        "modifiers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Modifiers (e.g., [\"ctrl\"], [\"ctrl\", \"shift\"])"
+        },
+        "key": {
+          "type": "string",
+          "description": "Key name (e.g., \"a\", \"Enter\", \"F1\")"
+        }
+      },
+      "required": [
+        "key"
+      ],
+      "description": "A single key in a sequence"
+    },
+    "Keybinding": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string",
+          "description": "Key name (e.g., \"a\", \"Enter\", \"F1\") - for single-key bindings"
+        },
+        "when": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Optional condition (e.g., \"mode == insert\")"
+        },
+        "action": {
+          "type": "string",
+          "description": "Action to perform (e.g., \"insert_char\", \"move_left\")"
+        },
+        "modifiers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Modifiers (e.g., [\"ctrl\"], [\"ctrl\", \"shift\"]) - for single-key bindings"
+        },
+        "keys": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/KeyPress"
+          },
+          "description": "Key sequence for chord bindings (e.g., [{\"key\": \"x\", \"modifiers\": [\"ctrl\"]}, {\"key\": \"s\", \"modifiers\": [\"ctrl\"]}])\nIf present, takes precedence over key + modifiers"
+        },
+        "args": {
+          "type": "object",
+          "additionalProperties": {},
+          "description": "Optional arguments for the action"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "description": "Keybinding definition"
+    },
+    "HighlighterPreference": {
+      "type": "string",
+      "enum": [
+        "auto",
+        "tree-sitter",
+        "textmate"
+      ],
+      "default": "auto",
+      "description": "Preference for which syntax highlighting backend to use"
     },
     "MenuConfig": {
       "type": "object",
@@ -344,14 +336,14 @@
     "Menu": {
       "type": "object",
       "properties": {
-        "label": {
-          "type": "string"
-        },
         "items": {
           "type": "array",
           "items": {
             "$ref": "#/$defs/MenuItem"
           }
+        },
+        "label": {
+          "type": "string"
         }
       },
       "required": [
@@ -360,39 +352,47 @@
       ],
       "description": "A top-level menu in the menu bar"
     },
-    "HighlighterPreference": {
-      "type": "string",
-      "enum": [
-        "auto",
-        "tree-sitter",
-        "textmate"
-      ],
-      "default": "auto",
-      "description": "Preference for which syntax highlighting backend to use"
-    },
-    "KeymapConfig": {
+    "FileExplorerConfig": {
       "type": "object",
       "properties": {
-        "bindings": {
+        "respect_gitignore": {
+          "type": "boolean",
+          "description": "Whether to respect .gitignore files"
+        },
+        "show_hidden": {
+          "type": "boolean",
+          "description": "Whether to show hidden files (starting with .) by default"
+        },
+        "width": {
+          "type": "number",
+          "description": "Width of file explorer as percentage (0.0 to 1.0)"
+        },
+        "show_gitignored": {
+          "type": "boolean",
+          "description": "Whether to show gitignored files by default"
+        },
+        "custom_ignore_patterns": {
           "type": "array",
           "items": {
-            "$ref": "#/$defs/Keybinding"
+            "type": "string"
           },
-          "description": "Keybindings defined in this keymap"
-        },
-        "inherits": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Optional parent keymap to inherit from"
+          "description": "Custom patterns to ignore (in addition to .gitignore)"
         }
       },
-      "description": "Keymap configuration (for built-in and user-defined keymaps)"
+      "description": "File explorer configuration"
+    },
+    "MenuItem": {
+      "type": "string",
+      "enum": [
+        "separator",
+        "action",
+        "label: string",
+        "action: string",
+        "args: hashmap<string, serde_json::value>",
+        "when: option<string>",
+        "checkbox: option<string>"
+      ],
+      "description": "A menu item (action, separator, or submenu)"
     }
   }
 }

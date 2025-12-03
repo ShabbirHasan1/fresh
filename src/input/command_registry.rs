@@ -111,13 +111,23 @@ impl CommandRegistry {
         current_context: KeyContext,
         keybinding_resolver: &crate::input::keybindings::KeybindingResolver,
         selection_active: bool,
+        active_custom_contexts: &std::collections::HashSet<String>,
     ) -> Vec<Suggestion> {
         let commands = self.get_all();
 
         // Helper function to check if command is available in current context
         let is_available = |cmd: &Command| -> bool {
-            // Empty contexts means available in all contexts
-            cmd.contexts.is_empty() || cmd.contexts.contains(&current_context)
+            // Check built-in contexts
+            let builtin_ok = cmd.contexts.is_empty() || cmd.contexts.contains(&current_context);
+
+            // Check custom contexts - all required custom contexts must be active
+            let custom_ok = cmd.custom_contexts.is_empty()
+                || cmd
+                    .custom_contexts
+                    .iter()
+                    .all(|ctx| active_custom_contexts.contains(ctx));
+
+            builtin_ok && custom_ok
         };
 
         // Filter and convert to suggestions with history position and fuzzy score
@@ -237,6 +247,7 @@ mod tests {
             description: "A test command".to_string(),
             action: Action::None,
             contexts: vec![],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         };
 
@@ -257,6 +268,7 @@ mod tests {
             description: "A test command".to_string(),
             action: Action::None,
             contexts: vec![],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         };
 
@@ -276,6 +288,7 @@ mod tests {
             description: "First version".to_string(),
             action: Action::None,
             contexts: vec![],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         };
 
@@ -284,6 +297,7 @@ mod tests {
             description: "Second version".to_string(),
             action: Action::None,
             contexts: vec![],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         };
 
@@ -306,6 +320,7 @@ mod tests {
             description: "".to_string(),
             action: Action::None,
             contexts: vec![],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         });
 
@@ -314,6 +329,7 @@ mod tests {
             description: "".to_string(),
             action: Action::None,
             contexts: vec![],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         });
 
@@ -322,6 +338,7 @@ mod tests {
             description: "".to_string(),
             action: Action::None,
             contexts: vec![],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         });
 
@@ -348,10 +365,12 @@ mod tests {
             description: "Test save command".to_string(),
             action: Action::None,
             contexts: vec![KeyContext::Normal],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         });
 
-        let results = registry.filter("save", KeyContext::Normal, &keybindings, false);
+        let empty_contexts = std::collections::HashSet::new();
+        let results = registry.filter("save", KeyContext::Normal, &keybindings, false, &empty_contexts);
         assert!(results.len() >= 2); // At least "Save File" + "Test Save"
 
         // Check that both built-in and custom commands appear
@@ -373,6 +392,7 @@ mod tests {
             description: "Available only in normal context".to_string(),
             action: Action::None,
             contexts: vec![KeyContext::Normal],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         });
 
@@ -381,17 +401,19 @@ mod tests {
             description: "Available only in popup context".to_string(),
             action: Action::None,
             contexts: vec![KeyContext::Popup],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         });
 
         // In normal context, "Popup Only" should be disabled
-        let results = registry.filter("", KeyContext::Normal, &keybindings, false);
+        let empty_contexts = std::collections::HashSet::new();
+        let results = registry.filter("", KeyContext::Normal, &keybindings, false, &empty_contexts);
         let popup_only = results.iter().find(|s| s.text == "Popup Only");
         assert!(popup_only.is_some());
         assert!(popup_only.unwrap().disabled);
 
         // In popup context, "Normal Only" should be disabled
-        let results = registry.filter("", KeyContext::Popup, &keybindings, false);
+        let results = registry.filter("", KeyContext::Popup, &keybindings, false, &empty_contexts);
         let normal_only = results.iter().find(|s| s.text == "Normal Only");
         assert!(normal_only.is_some());
         assert!(normal_only.unwrap().disabled);
@@ -407,6 +429,7 @@ mod tests {
             description: "".to_string(),
             action: Action::None,
             contexts: vec![],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         });
 
@@ -415,6 +438,7 @@ mod tests {
             description: "".to_string(),
             action: Action::None,
             contexts: vec![],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         });
 
@@ -437,6 +461,7 @@ mod tests {
             description: "Custom save implementation".to_string(),
             action: Action::None,
             contexts: vec![],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         });
 
@@ -478,7 +503,8 @@ mod tests {
         registry.record_usage("Open File");
 
         // Filter with empty query should return history-sorted results
-        let results = registry.filter("", KeyContext::Normal, &keybindings, false);
+        let empty_contexts = std::collections::HashSet::new();
+        let results = registry.filter("", KeyContext::Normal, &keybindings, false, &empty_contexts);
 
         // Find positions of our test commands in results
         let open_pos = results.iter().position(|s| s.text == "Open File").unwrap();
@@ -530,6 +556,7 @@ mod tests {
             description: "".to_string(),
             action: Action::None,
             contexts: vec![],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         });
 
@@ -538,13 +565,15 @@ mod tests {
             description: "".to_string(),
             action: Action::None,
             contexts: vec![],
+            custom_contexts: vec![],
             source: CommandSource::Builtin,
         });
 
         // Use one built-in command
         registry.record_usage("Save File");
 
-        let results = registry.filter("", KeyContext::Normal, &keybindings, false);
+        let empty_contexts = std::collections::HashSet::new();
+        let results = registry.filter("", KeyContext::Normal, &keybindings, false, &empty_contexts);
 
         let save_pos = results.iter().position(|s| s.text == "Save File").unwrap();
         let alpha_pos = results

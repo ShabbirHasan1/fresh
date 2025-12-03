@@ -862,7 +862,8 @@ fn op_fresh_insert_at_cursor(state: &mut OpState, #[string] text: String) -> boo
 /// @param name - Unique command name (e.g., "my_plugin_action")
 /// @param description - Human-readable description
 /// @param action - JavaScript function name to call when command is triggered
-/// @param contexts - Comma-separated list of contexts (e.g., "normal,prompt")
+/// @param contexts - Comma-separated list of contexts, including both built-in (normal, prompt, popup,
+///                   fileexplorer, menu) and custom plugin-defined contexts (e.g., "normal,config-editor")
 /// @param source - Plugin source name (empty string for builtin)
 /// @returns true if command was registered
 #[op2(fast)]
@@ -877,26 +878,32 @@ fn op_fresh_register_command(
     if let Some(runtime_state) = state.try_borrow::<Rc<RefCell<TsRuntimeState>>>() {
         let runtime_state = runtime_state.borrow();
 
-        // Parse contexts string (comma-separated, e.g., "normal,prompt,popup")
-        let context_list: Vec<crate::input::keybindings::KeyContext> = if contexts.trim().is_empty()
-        {
-            vec![] // Empty = available in all contexts
-        } else {
-            contexts
-                .split(',')
-                .filter_map(|s| match s.trim().to_lowercase().as_str() {
-                    "global" => Some(crate::input::keybindings::KeyContext::Global),
-                    "normal" => Some(crate::input::keybindings::KeyContext::Normal),
-                    "prompt" => Some(crate::input::keybindings::KeyContext::Prompt),
-                    "popup" => Some(crate::input::keybindings::KeyContext::Popup),
+        // Parse contexts string - separate into built-in KeyContext values and custom contexts
+        let mut context_list: Vec<crate::input::keybindings::KeyContext> = Vec::new();
+        let mut custom_context_list: Vec<String> = Vec::new();
+
+        if !contexts.trim().is_empty() {
+            for ctx in contexts.split(',').map(|s| s.trim()) {
+                if ctx.is_empty() {
+                    continue;
+                }
+                // Try to parse as built-in context
+                match ctx.to_lowercase().as_str() {
+                    "global" => context_list.push(crate::input::keybindings::KeyContext::Global),
+                    "normal" => context_list.push(crate::input::keybindings::KeyContext::Normal),
+                    "prompt" => context_list.push(crate::input::keybindings::KeyContext::Prompt),
+                    "popup" => context_list.push(crate::input::keybindings::KeyContext::Popup),
                     "fileexplorer" | "file_explorer" => {
-                        Some(crate::input::keybindings::KeyContext::FileExplorer)
+                        context_list.push(crate::input::keybindings::KeyContext::FileExplorer)
                     }
-                    "menu" => Some(crate::input::keybindings::KeyContext::Menu),
-                    _ => None,
-                })
-                .collect()
-        };
+                    "menu" => context_list.push(crate::input::keybindings::KeyContext::Menu),
+                    _ => {
+                        // Not a built-in context, treat as custom context
+                        custom_context_list.push(ctx.to_string());
+                    }
+                }
+            }
+        }
 
         // Use the explicit source parameter
         let command_source = if source.is_empty() {
@@ -910,6 +917,7 @@ fn op_fresh_register_command(
             description,
             action: crate::input::keybindings::Action::PluginAction(action),
             contexts: context_list,
+            custom_contexts: custom_context_list,
             source: command_source,
         };
 
@@ -931,6 +939,24 @@ fn op_fresh_unregister_command(state: &mut OpState, #[string] name: String) -> b
         let result = runtime_state
             .command_sender
             .send(PluginCommand::UnregisterCommand { name });
+        return result.is_ok();
+    }
+    false
+}
+
+/// Set or unset a custom context for command visibility
+/// Custom contexts allow plugins to control when their commands are available.
+/// For example, setting "config-editor" context makes config editor commands visible.
+/// @param name - Context name (e.g., "config-editor")
+/// @param active - Whether the context is active (true = set, false = unset)
+/// @returns true if the context was updated
+#[op2(fast)]
+fn op_fresh_set_context(state: &mut OpState, #[string] name: String, active: bool) -> bool {
+    if let Some(runtime_state) = state.try_borrow::<Rc<RefCell<TsRuntimeState>>>() {
+        let runtime_state = runtime_state.borrow();
+        let result = runtime_state
+            .command_sender
+            .send(PluginCommand::SetContext { name, active });
         return result.is_ok();
     }
     false
@@ -2629,6 +2655,7 @@ extension!(
         op_fresh_insert_at_cursor,
         op_fresh_register_command,
         op_fresh_unregister_command,
+        op_fresh_set_context,
         op_fresh_open_file,
         op_fresh_get_active_split_id,
         op_fresh_open_file_in_split,
@@ -2872,6 +2899,11 @@ impl TypeScriptRuntime {
 
                     unregisterCommand(name) {
                         return core.ops.op_fresh_unregister_command(name);
+                    },
+
+                    // Context management
+                    setContext(name, active) {
+                        return core.ops.op_fresh_set_context(name, active);
                     },
 
                     // File operations
