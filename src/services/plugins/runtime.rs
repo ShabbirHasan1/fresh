@@ -2706,12 +2706,8 @@ extension!(
     ],
 );
 
-/// Pending response senders type alias for convenience
-pub type PendingResponses = Arc<
-    std::sync::Mutex<
-        HashMap<u64, tokio::sync::oneshot::Sender<crate::services::plugins::api::PluginResponse>>,
-    >,
->;
+// Re-export PendingResponses from the backend module
+pub use crate::services::plugins::backend::PendingResponses;
 
 /// TypeScript plugin runtime
 pub struct TypeScriptRuntime {
