@@ -161,14 +161,16 @@ impl Editor {
             if expanded_path.is_dir() {
                 self.file_open_navigate_to(expanded_path);
                 return;
-            } else if expanded_path.exists() || !expanded_path.to_string_lossy().ends_with('/') {
-                // Open the file (exists or will be created as new buffer)
+            } else if expanded_path.is_file() {
+                // File exists - open it directly (handles pasted paths before async load completes)
                 self.file_open_open_file(expanded_path);
                 return;
             }
+            // File doesn't exist - fall through to use selected entry from file list
+            // This allows partial filters like "bar" to match "bar.txt"
         }
 
-        // No prompt input or path resolution failed - use the selected entry from the file list
+        // Use the selected entry from the file list
         let (path, is_dir) = {
             let state = match &self.file_open_state {
                 Some(s) => s,
