@@ -3,6 +3,7 @@ use crate::input::keybindings::Action;
 use crate::model::event::{BufferId, SplitDirection, SplitId};
 use crate::services::async_bridge::LspMessageType;
 use ratatui::layout::Rect;
+use std::collections::HashMap;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 
@@ -327,6 +328,17 @@ pub(super) struct MouseState {
     pub hover_target: Option<HoverTarget>,
 }
 
+/// Mapping from visual row to buffer positions for mouse click handling
+/// Each entry represents one visual row with byte position info for click handling
+#[derive(Debug, Clone, Default)]
+pub struct ViewLineMapping {
+    /// Maps display column to buffer byte position (None for injected/virtual content)
+    pub char_mappings: Vec<Option<usize>>,
+    /// Last valid byte position in this visual row (newline for real lines, last char for wrapped)
+    /// Clicks past end of visible text position cursor here
+    pub line_end_byte: usize,
+}
+
 /// Cached layout information for mouse hit testing
 #[derive(Debug, Clone, Default)]
 pub(super) struct CachedLayout {
@@ -353,4 +365,8 @@ pub(super) struct CachedLayout {
     /// Close split button hit areas
     /// (split_id, row, start_col, end_col)
     pub close_split_areas: Vec<(SplitId, u16, u16, u16)>,
+    /// View line mappings for accurate mouse click positioning per split
+    /// Maps visual row index to character position mappings
+    /// Used to translate screen coordinates to buffer byte positions
+    pub view_line_mappings: HashMap<SplitId, Vec<ViewLineMapping>>,
 }

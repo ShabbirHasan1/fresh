@@ -3402,6 +3402,13 @@ impl Editor {
             self.set_active_buffer(buffer_id);
         }
 
+        // Get cached view line mappings for this split (before mutable borrow of buffers)
+        let cached_mappings = self
+            .cached_layout
+            .view_line_mappings
+            .get(&split_id)
+            .cloned();
+
         // Calculate clicked position in buffer
         if let Some(state) = self.buffers.get_mut(&buffer_id) {
             // Account for left margin (line numbers)
@@ -3416,45 +3423,37 @@ impl Editor {
                 return Ok(());
             }
 
-            // Adjust for gutter
-            let text_col = content_col.saturating_sub(gutter_width);
+            // Adjust for gutter - this gives us the display column in the text area
+            let text_col = content_col.saturating_sub(gutter_width) as usize;
 
-            // Account for horizontal scroll
-            let actual_col = (text_col as usize) + state.viewport.left_column;
-
-            // Find the byte position for this line and column
-            let mut line_iter = state.buffer.line_iterator(state.viewport.top_byte, 80);
-
-            // Navigate to the clicked line
-            let mut line_start = state.viewport.top_byte;
-            let target_position;
-            for _ in 0..content_row {
-                if let Some((pos, _content)) = line_iter.next() {
-                    line_start = pos;
-                } else {
-                    break;
-                }
-            }
-
-            // Get the content of the target line
-            if let Some((pos, line_content)) = line_iter.next() {
-                line_start = pos;
-                // Calculate byte offset within the line by iterating through characters
-                // to properly handle multi-byte UTF-8 characters
-                let mut byte_offset = 0;
-                let mut col_count = 0;
-                for ch in line_content.chars() {
-                    if col_count >= actual_col {
-                        break;
+            // Use cached view line mappings for accurate position lookup
+            // This properly handles line wrapping, virtual lines, and multi-byte characters
+            let visual_row = content_row as usize;
+            let target_position = cached_mappings
+                .as_ref()
+                .and_then(|mappings| mappings.get(visual_row))
+                .map(|line_mapping| {
+                    // First try to get the exact column position from char_mappings
+                    if text_col < line_mapping.char_mappings.len() {
+                        // Direct lookup - check if this column has a valid buffer position
+                        if let Some(byte_pos) = line_mapping.char_mappings[text_col] {
+                            return byte_pos;
+                        }
+                        // Column exists but maps to virtual/injected content
+                        // Find the nearest real position by searching backwards
+                        for col in (0..text_col).rev() {
+                            if let Some(byte_pos) = line_mapping.char_mappings[col] {
+                                return byte_pos;
+                            }
+                        }
+                        // No real position found before click - use line_end_byte
+                        line_mapping.line_end_byte
+                    } else {
+                        // Click is past the end of visible content - use line_end_byte
+                        line_mapping.line_end_byte
                     }
-                    byte_offset += ch.len_utf8();
-                    col_count += 1;
-                }
-                target_position = line_start + byte_offset;
-            } else {
-                // If we're past the last line, use the line start
-                target_position = line_start;
-            }
+                })
+                .unwrap_or(state.viewport.top_byte); // Fallback to viewport start if no mapping
 
             // Check for onClick text property at this position
             // This enables clickable UI elements in virtual buffers

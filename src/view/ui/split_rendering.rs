@@ -2,6 +2,7 @@
 
 use std::collections::BTreeMap;
 
+use crate::app::types::ViewLineMapping;
 use crate::app::BufferMetadata;
 use crate::model::buffer::Buffer;
 use crate::model::cursor::SelectionMode;
@@ -425,6 +426,7 @@ impl SplitRenderer {
         )>,
         Vec<(crate::model::event::SplitId, BufferId, u16, u16, u16, u16)>,
         Vec<(crate::model::event::SplitId, u16, u16, u16)>, // close split button areas
+        HashMap<crate::model::event::SplitId, Vec<ViewLineMapping>>, // view line mappings for mouse clicks
     ) {
         let _span = tracing::trace_span!("render_content").entered();
 
@@ -437,6 +439,8 @@ impl SplitRenderer {
         let mut split_areas = Vec::new();
         let mut all_tab_areas = Vec::new();
         let mut close_split_areas = Vec::new();
+        let mut view_line_mappings: HashMap<crate::model::event::SplitId, Vec<ViewLineMapping>> =
+            HashMap::new();
 
         // Render each split
         for (split_id, buffer_id, split_area) in visible_buffers {
@@ -501,7 +505,7 @@ impl SplitRenderer {
                 Self::sync_viewport_to_content(state, layout.content_rect);
                 let view_prefs = Self::resolve_view_preferences(state, split_view_states, split_id);
 
-                Self::render_buffer_in_split(
+                let split_view_mappings = Self::render_buffer_in_split(
                     frame,
                     state,
                     event_log_opt,
@@ -519,6 +523,9 @@ impl SplitRenderer {
                     buffer_id,
                     hide_cursor,
                 );
+
+                // Store view line mappings for mouse click handling
+                view_line_mappings.insert(split_id, split_view_mappings);
 
                 // For small files, count actual lines for accurate scrollbar
                 // For large files, we'll use a constant thumb size
@@ -561,7 +568,12 @@ impl SplitRenderer {
             Self::render_separator(frame, direction, x, y, length, theme);
         }
 
-        (split_areas, all_tab_areas, close_split_areas)
+        (
+            split_areas,
+            all_tab_areas,
+            close_split_areas,
+            view_line_mappings,
+        )
     }
 
     /// Render a split separator line
@@ -2311,6 +2323,7 @@ impl SplitRenderer {
     }
 
     /// Render a single buffer in a split pane
+    /// Returns the view line mappings for mouse click handling
     fn render_buffer_in_split(
         frame: &mut Frame,
         state: &mut EditorState,
@@ -2328,7 +2341,7 @@ impl SplitRenderer {
         estimated_line_length: usize,
         _buffer_id: BufferId,
         hide_cursor: bool,
-    ) {
+    ) -> Vec<ViewLineMapping> {
         let _span = tracing::trace_span!("render_buffer_in_split").entered();
 
         let line_wrap = state.viewport.line_wrap_enabled;
@@ -2534,6 +2547,34 @@ impl SplitRenderer {
                 }
             }
         }
+
+        // Extract view line mappings for mouse click handling
+        // This maps screen coordinates to buffer byte positions
+        Self::extract_view_line_mappings(view_lines_to_render)
+    }
+
+    /// Extract ViewLineMapping from rendered view lines
+    /// This captures the char_mappings from each ViewLine for accurate mouse click positioning
+    fn extract_view_line_mappings(view_lines: &[ViewLine]) -> Vec<ViewLineMapping> {
+        view_lines
+            .iter()
+            .map(|vl| {
+                // line_end_byte is the last valid mapping in char_mappings.
+                // For lines ending with newline, this IS the newline position.
+                // For wrapped continuations, this is the last char before the wrap.
+                let line_end_byte = vl
+                    .char_mappings
+                    .iter()
+                    .filter_map(|m| *m)
+                    .last()
+                    .unwrap_or(0);
+
+                ViewLineMapping {
+                    char_mappings: vl.char_mappings.clone(),
+                    line_end_byte,
+                }
+            })
+            .collect()
     }
 
     /// Apply styles from original line_spans to a wrapped segment

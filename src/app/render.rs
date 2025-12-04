@@ -267,28 +267,30 @@ impl Editor {
             _ => None,
         };
 
-        let (split_areas, tab_areas, close_split_areas) = SplitRenderer::render_content(
-            frame,
-            editor_content_area,
-            &self.split_manager,
-            &mut self.buffers,
-            &self.buffer_metadata,
-            &mut self.event_logs,
-            &self.theme,
-            self.ansi_background.as_ref(),
-            self.background_fade,
-            lsp_waiting,
-            self.config.editor.large_file_threshold_bytes,
-            self.config.editor.line_wrap,
-            self.config.editor.estimated_line_length,
-            Some(&self.split_view_states),
-            hide_cursor,
-            hovered_tab,
-            hovered_close_split,
-        );
+        let (split_areas, tab_areas, close_split_areas, view_line_mappings) =
+            SplitRenderer::render_content(
+                frame,
+                editor_content_area,
+                &self.split_manager,
+                &mut self.buffers,
+                &self.buffer_metadata,
+                &mut self.event_logs,
+                &self.theme,
+                self.ansi_background.as_ref(),
+                self.background_fade,
+                lsp_waiting,
+                self.config.editor.large_file_threshold_bytes,
+                self.config.editor.line_wrap,
+                self.config.editor.estimated_line_length,
+                Some(&self.split_view_states),
+                hide_cursor,
+                hovered_tab,
+                hovered_close_split,
+            );
         self.cached_layout.split_areas = split_areas;
         self.cached_layout.tab_areas = tab_areas;
         self.cached_layout.close_split_areas = close_split_areas;
+        self.cached_layout.view_line_mappings = view_line_mappings;
         self.cached_layout.separator_areas = self
             .split_manager
             .get_separators_with_ids(editor_content_area);

@@ -703,6 +703,251 @@ fn test_wrapped_line_scrolling_down_past_viewport() {
     );
 }
 
+/// Test mouse clicking on wrapped lines positions cursor correctly
+/// This test validates that clicking on:
+/// 1. The first visual row of a wrapped line
+/// 2. Continuation rows (wrapped portions)
+/// 3. Empty lines
+/// all position the cursor at the correct buffer offset
+#[test]
+fn test_mouse_click_on_wrapped_lines() {
+    const TERMINAL_WIDTH: u16 = 60;
+    const TERMINAL_HEIGHT: u16 = 24;
+    const GUTTER_WIDTH: u16 = 8; // Line numbers + margin
+
+    let mut harness = EditorTestHarness::new(TERMINAL_WIDTH, TERMINAL_HEIGHT).unwrap();
+
+    // Create content with:
+    // Line 1: A long line that will wrap to multiple visual rows
+    // Line 2: An empty line
+    // Line 3: A short line
+    let long_line =
+        "The quick brown fox jumps over the lazy dog and continues running through the forest.";
+    let short_line = "Short line here.";
+
+    harness.type_text(long_line).unwrap();
+    harness
+        .send_key(KeyCode::Enter, KeyModifiers::NONE)
+        .unwrap();
+    // Empty line (just press Enter again)
+    harness
+        .send_key(KeyCode::Enter, KeyModifiers::NONE)
+        .unwrap();
+    harness.type_text(short_line).unwrap();
+
+    harness.render().unwrap();
+
+    let buffer_content = harness.get_buffer_content().unwrap();
+    eprintln!("Buffer content ({} bytes):", buffer_content.len());
+    eprintln!(
+        "  Line 1 (long): '{}' ({} chars)",
+        long_line,
+        long_line.len()
+    );
+    eprintln!("  Line 2: (empty)");
+    eprintln!(
+        "  Line 3 (short): '{}' ({} chars)",
+        short_line,
+        short_line.len()
+    );
+
+    // Calculate expected positions
+    let line1_start = 0usize;
+    let line2_start = long_line.len() + 1; // after long_line + newline
+    let line3_start = line2_start + 1; // after empty line's newline
+
+    eprintln!("\nExpected buffer positions:");
+    eprintln!("  Line 1 starts at byte: {}", line1_start);
+    eprintln!("  Line 2 starts at byte: {}", line2_start);
+    eprintln!("  Line 3 starts at byte: {}", line3_start);
+
+    // Get content area info
+    let (content_first_row, _content_last_row) = harness.content_area_rows();
+    eprintln!("\nContent area starts at row: {}", content_first_row);
+
+    // ========================================
+    // Test 1: Click on first visual row of wrapped line (line 1)
+    // ========================================
+    eprintln!("\n=== Test 1: Click on first row of wrapped line ===");
+
+    // Click near the beginning of the first line (in text area, after gutter)
+    let click_x = GUTTER_WIDTH + 5; // 5 chars into the text
+    let click_y = content_first_row as u16;
+
+    harness.mouse_click(click_x, click_y).unwrap();
+    harness.render().unwrap();
+
+    let pos_after_click1 = harness.cursor_position();
+    eprintln!(
+        "Clicked at screen ({}, {}), cursor now at buffer position: {}",
+        click_x, click_y, pos_after_click1
+    );
+
+    // Cursor should be near position 5 (within the first line)
+    assert!(
+        pos_after_click1 < long_line.len(),
+        "Click on first row should position cursor within line 1 (pos {} should be < {})",
+        pos_after_click1,
+        long_line.len()
+    );
+    // Should be roughly where we clicked (allowing some tolerance for character width)
+    assert!(
+        pos_after_click1 >= 3 && pos_after_click1 <= 10,
+        "Click at x={} should position cursor around position 5, got {}",
+        click_x,
+        pos_after_click1
+    );
+    eprintln!("  ✓ Cursor correctly positioned in first visual row");
+
+    // ========================================
+    // Test 2: Click on continuation row (second visual row of line 1)
+    // ========================================
+    eprintln!("\n=== Test 2: Click on wrapped continuation row ===");
+
+    // The text width available is TERMINAL_WIDTH - GUTTER_WIDTH - 1 (scrollbar) = 60 - 8 - 1 = 51
+    // So the first wrap should occur around character 51
+    let text_width = (TERMINAL_WIDTH - GUTTER_WIDTH - 1) as usize;
+    eprintln!("Text width per row: {} chars", text_width);
+
+    // Click on the second visual row (continuation of line 1)
+    let click_x = GUTTER_WIDTH + 10; // 10 chars into the continuation
+    let click_y = content_first_row as u16 + 1; // Second visual row
+
+    harness.mouse_click(click_x, click_y).unwrap();
+    harness.render().unwrap();
+
+    let pos_after_click2 = harness.cursor_position();
+    eprintln!(
+        "Clicked at screen ({}, {}), cursor now at buffer position: {}",
+        click_x, click_y, pos_after_click2
+    );
+
+    // Cursor should be in the wrapped portion of line 1
+    // That means position should be >= text_width (past first visual row)
+    // and still within line 1 (< long_line.len())
+    assert!(
+        pos_after_click2 >= text_width.saturating_sub(5),
+        "Click on continuation row should position cursor past first visual row (pos {} should be >= ~{})",
+        pos_after_click2,
+        text_width
+    );
+    assert!(
+        pos_after_click2 < long_line.len(),
+        "Click on continuation row should stay within line 1 (pos {} should be < {})",
+        pos_after_click2,
+        long_line.len()
+    );
+    eprintln!("  ✓ Cursor correctly positioned in continuation row");
+
+    // ========================================
+    // Test 3: Click on empty line (line 2)
+    // ========================================
+    eprintln!("\n=== Test 3: Click on empty line ===");
+
+    // First, find which visual row the empty line is on
+    // Line 1 wraps to ~2 visual rows (85 chars / 51 chars per row ≈ 2 rows)
+    let visual_rows_for_line1 = (long_line.len() + text_width - 1) / text_width;
+    eprintln!("Line 1 takes {} visual rows", visual_rows_for_line1);
+
+    let empty_line_visual_row = content_first_row + visual_rows_for_line1;
+    eprintln!(
+        "Empty line should be at visual row: {}",
+        empty_line_visual_row
+    );
+
+    // Click on the empty line
+    let click_x = GUTTER_WIDTH + 5; // Doesn't matter much for empty line
+    let click_y = empty_line_visual_row as u16;
+
+    harness.mouse_click(click_x, click_y).unwrap();
+    harness.render().unwrap();
+
+    let pos_after_click3 = harness.cursor_position();
+    eprintln!(
+        "Clicked at screen ({}, {}), cursor now at buffer position: {}",
+        click_x, click_y, pos_after_click3
+    );
+
+    // Cursor should be at the start of line 2 (the empty line)
+    // or at the newline position of line 1
+    assert!(
+        pos_after_click3 >= long_line.len() && pos_after_click3 <= line2_start,
+        "Click on empty line should position cursor at/near line 2 start (pos {} should be around {})",
+        pos_after_click3,
+        line2_start
+    );
+    eprintln!("  ✓ Cursor correctly positioned on empty line");
+
+    // ========================================
+    // Test 4: Click on line after empty line (line 3)
+    // ========================================
+    eprintln!("\n=== Test 4: Click on line after empty line ===");
+
+    let short_line_visual_row = empty_line_visual_row + 1;
+    eprintln!(
+        "Short line should be at visual row: {}",
+        short_line_visual_row
+    );
+
+    // Click on the short line
+    let click_x = GUTTER_WIDTH + 3;
+    let click_y = short_line_visual_row as u16;
+
+    harness.mouse_click(click_x, click_y).unwrap();
+    harness.render().unwrap();
+
+    let pos_after_click4 = harness.cursor_position();
+    eprintln!(
+        "Clicked at screen ({}, {}), cursor now at buffer position: {}",
+        click_x, click_y, pos_after_click4
+    );
+
+    // Cursor should be within line 3
+    assert!(
+        pos_after_click4 >= line3_start,
+        "Click on line 3 should position cursor at or after line 3 start (pos {} should be >= {})",
+        pos_after_click4,
+        line3_start
+    );
+    assert!(
+        pos_after_click4 <= line3_start + short_line.len(),
+        "Click on line 3 should position cursor within line 3 (pos {} should be <= {})",
+        pos_after_click4,
+        line3_start + short_line.len()
+    );
+    eprintln!("  ✓ Cursor correctly positioned on line after empty line");
+
+    // ========================================
+    // Test 5: Click at end of wrapped line (rightmost position before wrap)
+    // ========================================
+    eprintln!("\n=== Test 5: Click at end of first visual row ===");
+
+    // Click at the rightmost text position of the first visual row
+    let click_x = TERMINAL_WIDTH - 2; // Just before the scrollbar
+    let click_y = content_first_row as u16;
+
+    harness.mouse_click(click_x, click_y).unwrap();
+    harness.render().unwrap();
+
+    let pos_after_click5 = harness.cursor_position();
+    eprintln!(
+        "Clicked at screen ({}, {}), cursor now at buffer position: {}",
+        click_x, click_y, pos_after_click5
+    );
+
+    // Cursor should be near the end of the first visual row
+    // (around text_width position, give or take)
+    assert!(
+        pos_after_click5 >= text_width.saturating_sub(5) && pos_after_click5 <= text_width + 5,
+        "Click at end of first visual row should position cursor near wrap point (pos {} should be around {})",
+        pos_after_click5,
+        text_width
+    );
+    eprintln!("  ✓ Cursor correctly positioned at end of first visual row");
+
+    eprintln!("\n=== All mouse click tests passed! ===");
+}
+
 /// Test that cursor doesn't move into empty space beyond wrapped line ends
 /// Bug: Cursor can move several characters past the visible text before wrapping down
 /// TODO: This test is currently disabled due to rendering issues that need investigation
