@@ -191,6 +191,45 @@ function convertJsonSchemaToFieldSchema(
     return merged;
   }
 
+  // Handle anyOf/oneOf (union types - pick the most specific object variant)
+  const unionSchemas = jsonSchema.anyOf || jsonSchema.oneOf;
+  if (unionSchemas && unionSchemas.length > 0) {
+    // Find the most useful variant - prefer objects with properties over primitives
+    let bestSchema: JsonSchema | null = null;
+    let bestScore = -1;
+
+    for (const variant of unionSchemas) {
+      // Resolve any refs
+      let resolved = variant;
+      if (variant.$ref) {
+        const ref = resolveRef(variant.$ref, rootSchema);
+        if (ref) resolved = ref;
+      }
+
+      // Score based on usefulness for editing
+      let score = 0;
+      if (resolved.type === "object" && resolved.properties) {
+        score = 10 + Object.keys(resolved.properties).length;
+      } else if (resolved.type === "object") {
+        score = 5;
+      } else if (resolved.type === "string" || resolved.type === "number" || resolved.type === "boolean") {
+        score = 1;
+      }
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestSchema = resolved;
+      }
+    }
+
+    if (bestSchema) {
+      const result = convertJsonSchemaToFieldSchema(bestSchema, rootSchema, propertyName);
+      // Store all variants for potential future use (e.g., variant selection UI)
+      result.description = jsonSchema.description || result.description;
+      return result;
+    }
+  }
+
   // Determine type
   let fieldType: FieldType = "string";
   const jsonType = Array.isArray(jsonSchema.type) ? jsonSchema.type[0] : jsonSchema.type;
