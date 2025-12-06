@@ -197,7 +197,13 @@ fn main() -> io::Result<()> {
     if let Ok(log_file) = std::fs::File::create(&args.log_file) {
         tracing_subscriber::registry()
             .with(fmt::layer().with_writer(std::sync::Arc::new(log_file)))
-            .with(EnvFilter::from_default_env().add_directive(tracing::Level::DEBUG.into()))
+            .with(
+                EnvFilter::from_default_env()
+                    .add_directive(tracing::Level::DEBUG.into())
+                    // Suppress noisy SWC debug logs
+                    .add_directive("swc_ecma_transforms_base=info".parse().unwrap())
+                    .add_directive("swc_common=info".parse().unwrap()),
+            )
             .init();
     }
 
@@ -500,8 +506,8 @@ fn run_event_loop(
 
 /// Handle a keyboard event
 fn handle_key_event(editor: &mut Editor, key_event: KeyEvent) -> io::Result<()> {
-    // Debug trace the full key event
-    tracing::debug!(
+    // Trace the full key event
+    tracing::trace!(
         "Key event received: code={:?}, modifiers={:?}, kind={:?}, state={:?}",
         key_event.code,
         key_event.modifiers,

@@ -1199,7 +1199,7 @@ impl Editor {
     pub(super) fn collect_lsp_changes(&self, event: &Event) -> Vec<TextDocumentContentChangeEvent> {
         match event {
             Event::Insert { position, text, .. } => {
-                tracing::debug!(
+                tracing::trace!(
                     "collect_lsp_changes: processing Insert at position {}",
                     position
                 );
@@ -1217,7 +1217,7 @@ impl Editor {
                 }]
             }
             Event::Delete { range, .. } => {
-                tracing::debug!("collect_lsp_changes: processing Delete range {:?}", range);
+                tracing::trace!("collect_lsp_changes: processing Delete range {:?}", range);
                 // For delete: create a range from start to end, send empty string
                 let (start_line, start_char) = self
                     .active_state()
@@ -1240,7 +1240,7 @@ impl Editor {
             Event::Batch { events, .. } => {
                 // Collect all changes from sub-events into a single vector
                 // This allows sending all changes in one didChange notification
-                tracing::debug!(
+                tracing::trace!(
                     "collect_lsp_changes: processing Batch with {} events",
                     events.len()
                 );

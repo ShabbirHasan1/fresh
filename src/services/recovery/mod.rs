@@ -286,7 +286,7 @@ impl RecoveryService {
         self.last_save_times
             .insert(buffer_id.to_string(), Instant::now());
 
-        tracing::debug!(
+        tracing::trace!(
             "Saved recovery for buffer {} (original: {} bytes, final: {} bytes)",
             buffer_id,
             original_file_size,

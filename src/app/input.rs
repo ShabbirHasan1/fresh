@@ -30,7 +30,7 @@ impl Editor {
 
         let _t_total = std::time::Instant::now();
 
-        tracing::debug!(
+        tracing::trace!(
             "Editor.handle_key: code={:?}, modifiers={:?}",
             code,
             modifiers
@@ -124,7 +124,7 @@ impl Editor {
         // Regular single-key resolution
         let action = self.keybindings.resolve(&key_event, context);
 
-        tracing::debug!("Context: {:?} -> Action: {:?}", context, action);
+        tracing::trace!("Context: {:?} -> Action: {:?}", context, action);
 
         // Cancel pending LSP requests on user actions (except LSP actions themselves)
         // This ensures stale completions don't show up after the user has moved on

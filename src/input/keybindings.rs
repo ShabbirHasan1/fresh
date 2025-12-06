@@ -939,7 +939,7 @@ impl KeybindingResolver {
         let mut full_sequence = chord_state.to_vec();
         full_sequence.push((event.code, event.modifiers));
 
-        tracing::debug!(
+        tracing::trace!(
             "KeybindingResolver.resolve_chord: sequence={:?}, context={:?}",
             full_sequence,
             context
@@ -963,7 +963,7 @@ impl KeybindingResolver {
             if let Some(context_chords) = binding_map.get(bind_context) {
                 // Check for exact match
                 if let Some(action) = context_chords.get(&full_sequence) {
-                    tracing::debug!("  -> Complete chord match in {}: {:?}", label, action);
+                    tracing::trace!("  -> Complete chord match in {}: {:?}", label, action);
                     return ChordResolution::Complete(action.clone());
                 }
 
@@ -972,7 +972,7 @@ impl KeybindingResolver {
                     if chord_seq.len() > full_sequence.len()
                         && chord_seq[..full_sequence.len()] == full_sequence[..]
                     {
-                        tracing::debug!("  -> Partial chord match in {}", label);
+                        tracing::trace!("  -> Partial chord match in {}", label);
                         has_partial_match = true;
                         break;
                     }
@@ -983,14 +983,14 @@ impl KeybindingResolver {
         if has_partial_match {
             ChordResolution::Partial
         } else {
-            tracing::debug!("  -> No chord match");
+            tracing::trace!("  -> No chord match");
             ChordResolution::NoMatch
         }
     }
 
     /// Resolve a key event to an action in the given context
     pub fn resolve(&self, event: &KeyEvent, context: KeyContext) -> Action {
-        tracing::debug!(
+        tracing::trace!(
             "KeybindingResolver.resolve: code={:?}, modifiers={:?}, context={:?}",
             event.code,
             event.modifiers,
@@ -1000,14 +1000,14 @@ impl KeybindingResolver {
         // Check Global bindings first (highest priority - work in all contexts)
         if let Some(global_bindings) = self.bindings.get(&KeyContext::Global) {
             if let Some(action) = global_bindings.get(&(event.code, event.modifiers)) {
-                tracing::debug!("  -> Found in custom global bindings: {:?}", action);
+                tracing::trace!("  -> Found in custom global bindings: {:?}", action);
                 return action.clone();
             }
         }
 
         if let Some(global_bindings) = self.default_bindings.get(&KeyContext::Global) {
             if let Some(action) = global_bindings.get(&(event.code, event.modifiers)) {
-                tracing::debug!("  -> Found in default global bindings: {:?}", action);
+                tracing::trace!("  -> Found in default global bindings: {:?}", action);
                 return action.clone();
             }
         }
@@ -1015,7 +1015,7 @@ impl KeybindingResolver {
         // Try context-specific custom bindings
         if let Some(context_bindings) = self.bindings.get(&context) {
             if let Some(action) = context_bindings.get(&(event.code, event.modifiers)) {
-                tracing::debug!(
+                tracing::trace!(
                     "  -> Found in custom {} bindings: {:?}",
                     context.to_when_clause(),
                     action
@@ -1027,7 +1027,7 @@ impl KeybindingResolver {
         // Try context-specific default bindings
         if let Some(context_bindings) = self.default_bindings.get(&context) {
             if let Some(action) = context_bindings.get(&(event.code, event.modifiers)) {
-                tracing::debug!(
+                tracing::trace!(
                     "  -> Found in default {} bindings: {:?}",
                     context.to_when_clause(),
                     action
@@ -1042,7 +1042,7 @@ impl KeybindingResolver {
             if let Some(normal_bindings) = self.bindings.get(&KeyContext::Normal) {
                 if let Some(action) = normal_bindings.get(&(event.code, event.modifiers)) {
                     if Self::is_application_wide_action(action) {
-                        tracing::debug!(
+                        tracing::trace!(
                             "  -> Found application-wide action in custom normal bindings: {:?}",
                             action
                         );
@@ -1054,7 +1054,7 @@ impl KeybindingResolver {
             if let Some(normal_bindings) = self.default_bindings.get(&KeyContext::Normal) {
                 if let Some(action) = normal_bindings.get(&(event.code, event.modifiers)) {
                     if Self::is_application_wide_action(action) {
-                        tracing::debug!(
+                        tracing::trace!(
                             "  -> Found application-wide action in default normal bindings: {:?}",
                             action
                         );
@@ -1068,13 +1068,13 @@ impl KeybindingResolver {
         if context.allows_text_input() {
             if event.modifiers.is_empty() || event.modifiers == KeyModifiers::SHIFT {
                 if let KeyCode::Char(c) = event.code {
-                    tracing::debug!("  -> Character input: '{}'", c);
+                    tracing::trace!("  -> Character input: '{}'", c);
                     return Action::InsertChar(c);
                 }
             }
         }
 
-        tracing::debug!("  -> No binding found, returning Action::None");
+        tracing::trace!("  -> No binding found, returning Action::None");
         Action::None
     }
 

@@ -411,7 +411,7 @@ impl LspState {
 
         let content = format!("Content-Length: {}\r\n\r\n{}", json.len(), json);
 
-        tracing::debug!("Writing LSP message to stdin ({} bytes)", content.len());
+        tracing::trace!("Writing LSP message to stdin ({} bytes)", content.len());
 
         self.stdin
             .write_all(content.as_bytes())
@@ -423,7 +423,7 @@ impl LspState {
             .await
             .map_err(|e| format!("Failed to flush stdin: {}", e))?;
 
-        tracing::debug!("Successfully sent LSP message");
+        tracing::trace!("Successfully sent LSP message");
 
         Ok(())
     }
@@ -470,7 +470,7 @@ impl LspState {
         // Track the mapping if editor_request_id is provided
         if let Some(editor_id) = editor_request_id {
             self.active_requests.insert(editor_id, id);
-            tracing::debug!("Tracking request: editor_id={}, lsp_id={}", editor_id, id);
+            tracing::trace!("Tracking request: editor_id={}, lsp_id={}", editor_id, id);
         }
 
         let params_value = params
@@ -489,19 +489,19 @@ impl LspState {
 
         self.write_message(&request).await?;
 
-        tracing::debug!("Sent LSP request id={}, waiting for response...", id);
+        tracing::trace!("Sent LSP request id={}, waiting for response...", id);
 
         // Await response (this is OK now because the reader task will send it)
         let result = rx
             .await
             .map_err(|_| "Response channel closed".to_string())??;
 
-        tracing::debug!("Received LSP response for request id={}", id);
+        tracing::trace!("Received LSP response for request id={}", id);
 
         // Remove tracking after response received
         if let Some(editor_id) = editor_request_id {
             self.active_requests.remove(&editor_id);
-            tracing::debug!("Completed request: editor_id={}, lsp_id={}", editor_id, id);
+            tracing::trace!("Completed request: editor_id={}, lsp_id={}", editor_id, id);
         }
 
         serde_json::from_value(result).map_err(|e| format!("Failed to deserialize response: {}", e))
@@ -574,7 +574,7 @@ impl LspState {
         language_id: String,
         _pending: &Arc<Mutex<HashMap<i64, oneshot::Sender<Result<Value, String>>>>>,
     ) -> Result<(), String> {
-        tracing::debug!("LSP: did_open for {}", uri.as_str());
+        tracing::trace!("LSP: did_open for {}", uri.as_str());
 
         let params = DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
@@ -598,7 +598,7 @@ impl LspState {
         content_changes: Vec<TextDocumentContentChangeEvent>,
         _pending: &Arc<Mutex<HashMap<i64, oneshot::Sender<Result<Value, String>>>>>,
     ) -> Result<(), String> {
-        tracing::debug!("LSP: did_change for {}", uri.as_str());
+        tracing::trace!("LSP: did_change for {}", uri.as_str());
 
         let path = PathBuf::from(uri.path().as_str());
         let version = self.document_versions.entry(path).or_insert(0);
@@ -618,7 +618,7 @@ impl LspState {
 
     /// Handle did_save command
     async fn handle_did_save(&mut self, uri: Uri, text: Option<String>) -> Result<(), String> {
-        tracing::debug!("LSP: did_save for {}", uri.as_str());
+        tracing::trace!("LSP: did_save for {}", uri.as_str());
 
         let params = DidSaveTextDocumentParams {
             text_document: TextDocumentIdentifier { uri },
@@ -642,7 +642,7 @@ impl LspState {
             TextDocumentPositionParams, WorkDoneProgressParams,
         };
 
-        tracing::debug!(
+        tracing::trace!(
             "LSP: completion request at {}:{}:{}",
             uri.as_str(),
             line,
@@ -715,7 +715,7 @@ impl LspState {
             TextDocumentPositionParams, WorkDoneProgressParams,
         };
 
-        tracing::debug!(
+        tracing::trace!(
             "LSP: go-to-definition request at {}:{}:{}",
             uri.as_str(),
             line,
@@ -795,7 +795,7 @@ impl LspState {
             WorkDoneProgressParams,
         };
 
-        tracing::debug!(
+        tracing::trace!(
             "LSP: rename request at {}:{}:{} to '{}'",
             uri.as_str(),
             line,
@@ -864,7 +864,7 @@ impl LspState {
             WorkDoneProgressParams,
         };
 
-        tracing::debug!(
+        tracing::trace!(
             "LSP: hover request at {}:{}:{}",
             uri.as_str(),
             line,
@@ -983,7 +983,7 @@ impl LspState {
             TextDocumentIdentifier, WorkDoneProgressParams,
         };
 
-        tracing::debug!(
+        tracing::trace!(
             "LSP: find references request at {}:{}:{}",
             uri.as_str(),
             line,
@@ -1015,7 +1015,7 @@ impl LspState {
                     serde_json::from_value::<Vec<lsp_types::Location>>(result).unwrap_or_default()
                 };
 
-                tracing::debug!("LSP: found {} references", locations.len());
+                tracing::trace!("LSP: found {} references", locations.len());
 
                 // Send to main loop
                 let _ = self.async_tx.send(AsyncMessage::LspReferences {
@@ -1050,7 +1050,7 @@ impl LspState {
             WorkDoneProgressParams,
         };
 
-        tracing::debug!(
+        tracing::trace!(
             "LSP: signature help request at {}:{}:{}",
             uri.as_str(),
             line,
@@ -1083,7 +1083,7 @@ impl LspState {
                     serde_json::from_value::<lsp_types::SignatureHelp>(result).ok()
                 };
 
-                tracing::debug!(
+                tracing::trace!(
                     "LSP: signature help received: {} signatures",
                     signature_help
                         .as_ref()
@@ -1127,7 +1127,7 @@ impl LspState {
             TextDocumentIdentifier, WorkDoneProgressParams,
         };
 
-        tracing::debug!(
+        tracing::trace!(
             "LSP: code actions request at {}:{}:{}-{}:{}",
             uri.as_str(),
             start_line,
@@ -1171,7 +1171,7 @@ impl LspState {
                         .unwrap_or_default()
                 };
 
-                tracing::debug!("LSP: received {} code actions", actions.len());
+                tracing::trace!("LSP: received {} code actions", actions.len());
 
                 // Send to main loop
                 let _ = self.async_tx.send(AsyncMessage::LspCodeActions {
@@ -1205,7 +1205,7 @@ impl LspState {
             WorkDoneProgressParams,
         };
 
-        tracing::debug!(
+        tracing::trace!(
             "LSP: document diagnostic request for {} (previous_result_id: {:?})",
             uri.as_str(),
             previous_result_id
@@ -1237,7 +1237,7 @@ impl LspState {
                     let diagnostics = full_report.full_document_diagnostic_report.items;
                     let result_id = full_report.full_document_diagnostic_report.result_id;
 
-                    tracing::debug!(
+                    tracing::trace!(
                         "LSP: received {} diagnostics for {} (result_id: {:?})",
                         diagnostics.len(),
                         uri_string,
@@ -1259,7 +1259,7 @@ impl LspState {
                         .unchanged_document_diagnostic_report
                         .result_id;
 
-                    tracing::debug!(
+                    tracing::trace!(
                         "LSP: diagnostics unchanged for {} (result_id: {:?})",
                         uri_string,
                         result_id
@@ -1319,7 +1319,7 @@ impl LspState {
             InlayHintParams, Position, Range, TextDocumentIdentifier, WorkDoneProgressParams,
         };
 
-        tracing::debug!(
+        tracing::trace!(
             "LSP: inlay hints request for {} ({}:{} - {}:{})",
             uri.as_str(),
             start_line,
@@ -1355,7 +1355,7 @@ impl LspState {
                 let hints = hints.unwrap_or_default();
                 let uri_string = uri.as_str().to_string();
 
-                tracing::debug!(
+                tracing::trace!(
                     "LSP: received {} inlay hints for {}",
                     hints.len(),
                     uri_string
@@ -1440,7 +1440,7 @@ impl LspState {
 
     /// Send a cancel request notification to the server
     async fn send_cancel_request(&mut self, lsp_id: i64) -> Result<(), String> {
-        tracing::debug!("Sending $/cancelRequest for LSP id {}", lsp_id);
+        tracing::trace!("Sending $/cancelRequest for LSP id {}", lsp_id);
 
         let notification = JsonRpcNotification {
             jsonrpc: "2.0".to_string(),
@@ -1461,7 +1461,7 @@ impl LspState {
             );
             self.send_cancel_request(lsp_id).await
         } else {
-            tracing::debug!(
+            tracing::trace!(
                 "Cancel request ignored: no active LSP request for editor_id={}",
                 request_id
             );
@@ -1587,7 +1587,7 @@ impl LspTask {
             loop {
                 match read_message_from_stdout(&mut stdout).await {
                     Ok(message) => {
-                        tracing::debug!("Read message from LSP server: {:?}", message);
+                        tracing::trace!("Read message from LSP server: {:?}", message);
                         if let Err(e) = handle_message_dispatch(
                             message,
                             &pending,
@@ -1670,14 +1670,14 @@ impl LspTask {
             tokio::select! {
                 // Handle server-to-client responses (high priority)
                 Some(response) = server_response_rx.recv() => {
-                    tracing::debug!("Sending response to server request id={}", response.id);
+                    tracing::trace!("Sending response to server request id={}", response.id);
                     if let Err(e) = state.write_message(&response).await {
                         tracing::error!("Failed to send response to server: {}", e);
                     }
                 }
                 // Handle commands from the editor
                 Some(cmd) = command_rx.recv() => {
-                    tracing::debug!("LspTask received command: {:?}", cmd);
+                    tracing::trace!("LspTask received command: {:?}", cmd);
                     match cmd {
                         LspCommand::Initialize { root_uri, response } => {
                             // Send initializing status
@@ -1708,7 +1708,7 @@ impl LspTask {
                                     .handle_did_open_sequential(uri, text, language_id, &pending)
                                     .await;
                             } else {
-                                tracing::debug!(
+                                tracing::trace!(
                                     "Queueing DidOpen for {} until initialization completes",
                                     uri.as_str()
                                 );
@@ -1724,12 +1724,12 @@ impl LspTask {
                             content_changes,
                         } => {
                             if state.initialized {
-                                tracing::debug!("Processing DidChange for {}", uri.as_str());
+                                tracing::trace!("Processing DidChange for {}", uri.as_str());
                                 let _ = state
                                     .handle_did_change_sequential(uri, content_changes, &pending)
                                     .await;
                             } else {
-                                tracing::debug!(
+                                tracing::trace!(
                                     "Queueing DidChange for {} until initialization completes",
                                     uri.as_str()
                                 );
@@ -1744,7 +1744,7 @@ impl LspTask {
                                 tracing::info!("Processing DidSave for {}", uri.as_str());
                                 let _ = state.handle_did_save(uri, text).await;
                             } else {
-                                tracing::debug!(
+                                tracing::trace!(
                                     "Queueing DidSave for {} until initialization completes",
                                     uri.as_str()
                                 );
@@ -1766,7 +1766,7 @@ impl LspTask {
                                     .handle_completion(request_id, uri, line, character, &pending)
                                     .await;
                             } else {
-                                tracing::debug!("LSP not initialized, sending empty completion");
+                                tracing::trace!("LSP not initialized, sending empty completion");
                                 let _ = state.async_tx.send(AsyncMessage::LspCompletion {
                                     request_id,
                                     items: vec![],
@@ -1790,7 +1790,7 @@ impl LspTask {
                                     )
                                     .await;
                             } else {
-                                tracing::debug!("LSP not initialized, sending empty locations");
+                                tracing::trace!("LSP not initialized, sending empty locations");
                                 let _ = state.async_tx.send(AsyncMessage::LspGotoDefinition {
                                     request_id,
                                     locations: vec![],
@@ -1812,7 +1812,7 @@ impl LspTask {
                                     )
                                     .await;
                             } else {
-                                tracing::debug!("LSP not initialized, cannot rename");
+                                tracing::trace!("LSP not initialized, cannot rename");
                                 let _ = state.async_tx.send(AsyncMessage::LspRename {
                                     request_id,
                                     result: Err("LSP not initialized".to_string()),
@@ -1831,7 +1831,7 @@ impl LspTask {
                                     .handle_hover(request_id, uri, line, character, &pending)
                                     .await;
                             } else {
-                                tracing::debug!("LSP not initialized, cannot get hover");
+                                tracing::trace!("LSP not initialized, cannot get hover");
                                 let _ = state.async_tx.send(AsyncMessage::LspHover {
                                     request_id,
                                     contents: String::new(),
@@ -1852,7 +1852,7 @@ impl LspTask {
                                     .handle_references(request_id, uri, line, character, &pending)
                                     .await;
                             } else {
-                                tracing::debug!("LSP not initialized, cannot get references");
+                                tracing::trace!("LSP not initialized, cannot get references");
                                 let _ = state.async_tx.send(AsyncMessage::LspReferences {
                                     request_id,
                                     locations: Vec::new(),
@@ -1871,7 +1871,7 @@ impl LspTask {
                                     .handle_signature_help(request_id, uri, line, character, &pending)
                                     .await;
                             } else {
-                                tracing::debug!("LSP not initialized, cannot get signature help");
+                                tracing::trace!("LSP not initialized, cannot get signature help");
                                 let _ = state.async_tx.send(AsyncMessage::LspSignatureHelp {
                                     request_id,
                                     signature_help: None,
@@ -1902,7 +1902,7 @@ impl LspTask {
                                     )
                                     .await;
                             } else {
-                                tracing::debug!("LSP not initialized, cannot get code actions");
+                                tracing::trace!("LSP not initialized, cannot get code actions");
                                 let _ = state.async_tx.send(AsyncMessage::LspCodeActions {
                                     request_id,
                                     actions: Vec::new(),
@@ -1928,7 +1928,7 @@ impl LspTask {
                                     )
                                     .await;
                             } else {
-                                tracing::debug!(
+                                tracing::trace!(
                                     "LSP not initialized, cannot get document diagnostics"
                                 );
                                 let _ = state.async_tx.send(AsyncMessage::LspPulledDiagnostics {
@@ -1965,7 +1965,7 @@ impl LspTask {
                                     )
                                     .await;
                             } else {
-                                tracing::debug!(
+                                tracing::trace!(
                                     "LSP not initialized, cannot get inlay hints"
                                 );
                                 let _ = state.async_tx.send(AsyncMessage::LspInlayHints {
@@ -1988,7 +1988,7 @@ impl LspTask {
                             params,
                         } => {
                             if state.initialized {
-                                tracing::debug!(
+                                tracing::trace!(
                                     "Processing plugin request {} ({})",
                                     request_id,
                                     method
@@ -2002,7 +2002,7 @@ impl LspTask {
                                     )
                                     .await;
                             } else {
-                                tracing::debug!(
+                                tracing::trace!(
                                     "Plugin LSP request {} received before initialization",
                                     request_id
                                 );
@@ -2100,7 +2100,7 @@ impl LspTask {
         language_id: String,
         _pending: &Arc<Mutex<HashMap<i64, oneshot::Sender<Result<Value, String>>>>>,
     ) -> Result<(), String> {
-        tracing::debug!("LSP: did_open for {}", uri.as_str());
+        tracing::trace!("LSP: did_open for {}", uri.as_str());
 
         let params = DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
@@ -2124,7 +2124,7 @@ impl LspTask {
         content_changes: Vec<TextDocumentContentChangeEvent>,
         _pending: &Arc<Mutex<HashMap<i64, oneshot::Sender<Result<Value, String>>>>>,
     ) -> Result<(), String> {
-        tracing::debug!("LSP: did_change for {}", uri.as_str());
+        tracing::trace!("LSP: did_change for {}", uri.as_str());
 
         let path = PathBuf::from(uri.path().as_str());
         let version = self.document_versions.entry(path).or_insert(0);
@@ -2168,14 +2168,14 @@ impl LspTask {
 
         self.write_message(&request).await?;
 
-        tracing::debug!("Sent LSP request id={}, waiting for response...", id);
+        tracing::trace!("Sent LSP request id={}, waiting for response...", id);
 
         // Await response (this is OK now because the reader task will send it)
         let result = rx
             .await
             .map_err(|_| "Response channel closed".to_string())??;
 
-        tracing::debug!("Received LSP response for request id={}", id);
+        tracing::trace!("Received LSP response for request id={}", id);
 
         serde_json::from_value(result).map_err(|e| format!("Failed to deserialize response: {}", e))
     }
@@ -2361,7 +2361,7 @@ impl LspTask {
                     let params: PublishDiagnosticsParams = serde_json::from_value(params)
                         .map_err(|e| format!("Failed to deserialize diagnostics: {}", e))?;
 
-                    tracing::debug!(
+                    tracing::trace!(
                         "Received {} diagnostics for {}",
                         params.diagnostics.len(),
                         params.uri.as_str()
@@ -2399,7 +2399,7 @@ impl LspTask {
                             LspMessageType::Error => tracing::error!("LSP: {}", message),
                             LspMessageType::Warning => tracing::warn!("LSP: {}", message),
                             LspMessageType::Info => tracing::info!("LSP: {}", message),
-                            LspMessageType::Log => tracing::debug!("LSP: {}", message),
+                            LspMessageType::Log => tracing::trace!("LSP: {}", message),
                         }
 
                         // Send to UI
@@ -2436,7 +2436,7 @@ impl LspTask {
                             LspMessageType::Error => tracing::error!("LSP: {}", message),
                             LspMessageType::Warning => tracing::warn!("LSP: {}", message),
                             LspMessageType::Info => tracing::info!("LSP: {}", message),
-                            LspMessageType::Log => tracing::debug!("LSP: {}", message),
+                            LspMessageType::Log => tracing::trace!("LSP: {}", message),
                         }
 
                         // Send to UI
@@ -2509,7 +2509,7 @@ impl LspTask {
                                         .and_then(|v| v.as_u64())
                                         .map(|p| p as u32);
 
-                                    tracing::debug!(
+                                    tracing::trace!(
                                         "LSP ({}) progress report: {:?} {:?}",
                                         self.language,
                                         message,
@@ -2550,7 +2550,7 @@ impl LspTask {
                 }
             }
             _ => {
-                tracing::debug!("Forwarding notification {} to plugins", notification.method);
+                tracing::trace!("Forwarding notification {} to plugins", notification.method);
                 let _ = self.async_tx.send(AsyncMessage::CustomNotification {
                     language: self.language.clone(),
                     method: notification.method.clone(),
@@ -2623,7 +2623,7 @@ async fn handle_message_dispatch(
 ) -> Result<(), String> {
     match message {
         JsonRpcMessage::Response(response) => {
-            tracing::debug!("Received LSP response for request id={}", response.id);
+            tracing::trace!("Received LSP response for request id={}", response.id);
             if let Some(tx) = pending.lock().unwrap().remove(&response.id) {
                 let result = if let Some(error) = response.error {
                     tracing::warn!(
@@ -2636,7 +2636,7 @@ async fn handle_message_dispatch(
                         error.message, error.code
                     ))
                 } else {
-                    tracing::debug!("LSP response success for request id={}", response.id);
+                    tracing::trace!("LSP response success for request id={}", response.id);
                     response
                         .result
                         .ok_or_else(|| "No result in response".to_string())
@@ -2650,16 +2650,16 @@ async fn handle_message_dispatch(
             }
         }
         JsonRpcMessage::Notification(notification) => {
-            tracing::debug!("Received LSP notification: {}", notification.method);
+            tracing::trace!("Received LSP notification: {}", notification.method);
             handle_notification_dispatch(notification, async_tx, language).await?;
         }
         JsonRpcMessage::Request(request) => {
             // Handle server-to-client requests - MUST respond to avoid timeouts
-            tracing::debug!("Received request from server: {}", request.method);
+            tracing::trace!("Received request from server: {}", request.method);
             let response = match request.method.as_str() {
                 "window/workDoneProgress/create" => {
                     // Server wants to create a progress token - acknowledge it
-                    tracing::debug!("Acknowledging workDoneProgress/create (id={})", request.id);
+                    tracing::trace!("Acknowledging workDoneProgress/create (id={})", request.id);
                     JsonRpcResponse {
                         jsonrpc: "2.0".to_string(),
                         id: request.id,
@@ -2671,7 +2671,7 @@ async fn handle_message_dispatch(
                     // Return configuration with inlay hints enabled for rust-analyzer
                     // The request contains items asking for configuration sections
                     // We return an array with one config object per requested item
-                    tracing::debug!(
+                    tracing::trace!(
                         "Responding to workspace/configuration with inlay hints enabled"
                     );
 
@@ -2714,7 +2714,7 @@ async fn handle_message_dispatch(
                 }
                 "client/registerCapability" => {
                     // Server wants to register a capability dynamically - acknowledge
-                    tracing::debug!(
+                    tracing::trace!(
                         "Acknowledging client/registerCapability (id={})",
                         request.id
                     );
@@ -2758,7 +2758,7 @@ async fn handle_notification_dispatch(
                 let params: PublishDiagnosticsParams = serde_json::from_value(params)
                     .map_err(|e| format!("Failed to deserialize diagnostics: {}", e))?;
 
-                tracing::debug!(
+                tracing::trace!(
                     "Received {} diagnostics for {}",
                     params.diagnostics.len(),
                     params.uri.as_str()
@@ -2795,7 +2795,7 @@ async fn handle_notification_dispatch(
                             tracing::warn!("LSP ({}): {}", language, message)
                         }
                         LspMessageType::Info => tracing::info!("LSP ({}): {}", language, message),
-                        LspMessageType::Log => tracing::debug!("LSP ({}): {}", language, message),
+                        LspMessageType::Log => tracing::trace!("LSP ({}): {}", language, message),
                     }
 
                     // Send to UI
@@ -2831,7 +2831,7 @@ async fn handle_notification_dispatch(
                             tracing::warn!("LSP ({}): {}", language, message)
                         }
                         LspMessageType::Info => tracing::info!("LSP ({}): {}", language, message),
-                        LspMessageType::Log => tracing::debug!("LSP ({}): {}", language, message),
+                        LspMessageType::Log => tracing::trace!("LSP ({}): {}", language, message),
                     }
 
                     // Send to UI
@@ -2904,7 +2904,7 @@ async fn handle_notification_dispatch(
                                     .and_then(|v| v.as_u64())
                                     .map(|p| p as u32);
 
-                                tracing::debug!(
+                                tracing::trace!(
                                     "LSP ({}) progress report: {:?} {:?}",
                                     language,
                                     message,

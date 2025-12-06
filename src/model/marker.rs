@@ -83,7 +83,7 @@ impl MarkerList {
         // Store affinity for compatibility (though not strictly needed by tree)
         self._affinity_map.insert(id, left_affinity);
 
-        tracing::debug!(
+        tracing::trace!(
             "Created marker {:?} at position {} with {} affinity",
             id,
             position,

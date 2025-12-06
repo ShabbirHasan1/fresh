@@ -6466,7 +6466,7 @@ impl Editor {
             }
         };
 
-        tracing::debug!(
+        tracing::trace!(
             "send_lsp_changes_for_buffer: sending {} changes to {} in single didChange notification",
             changes.len(),
             uri.as_str()
@@ -6477,7 +6477,7 @@ impl Editor {
                 if let Err(e) = client.did_change(uri, changes) {
                     tracing::warn!("Failed to send didChange to LSP: {}", e);
                 } else {
-                    tracing::info!("Successfully sent batched didChange to LSP");
+                    tracing::trace!("Successfully sent batched didChange to LSP");
                 }
             } else {
                 tracing::warn!(
