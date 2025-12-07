@@ -12,6 +12,8 @@
 
 * **Signal Handling**: Removed ctrlc dependency, use nix sigaction directly.
 
+* **Test Reliability**: Fixed flaky auto-revert tests on macOS (FSEvents latency) and filesystems with 1-second mtime granularity.
+
 ---
 
 ## 0.1.24

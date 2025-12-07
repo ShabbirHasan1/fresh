@@ -3,6 +3,11 @@ use std::fs;
 use std::thread;
 use std::time::Duration;
 
+/// Delay between file writes to ensure filesystem notifications are received.
+/// - Many filesystems (ext4, HFS+) have 1-second mtime granularity
+/// - macOS FSEvents has 500ms-2s coalescing latency by default
+const FILE_CHANGE_DELAY: Duration = Duration::from_millis(1100);
+
 /// Test that the notify-based auto-revert flow works correctly.
 /// This test validates that external file changes are detected and
 /// the buffer is automatically updated in the render view.
@@ -26,9 +31,7 @@ fn test_auto_revert_multiple_external_edits() {
     for version in 2..=5 {
         let new_content = format!("Updated content v{}", version);
 
-        // Small delay to ensure filesystem timestamp changes
-        // (some filesystems have second-level granularity)
-        thread::sleep(Duration::from_millis(50));
+        thread::sleep(FILE_CHANGE_DELAY);
 
         // Write new content externally (simulating another process editing the file)
         fs::write(&file_path, &new_content).unwrap();
@@ -64,7 +67,7 @@ fn test_auto_revert_file_grows() {
 
     // Grow the file progressively
     for num_lines in [3, 5, 10] {
-        thread::sleep(Duration::from_millis(50));
+        thread::sleep(FILE_CHANGE_DELAY);
 
         let content: String = (1..=num_lines)
             .map(|i| format!("Line {}", i))
@@ -101,7 +104,7 @@ fn test_auto_revert_file_shrinks() {
 
     // Shrink the file progressively
     for num_lines in [5, 3, 1] {
-        thread::sleep(Duration::from_millis(50));
+        thread::sleep(FILE_CHANGE_DELAY);
 
         let content: String = (1..=num_lines)
             .map(|i| format!("Line {}", i))
@@ -149,7 +152,7 @@ fn test_auto_revert_preserves_scroll_position() {
     assert!(top_line_before > 1, "Should have scrolled down");
 
     // Modify the file slightly (change one line in the visible area)
-    thread::sleep(Duration::from_millis(50));
+    thread::sleep(FILE_CHANGE_DELAY);
     let modified_content: String = (1..=100)
         .map(|i| {
             if i == 50 {
@@ -192,7 +195,7 @@ fn test_auto_revert_skipped_when_buffer_modified() {
     harness.assert_buffer_content("Original content - local edit");
 
     // Modify the file externally
-    thread::sleep(Duration::from_millis(50));
+    thread::sleep(FILE_CHANGE_DELAY);
     fs::write(&file_path, "External change").unwrap();
 
     // Process events - but buffer should NOT be reverted
@@ -264,7 +267,7 @@ fn test_auto_revert_preserves_cursor_position() {
     assert!(cursor_before > 0, "Cursor should have moved from start");
 
     // Modify the file externally (but keep same structure so cursor position is valid)
-    thread::sleep(Duration::from_millis(50));
+    thread::sleep(FILE_CHANGE_DELAY);
     let modified_content = "Line 1\nLine 2\nLine X\nLine 4\nLine 5"; // Same length, just changed content
     fs::write(&file_path, modified_content).unwrap();
 
@@ -297,7 +300,7 @@ fn test_auto_revert_not_disabled_by_external_save() {
     harness.assert_buffer_content("Initial content");
 
     // Simulate an external save (like when another process saves the file)
-    thread::sleep(Duration::from_millis(50));
+    thread::sleep(FILE_CHANGE_DELAY);
     fs::write(&file_path, "Changed by external save").unwrap();
 
     // Wait for auto-revert
@@ -340,7 +343,7 @@ fn test_auto_revert_with_temp_rename_save() {
     for version in 2..=5 {
         let new_content = format!("Updated content v{}", version);
 
-        thread::sleep(Duration::from_millis(50));
+        thread::sleep(FILE_CHANGE_DELAY);
 
         // Write to a temp file first, then rename (atomic save pattern)
         // This changes the file's inode, which can break inotify watches
