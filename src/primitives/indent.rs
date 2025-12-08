@@ -140,11 +140,11 @@ impl IndentCalculator {
                 tree_sitter_lua::LANGUAGE.into(),
                 include_str!("../../queries/lua/indents.scm"),
             ),
-            Language::CSharp => {
-                // C# doesn't have a highlight query, skip indent support for now
-                tracing::warn!("Auto-indent not supported for C#");
-                return None;
-            }
+            Language::CSharp => (
+                "csharp",
+                tree_sitter_c_sharp::LANGUAGE.into(),
+                include_str!("../../queries/csharp/indents.scm"),
+            )
         };
 
         // Check if we already have this config
