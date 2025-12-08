@@ -557,8 +557,11 @@ impl Config {
         let mut lsp = HashMap::new();
 
         // rust-analyzer (installed via rustup or package manager)
-        // Enable logging to help debug LSP issues
-        let ra_log_path = format!("/tmp/rust-analyzer-{}.log", std::process::id());
+        // Enable logging to help debug LSP issues (cross-platform temp directory)
+        let ra_log_path = std::env::temp_dir()
+            .join(format!("rust-analyzer-{}.log", std::process::id()))
+            .to_string_lossy()
+            .to_string();
         tracing::info!("rust-analyzer will log to: {}", ra_log_path);
 
         lsp.insert(

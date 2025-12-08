@@ -3004,9 +3004,9 @@ impl LspHandle {
         let args = args.to_vec();
         let state = Arc::new(Mutex::new(LspClientState::Starting));
 
-        // Create stderr log path: /tmp/fresh-lsp-{language}-{pid}.log
-        let stderr_log_path = std::path::PathBuf::from(format!(
-            "/tmp/fresh-lsp-{}-{}.log",
+        // Create stderr log path in system temp directory (cross-platform)
+        let stderr_log_path = std::env::temp_dir().join(format!(
+            "fresh-lsp-{}-{}.log",
             language,
             std::process::id()
         ));

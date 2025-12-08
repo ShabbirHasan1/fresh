@@ -42,7 +42,7 @@ struct Args {
     #[arg(long, value_name = "PATH")]
     config: Option<PathBuf>,
 
-    /// Path to log file for editor diagnostics
+    /// Path to log file for editor diagnostics (default: system temp dir)
     #[arg(long, value_name = "PATH")]
     log_file: Option<PathBuf>,
 
