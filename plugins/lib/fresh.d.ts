@@ -308,6 +308,24 @@ interface EditorAPI {
 
   // === Buffer Queries ===
   /**
+   * Get the current editor configuration
+   *
+   * Returns the merged configuration (user config file + compiled-in defaults).
+   * This is the runtime config that the editor is actually using, including
+   * all default values for LSP servers, languages, keybindings, etc.
+   * @returns Configuration object
+   */
+  getConfig(): unknown;
+  /**
+   * Get the user's configuration (only explicitly set values)
+   *
+   * Returns only the configuration from the user's config file.
+   * Fields not present here are using default values.
+   * Use this with getConfig() to determine which values are defaults.
+   * @returns User configuration object (sparse - only explicitly set values)
+   */
+  getUserConfig(): unknown;
+  /**
    * Get the buffer ID of the focused editor pane
    *
    * Returns 0 if no buffer is active (rare edge case).

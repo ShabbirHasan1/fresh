@@ -368,9 +368,11 @@ interface ConfigEditorState {
   splitId: number | null;
   sourceSplitId: number | null;
   sourceBufferId: number | null;
-  /** Original config from file */
+  /** User's config file (sparse - only explicitly set values) */
+  userConfig: Record<string, unknown>;
+  /** Original user config from file (for detecting changes) */
   originalConfig: Record<string, unknown>;
-  /** Working copy with modifications */
+  /** Working copy with modifications (merged config = defaults + user overrides) */
   workingConfig: Record<string, unknown>;
   /** Expanded section paths */
   expandedSections: Set<string>;
@@ -394,6 +396,7 @@ const state: ConfigEditorState = {
   splitId: null,
   sourceSplitId: null,
   sourceBufferId: null,
+  userConfig: {},
   originalConfig: {},
   workingConfig: {},
   expandedSections: new Set(["editor", "file_explorer"]),
@@ -529,6 +532,28 @@ function setNestedValue(obj: Record<string, unknown>, path: string, value: unkno
   } else {
     (current as Record<string, unknown>)[lastPart] = value;
   }
+}
+
+/**
+ * Check if a path exists in an object (has been explicitly set)
+ */
+function hasNestedValue(obj: Record<string, unknown>, path: string): boolean {
+  const parts = parsePath(path);
+  let current: unknown = obj;
+  for (const part of parts) {
+    if (current === null || current === undefined) return false;
+    if (Array.isArray(current)) {
+      const index = parseInt(part, 10);
+      if (isNaN(index) || index >= current.length) return false;
+      current = current[index];
+    } else if (typeof current === "object") {
+      if (!(part in (current as Record<string, unknown>))) return false;
+      current = (current as Record<string, unknown>)[part];
+    } else {
+      return false;
+    }
+  }
+  return true;
 }
 
 /**
@@ -748,30 +773,30 @@ function findConfigPath(): string {
 }
 
 /**
- * Load config from file
+ * Load config using editor APIs
+ * Returns both the merged config (with defaults) and the user's sparse config
  */
-async function loadConfig(): Promise<Record<string, unknown>> {
-  const configPath = findConfigPath();
-  state.configPath = configPath;
+function loadConfig(): { merged: Record<string, unknown>; user: Record<string, unknown> } {
+  state.configPath = findConfigPath();
 
-  try {
-    const content = await editor.readFile(configPath);
-    return JSON.parse(content);
-  } catch (e) {
-    // Return empty config if file doesn't exist
-    editor.debug(`Config file not found at ${configPath}, using defaults`);
-    return {};
-  }
+  // Get the merged runtime config (defaults + user overrides)
+  const merged = editor.getConfig() as Record<string, unknown>;
+
+  // Get only what the user has explicitly set
+  const user = editor.getUserConfig() as Record<string, unknown>;
+
+  return { merged, user };
 }
 
 /**
  * Save config to file
+ * Only saves the userConfig (sparse - only user-customized values)
  */
 async function saveConfig(): Promise<boolean> {
   try {
-    const content = JSON.stringify(state.workingConfig, null, 2);
+    const content = JSON.stringify(state.userConfig, null, 2);
     await editor.writeFile(state.configPath, content);
-    state.originalConfig = deepClone(state.workingConfig);
+    state.originalConfig = deepClone(state.userConfig);
     state.hasChanges = false;
     // Tell the editor to reload config from file so it stays in sync
     editor.reloadConfig();
@@ -789,6 +814,9 @@ async function saveConfig(): Promise<boolean> {
 /**
  * Build the flat list of visible fields based on schema and expanded sections
  * Uses the dynamically loaded schema from state.schema
+ *
+ * isDefault is determined by checking if the path exists in userConfig (sparse user overrides).
+ * Values are displayed from workingConfig (merged defaults + user overrides).
  */
 function buildVisibleFields(): ConfigField[] {
   const fields: ConfigField[] = [];
@@ -805,8 +833,8 @@ function buildVisibleFields(): ConfigField[] {
     for (const [key, fieldSchema] of Object.entries(schema)) {
       const path = basePath ? `${basePath}.${key}` : key;
       const value = configData[key];
-      const defaultValue = getDefaultValue(fieldSchema);
-      const isDefault = value === undefined || deepEqual(value, defaultValue);
+      // A field is "default" if the user hasn't explicitly set it in their config file
+      const isDefault = !hasNestedValue(state.userConfig, path);
 
       // Check if this is an object with nested properties
       if (fieldSchema.type === "object" && fieldSchema.nestedSchema) {
@@ -845,14 +873,29 @@ function buildVisibleFields(): ConfigField[] {
         });
 
         // Add map entries if expanded
-        if (expanded && value && typeof value === "object") {
-          const mapData = value as Record<string, unknown>;
+        if (expanded) {
+          const mapData = (value && typeof value === "object") ? value as Record<string, unknown> : {};
           const itemSchema = fieldSchema.itemSchema;
+          const mapKeys = Object.keys(mapData).sort();
 
-          for (const mapKey of Object.keys(mapData).sort()) {
+          // Show empty state message if no entries
+          if (mapKeys.length === 0) {
+            fields.push({
+              path: `${path}.__empty__`,
+              name: "(no entries configured)",
+              schema: { type: "string", description: "This map has no entries. Edit the config file directly to add entries." },
+              value: undefined,
+              isDefault: true,
+              depth: depth + 1,
+              isSection: false,
+            });
+          }
+
+          for (const mapKey of mapKeys) {
             const itemPath = `${path}.${mapKey}`;
             const itemValue = mapData[mapKey];
             const itemExpanded = state.expandedSections.has(itemPath);
+            const itemIsDefault = !hasNestedValue(state.userConfig, itemPath);
 
             // Check if item is an object with nested schema
             if (itemSchema.type === "object" && itemSchema.nestedSchema) {
@@ -861,7 +904,7 @@ function buildVisibleFields(): ConfigField[] {
                 name: mapKey,
                 schema: { ...itemSchema, description: `${mapKey} configuration` },
                 value: itemValue,
-                isDefault: false,
+                isDefault: itemIsDefault,
                 depth: depth + 1,
                 isSection: true,
                 expanded: itemExpanded,
@@ -879,7 +922,7 @@ function buildVisibleFields(): ConfigField[] {
                 name: mapKey,
                 schema: itemSchema,
                 value: itemValue,
-                isDefault: false,
+                isDefault: itemIsDefault,
                 depth: depth + 1,
                 isSection: false,
               });
@@ -908,6 +951,7 @@ function buildVisibleFields(): ConfigField[] {
           for (let i = 0; i < arrayValue.length; i++) {
             const itemPath = `${path}[${i}]`;
             const itemValue = arrayValue[i];
+            const itemIsDefault = !hasNestedValue(state.userConfig, itemPath);
 
             // Check if item is a complex object (either by schema or by actual value)
             const isComplexObject = (itemSchema.type === "object" && itemSchema.nestedSchema) ||
@@ -931,7 +975,7 @@ function buildVisibleFields(): ConfigField[] {
                 name: `[${i}]`,
                 schema: { ...effectiveSchema, description: `Item ${i}` },
                 value: itemValue,
-                isDefault: false,
+                isDefault: itemIsDefault,
                 depth: depth + 1,
                 isSection: true,
                 expanded: itemExpanded,
@@ -949,7 +993,7 @@ function buildVisibleFields(): ConfigField[] {
                 name: `[${i}]`,
                 schema: itemSchema,
                 value: itemValue,
-                isDefault: false,
+                isDefault: itemIsDefault,
                 depth: depth + 1,
                 isSection: false,
               });
@@ -1521,9 +1565,11 @@ globalThis.open_config_editor = async function(): Promise<void> {
   state.schema = await getConfigSchema();
   editor.debug(`Loaded schema with ${Object.keys(state.schema).length} top-level fields`);
 
-  // Load config
-  state.originalConfig = await loadConfig();
-  state.workingConfig = deepClone(state.originalConfig);
+  // Load config (merged defaults + user overrides, and sparse user config)
+  const { merged, user } = loadConfig();
+  state.workingConfig = merged;
+  state.userConfig = user;
+  state.originalConfig = deepClone(user);
   state.hasChanges = false;
 
   // Build initial entries
@@ -1714,17 +1760,19 @@ globalThis.config_editor_save = async function(): Promise<void> {
 /**
  * Reload configuration from file
  */
-globalThis.config_editor_reload = async function(): Promise<void> {
+globalThis.config_editor_reload = function(): void {
   if (state.hasChanges) {
     editor.setStatus("Discarding local changes...");
   }
 
-  state.originalConfig = await loadConfig();
-  state.workingConfig = deepClone(state.originalConfig);
+  const { merged, user } = loadConfig();
+  state.workingConfig = merged;
+  state.userConfig = user;
+  state.originalConfig = deepClone(user);
   state.hasChanges = false;
   updateDisplay();
 
-  editor.setStatus("Configuration reloaded from file");
+  editor.setStatus("Configuration reloaded");
 };
 
 /**
@@ -1818,9 +1866,6 @@ globalThis.onConfigChanged = async function(data: { path: string }): Promise<voi
   // Only react if the config editor is currently open
   if (!state.isOpen) return;
 
-  // Reload config from disk
-  const newConfig = await loadConfig();
-
   // Check if the external change conflicts with unsaved local changes
   if (state.hasChanges) {
     // Keep local changes but warn user
@@ -1829,9 +1874,13 @@ globalThis.onConfigChanged = async function(data: { path: string }): Promise<voi
     return;
   }
 
+  // Reload config from runtime
+  const { merged, user } = loadConfig();
+
   // Update state with new config
-  state.originalConfig = newConfig;
-  state.workingConfig = deepClone(newConfig);
+  state.originalConfig = merged;
+  state.workingConfig = deepClone(merged);
+  state.userConfig = user;
   state.hasChanges = false;
 
   // Refresh the display

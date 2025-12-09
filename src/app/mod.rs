@@ -4766,6 +4766,20 @@ impl Editor {
 
             // Update LSP diagnostics
             snapshot.diagnostics = self.stored_diagnostics.clone();
+
+            // Update config (serialize the runtime config for plugins)
+            snapshot.config = serde_json::to_value(&self.config).unwrap_or(serde_json::Value::Null);
+
+            // Update user config (raw file contents, not merged with defaults)
+            // This allows plugins to distinguish between user-set and default values
+            if let Some(config_path) = Config::default_config_path() {
+                if config_path.exists() {
+                    if let Ok(contents) = std::fs::read_to_string(&config_path) {
+                        snapshot.user_config = serde_json::from_str(&contents)
+                            .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
+                    }
+                }
+            }
         }
     }
 

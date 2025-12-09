@@ -212,6 +212,44 @@ fn op_fresh_reload_config(state: &mut OpState) {
     tracing::debug!("TypeScript plugin: reloading config");
 }
 
+/// Get the current editor configuration
+///
+/// Returns the merged configuration (user config file + compiled-in defaults).
+/// This is the runtime config that the editor is actually using, including
+/// all default values for LSP servers, languages, keybindings, etc.
+/// @returns Configuration object
+#[op2]
+#[serde]
+fn op_fresh_get_config(state: &mut OpState) -> serde_json::Value {
+    if let Some(runtime_state) = state.try_borrow::<Rc<RefCell<TsRuntimeState>>>() {
+        let runtime_state = runtime_state.borrow();
+        if let Ok(snapshot) = runtime_state.state_snapshot.read() {
+            return snapshot.config.clone();
+        };
+    }
+    // Return empty object if config not available
+    serde_json::Value::Object(serde_json::Map::new())
+}
+
+/// Get the user's configuration (only explicitly set values)
+///
+/// Returns only the configuration from the user's config file.
+/// Fields not present here are using default values.
+/// Use this with getConfig() to determine which values are defaults.
+/// @returns User configuration object (sparse - only explicitly set values)
+#[op2]
+#[serde]
+fn op_fresh_get_user_config(state: &mut OpState) -> serde_json::Value {
+    if let Some(runtime_state) = state.try_borrow::<Rc<RefCell<TsRuntimeState>>>() {
+        let runtime_state = runtime_state.borrow();
+        if let Ok(snapshot) = runtime_state.state_snapshot.read() {
+            return snapshot.user_config.clone();
+        };
+    }
+    // Return empty object if config not available
+    serde_json::Value::Object(serde_json::Map::new())
+}
+
 /// Log a debug message to the editor's trace output
 ///
 /// Messages appear in stderr when running with RUST_LOG=debug.
@@ -2761,6 +2799,8 @@ extension!(
         op_fresh_set_status,
         op_fresh_apply_theme,
         op_fresh_reload_config,
+        op_fresh_get_config,
+        op_fresh_get_user_config,
         op_fresh_debug,
         op_fresh_set_clipboard,
         op_fresh_get_active_buffer_id,
@@ -2943,6 +2983,12 @@ impl TypeScriptRuntime {
                     // Config operations
                     reloadConfig() {
                         core.ops.op_fresh_reload_config();
+                    },
+                    getConfig() {
+                        return core.ops.op_fresh_get_config();
+                    },
+                    getUserConfig() {
+                        return core.ops.op_fresh_get_user_config();
                     },
 
                     // Clipboard

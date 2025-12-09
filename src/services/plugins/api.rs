@@ -175,6 +175,12 @@ pub struct EditorStateSnapshot {
     /// LSP diagnostics per file URI
     /// Maps file URI string to Vec of diagnostics for that file
     pub diagnostics: HashMap<String, Vec<lsp_types::Diagnostic>>,
+    /// Runtime config as serde_json::Value (merged user config + defaults)
+    /// This is the runtime config, not just the user's config file
+    pub config: serde_json::Value,
+    /// User config as serde_json::Value (only what's in the user's config file)
+    /// Fields not present here are using default values
+    pub user_config: serde_json::Value,
 }
 
 impl EditorStateSnapshot {
@@ -193,6 +199,8 @@ impl EditorStateSnapshot {
             clipboard: String::new(),
             working_dir: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
             diagnostics: HashMap::new(),
+            config: serde_json::Value::Null,
+            user_config: serde_json::Value::Null,
         }
     }
 }
