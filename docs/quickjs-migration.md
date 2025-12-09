@@ -11,151 +11,139 @@ This document tracks the migration from deno_core (V8) to QuickJS for the Fresh 
 3. **Lighter runtime** - QuickJS is ~700KB vs V8's multi-MB footprint
 4. **Single backend** - No feature flags, just QuickJS + oxc
 
+## Current Status
+
+| Component | Status | Notes |
+|-----------|--------|-------|
+| QuickJS runtime | **Working** | ES2023 support via rquickjs 0.9 |
+| TypeScript transpilation | **Working** | Via oxc 0.102 (parse + transform + codegen) |
+| Plugin loading | **Working** | 18/19 plugins load successfully |
+| ES module imports | **Skipped** | Plugins with `import` are skipped with warning |
+| Core editor.* API | **Working** | ~30 methods fully implemented |
+| Advanced API | **Stubs** | ~15 methods log warnings but don't crash |
+
+### Plugin Compatibility
+
+- **18 plugins load and run** - Full functionality for plugins without ES imports
+- **1 plugin skipped** - `clangd_support.ts` (uses ES module imports from `./lib/`)
+
 ## Technology Stack
 
 - **QuickJS**: Embedded JavaScript engine supporting ES2023 via `rquickjs` crate (v0.9)
 - **oxc**: Fast TypeScript transpilation via `oxc_transformer` (v0.102)
 - **oxc_semantic**: Scoping analysis for the transformer
 
+## Next Steps
+
+### Phase 1: ES Module Support (enables clangd_support.ts)
+
+To support plugins with ES module imports, we need module bundling:
+
+1. **Add `oxc_resolver`** - Resolve import paths to actual files
+2. **Implement simple bundler** - Concatenate imported modules before transpilation
+3. **Handle circular imports** - Track visited modules to avoid infinite loops
+
+```rust
+// Pseudo-code for module bundling
+fn bundle_module(path: &str, visited: &mut HashSet<String>) -> Result<String> {
+    if visited.contains(path) { return Ok(String::new()); }
+    visited.insert(path.to_string());
+
+    let source = fs::read_to_string(path)?;
+    let mut bundled = String::new();
+
+    for import in extract_imports(&source) {
+        let resolved = oxc_resolver::resolve(&import, path)?;
+        bundled.push_str(&bundle_module(&resolved, visited)?);
+    }
+
+    bundled.push_str(&strip_imports(&source));
+    Ok(bundled)
+}
+```
+
+### Phase 2: Implement Critical Stub Methods
+
+Priority order based on plugin usage:
+
+1. **`spawnProcess`** - Used by git plugins (git_blame, git_grep, git_log, live_grep)
+2. **`addOverlay` / `clearNamespace`** - Used by syntax highlighting plugins
+3. **`defineMode`** - Used by modal keybinding plugins
+4. **`startPrompt` / `setPromptSuggestions`** - Used by interactive plugins
+
+### Phase 3: Complete API Implementation
+
+- Virtual buffer support (`createVirtualBufferInSplit`, `setVirtualBufferContent`)
+- Split management (`closeSplit`, `setSplitBuffer`)
+- Line indicators (`setLineIndicator`, `clearLineIndicators`)
+- Buffer info (`getBufferInfo`, `getBufferSavedDiff`)
+
+### Phase 4: Testing & Optimization
+
+- Performance comparison vs deno_core
+- Memory usage profiling
+- Plugin execution benchmarks
+
 ## Completed Tasks
 
-1. **[DONE] Remove deno_core dependencies from Cargo.toml**
+1. **Remove deno_core dependencies from Cargo.toml**
    - Removed: `deno_core`, `deno_ast`, `deno_error`, `v8`
-   - Added: `rquickjs`, `oxc_transformer`, `oxc_allocator`, `oxc_parser`, `oxc_span`, `oxc_codegen`, `oxc_semantic`
+   - Added: `rquickjs`, `oxc_*` crates
 
-2. **[DONE] Remove deno_core backend files**
+2. **Remove deno_core backend files**
    - Deleted: `src/services/plugins/backend/deno_core_backend.rs`
    - Deleted: `src/services/plugins/runtime.rs`
    - Deleted: `src/v8_init.rs`
 
-3. **[DONE] Simplify backend/mod.rs**
+3. **Simplify backend/mod.rs**
    - Removed conditional compilation feature flags
    - Only exports QuickJS backend
-   - Added `backend_name()` returning "QuickJS + oxc"
 
-4. **[DONE] Update thread.rs**
-   - Changed imports from `runtime` to `backend` module
+4. **Update thread.rs**
    - Uses `QuickJsBackend::new()` instead of `TypeScriptRuntime`
 
-5. **[DONE] Update test harness**
+5. **Update test harness**
    - Removed V8 initialization from `tests/common/harness.rs`
-   - QuickJS doesn't need early initialization like V8
 
-6. **[DONE] Implement TypeScript transpilation**
-   - Uses `oxc_parser` to parse TypeScript
-   - Uses `oxc_semantic::SemanticBuilder` for scoping
-   - Uses `oxc_transformer::Transformer` to strip types
-   - Uses `oxc_codegen::Codegen` to generate JavaScript
+6. **Implement TypeScript transpilation**
+   - Parse -> Semantic analysis -> Transform -> Codegen
 
-7. **[DONE] Implement QuickJS backend**
-   - File: `src/services/plugins/backend/quickjs_backend.rs`
-   - Implements the `JsBackend` trait
-   - Creates `editor.*` global API for plugins
-   - IIFE wrapping for plugin scope isolation
+7. **Implement QuickJS backend**
+   - IIFE wrapping for scope isolation
+   - ES module import detection and skip
 
-## Current Status
+## Editor API Implementation
 
-### Working
-- Build compiles successfully
-- TypeScript transpilation works for most plugins
-- 18 out of 19 plugins load successfully
+### Fully Implemented (~30 methods)
 
-### Remaining Issue
-**1 plugin fails to load: `clangd_support.ts`**
+| Category | Methods |
+|----------|---------|
+| Status/Logging | `setStatus`, `debug`, `copyToClipboard` |
+| Buffer Info | `getActiveBufferId`, `getBufferPath`, `getBufferLength`, `isBufferModified` |
+| Cursor | `getCursorPosition`, `setBufferCursor` |
+| Text Editing | `insertText`, `deleteRange`, `insertAtCursor` |
+| Commands | `registerCommand`, `setContext` |
+| Files | `openFile`, `showBuffer`, `closeBuffer` |
+| Splits | `getActiveSplitId` |
+| Events | `on`, `off` |
+| Environment | `getEnv`, `getCwd` |
+| Paths | `pathDirname`, `pathBasename`, `pathExtname`, `pathIsAbsolute`, `pathJoin` |
+| File System | `fileExists`, `readFile`, `writeFile` |
 
-Error: `Unexpected token '{'` at line 10
+### Stub Implementations (~15 methods)
 
-This appears to be a syntax error in the transpiled output. The oxc transformer may be producing output that QuickJS doesn't accept, possibly related to:
-- Object shorthand syntax
-- Arrow function syntax
-- Async/await syntax (QuickJS ES2023 should support this though)
+These log warnings but allow plugins to load:
 
-## Editor API Implementation Status
-
-### Fully Implemented
-- `editor.setStatus(message)` - Show status message
-- `editor.debug(message)` - Debug logging
-- `editor.copyToClipboard(text)` - Set clipboard
-- `editor.getActiveBufferId()` - Get active buffer
-- `editor.getCursorPosition()` - Get cursor pos
-- `editor.getBufferPath(bufferId)` - Get file path
-- `editor.getBufferLength(bufferId)` - Get buffer size
-- `editor.isBufferModified(bufferId)` - Check modified
-- `editor.insertText(bufferId, pos, text)` - Insert text
-- `editor.deleteRange(bufferId, start, end)` - Delete text
-- `editor.insertAtCursor(text)` - Insert at cursor
-- `editor.registerCommand(name, desc, action, ctx)` - Register command
-- `editor.setContext(name, active)` - Set custom context
-- `editor.openFile(path)` - Open file
-- `editor.getActiveSplitId()` - Get active split
-- `editor.on(event, handler)` - Register event handler
-- `editor.off(event, handler)` - Remove event handler
-- `editor.getEnv(name)` - Get environment variable
-- `editor.getCwd()` - Get working directory
-- `editor.pathDirname(path)` - Get directory name
-- `editor.pathBasename(path)` - Get file name
-- `editor.pathExtname(path)` - Get extension
-- `editor.pathIsAbsolute(path)` - Check absolute
-- `editor.pathJoin(...parts)` - Join paths
-- `editor.fileExists(path)` - Check file exists
-- `editor.readFile(path)` - Read file contents
-- `editor.writeFile(path, content)` - Write file
-- `editor.showBuffer(bufferId)` - Show buffer
-- `editor.closeBuffer(bufferId)` - Close buffer
-- `editor.setBufferCursor(bufferId, pos)` - Set cursor
-
-### Stub Implementations (log warning but don't crash)
-- `editor.defineMode(name, parent, bindings)` - Modal keybindings
-- `editor.addOverlay(...)` - Syntax highlighting overlays
-- `editor.clearNamespace(bufferId, ns)` - Clear overlays
-- `editor.spawnProcess(cmd, args)` - Run external process
-- `editor.setPromptSuggestions(...)` - Autocomplete suggestions
-- `editor.startPrompt(prefix, mode)` - Start input prompt
-- `editor.refreshLines(...)` - Force line refresh
-- `editor.getTextPropertiesAtCursor()` - LSP info at cursor
-- `editor.getBufferInfo(bufferId)` - Buffer metadata
-- `editor.createVirtualBufferInSplit(...)` - Create virtual buffer
-- `editor.setVirtualBufferContent(...)` - Update virtual buffer
-- `editor.closeSplit(splitId)` - Close split
-- `editor.setSplitBuffer(...)` - Set split buffer
-- `editor.clearLineIndicators(...)` - Clear gutter indicators
-- `editor.setLineIndicator(...)` - Set gutter indicator
-- `editor.getBufferSavedDiff(...)` - Get diff from saved
-
-## Next Steps
-
-### Immediate (to fix the last failing plugin)
-
-1. **Debug clangd_support.ts transpilation**
-   - Write the transpiled output to a temp file
-   - Manually inspect what syntax QuickJS doesn't accept
-   - May need to adjust oxc transformer options
-
-2. **Alternative: Skip problematic plugins**
-   - Could add a list of plugins to skip loading
-   - Allow editor to start even with plugin failures
-
-### Short-term (complete the migration)
-
-3. **Implement critical stub methods**
-   - `spawnProcess` - Important for git plugins, grep, etc.
-   - `addOverlay`/`clearNamespace` - For syntax highlighting
-   - `defineMode` - For modal keybindings
-
-4. **Add error handling improvements**
-   - Better error messages for plugin failures
-   - Option to continue loading editor when plugins fail
-
-### Medium-term (full functionality)
-
-5. **Implement remaining stub methods**
-   - Virtual buffer support
-   - Split management
-   - Line indicators
-
-6. **Performance testing**
-   - Compare plugin execution speed vs deno_core
-   - Measure memory usage
+- `defineMode` - Modal keybindings
+- `addOverlay`, `clearNamespace` - Syntax highlighting
+- `spawnProcess` - External processes
+- `setPromptSuggestions`, `startPrompt` - Interactive prompts
+- `refreshLines` - Force refresh
+- `getTextPropertiesAtCursor`, `getBufferInfo` - Buffer metadata
+- `createVirtualBufferInSplit`, `setVirtualBufferContent` - Virtual buffers
+- `closeSplit`, `setSplitBuffer` - Split management
+- `clearLineIndicators`, `setLineIndicator` - Gutter indicators
+- `getBufferSavedDiff` - Diff from saved
 
 ## File Structure
 
@@ -163,7 +151,7 @@ This appears to be a syntax error in the transpiled output. The oxc transformer 
 src/services/plugins/
 ├── backend/
 │   ├── mod.rs              # Exports QuickJsBackend as SelectedBackend
-│   └── quickjs_backend.rs  # QuickJS implementation
+│   └── quickjs_backend.rs  # QuickJS implementation (~1000 lines)
 ├── api.rs                  # EditorStateSnapshot, PluginCommand, etc.
 ├── thread.rs               # Plugin thread runner
 ├── hooks.rs                # Hook definitions
@@ -171,7 +159,7 @@ src/services/plugins/
 └── process.rs              # Process spawning (not yet integrated)
 ```
 
-## Dependencies Added
+## Dependencies
 
 ```toml
 # QuickJS JavaScript runtime with oxc for TypeScript transpilation
@@ -182,20 +170,30 @@ oxc_parser = "0.102"
 oxc_span = "0.102"
 oxc_codegen = "0.102"
 oxc_semantic = "0.102"
+# Future: oxc_resolver = "0.102"  # For ES module bundling
 ```
 
 ## Known Limitations
 
-1. **No ES module imports** - Plugins with `import ... from` are skipped (e.g., clangd_support.ts)
+1. **No ES module imports** - Plugins with `import ... from` are skipped
+   - Affected: `clangd_support.ts`
    - Workaround: Inline dependencies or use global state
-   - Future: Implement module bundling at transpilation time
-2. **No async/await in plugin API** - QuickJS supports async, but our API is synchronous
-3. **Limited TypeScript features** - Only type stripping, no enum transforms etc.
-4. **IIFE scope isolation** - Uses IIFE wrapping instead of true ES module system
-5. **Stub implementations** - Many APIs just log warnings (see list above)
+   - Fix: Implement module bundling (see Phase 1)
+
+2. **IIFE scope isolation** - Each plugin runs in an IIFE, not true ES modules
+   - Plugins share `globalThis` for event handlers
+   - Local `const`/`let` are properly isolated
+
+3. **Stub implementations** - ~15 APIs log warnings but don't function
+   - Plugins using these features will not work correctly
+   - See Phase 2-3 for implementation plan
+
+4. **Synchronous API** - Plugin API is synchronous even though QuickJS supports async
+   - Future consideration for async plugin APIs
 
 ## References
 
 - [rquickjs crate](https://docs.rs/rquickjs/)
 - [QuickJS engine](https://bellard.org/quickjs/)
 - [oxc project](https://oxc-project.github.io/)
+- [oxc_resolver](https://docs.rs/oxc_resolver/) - For future ES module support
