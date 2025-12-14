@@ -82,5 +82,6 @@ pub enum FocusState {
     #[default]
     Normal,
     Focused,
+    Hovered,
     Disabled,
 }

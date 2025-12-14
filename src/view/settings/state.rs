@@ -4,6 +4,7 @@
 //! and provides methods for reading/writing config values.
 
 use super::items::{control_to_value, SettingControl, SettingItem, SettingsPage};
+use super::layout::SettingsHit;
 use super::schema::{parse_schema, SettingCategory};
 use super::search::{search_settings, SearchResult};
 use crate::config::Config;
@@ -49,6 +50,10 @@ pub struct SettingsState {
     pub visible_items: usize,
     /// Whether we're in text editing mode (for TextList controls)
     pub editing_text: bool,
+    /// Current mouse hover position (for hover feedback)
+    pub hover_position: Option<(u16, u16)>,
+    /// Current hover hit result (computed from hover_position and cached layout)
+    pub hover_hit: Option<SettingsHit>,
 }
 
 impl SettingsState {
@@ -77,6 +82,8 @@ impl SettingsState {
             scroll_offset: 0,
             visible_items: 10, // Will be updated during rendering
             editing_text: false,
+            hover_position: None,
+            hover_hit: None,
         })
     }
 

@@ -139,12 +139,15 @@ fn render_categories(
     theme: &Theme,
     layout: &mut SettingsLayout,
 ) {
+    use super::layout::SettingsHit;
+
     for (idx, page) in state.pages.iter().enumerate() {
         if idx as u16 >= area.height {
             break;
         }
 
         let is_selected = idx == state.selected_category;
+        let is_hovered = matches!(state.hover_hit, Some(SettingsHit::Category(i)) if i == idx);
         let row_area = Rect::new(area.x, area.y + idx as u16, area.width, 1);
 
         layout.add_category(idx, row_area);
@@ -159,6 +162,11 @@ fn render_categories(
                     .fg(theme.menu_fg)
                     .bg(theme.selection_bg)
             }
+        } else if is_hovered {
+            // Hover highlight (lighter than selection)
+            Style::default()
+                .fg(theme.popup_text_fg)
+                .add_modifier(Modifier::UNDERLINED)
         } else {
             Style::default().fg(theme.popup_text_fg)
         };
@@ -294,7 +302,22 @@ fn render_setting_item(
     theme: &Theme,
     layout: &mut SettingsLayout,
 ) {
+    use super::layout::SettingsHit;
+
     let is_selected = !state.category_focus && idx == state.selected_item;
+
+    // Check if this item or any of its controls is being hovered
+    let is_item_hovered = match state.hover_hit {
+        Some(SettingsHit::Item(i)) => i == idx,
+        Some(SettingsHit::ControlToggle(i)) => i == idx,
+        Some(SettingsHit::ControlDecrement(i)) => i == idx,
+        Some(SettingsHit::ControlIncrement(i)) => i == idx,
+        Some(SettingsHit::ControlDropdown(i)) => i == idx,
+        Some(SettingsHit::ControlText(i)) => i == idx,
+        Some(SettingsHit::ControlTextListRow(i, _)) => i == idx,
+        Some(SettingsHit::ControlMapRow(i, _)) => i == idx,
+        _ => false,
+    };
 
     // Controls that render their own label don't need the top-level name
     let control_has_own_label = matches!(
@@ -302,9 +325,14 @@ fn render_setting_item(
         SettingControl::TextList(_) | SettingControl::Map(_)
     );
 
-    // Draw selection highlight background
-    if is_selected {
-        let bg_style = Style::default().bg(theme.current_line_bg);
+    // Draw selection or hover highlight background
+    if is_selected || is_item_hovered {
+        let bg_style = if is_selected {
+            Style::default().bg(theme.current_line_bg)
+        } else {
+            // Hover uses a lighter/different highlight
+            Style::default().bg(theme.selection_bg)
+        };
         let highlight_height = if control_has_own_label {
             item.control.control_height()
         } else {
@@ -446,6 +474,9 @@ fn render_footer(
     theme: &Theme,
     layout: &mut SettingsLayout,
 ) {
+    use super::layout::SettingsHit;
+    use crate::view::controls::FocusState;
+
     let footer_y = modal_area.y + modal_area.height - 2;
     let footer_area = Rect::new(
         modal_area.x + 1,
@@ -465,9 +496,17 @@ fn render_footer(
     // Buttons on the right side
     let button_colors = ButtonColors::from_theme(theme);
 
-    let save_state = ButtonState::new("Save");
-    let cancel_state = ButtonState::new("Cancel");
-    let reset_state = ButtonState::new("Reset");
+    // Determine hover states for buttons
+    let save_hovered = matches!(state.hover_hit, Some(SettingsHit::SaveButton));
+    let cancel_hovered = matches!(state.hover_hit, Some(SettingsHit::CancelButton));
+    let reset_hovered = matches!(state.hover_hit, Some(SettingsHit::ResetButton));
+
+    let save_state = ButtonState::new("Save")
+        .with_focus(if save_hovered { FocusState::Hovered } else { FocusState::Normal });
+    let cancel_state = ButtonState::new("Cancel")
+        .with_focus(if cancel_hovered { FocusState::Hovered } else { FocusState::Normal });
+    let reset_state = ButtonState::new("Reset")
+        .with_focus(if reset_hovered { FocusState::Hovered } else { FocusState::Normal });
 
     // Calculate button positions from right
     let cancel_width = 10; // "[ Cancel ]"

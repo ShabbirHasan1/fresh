@@ -223,6 +223,7 @@ pub fn render_text_input(
     let (label_color, text_color, border_color, placeholder_color) = match state.focus {
         FocusState::Normal => (colors.label, colors.text, colors.border, colors.placeholder),
         FocusState::Focused => (colors.focused, colors.text, colors.focused, colors.placeholder),
+        FocusState::Hovered => (colors.focused, colors.text, colors.focused, colors.placeholder),
         FocusState::Disabled => {
             (colors.disabled, colors.disabled, colors.disabled, colors.disabled)
         }

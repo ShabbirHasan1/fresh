@@ -130,6 +130,7 @@ pub fn render_toggle(
     let (bracket_color, _check_color, label_color) = match state.focus {
         FocusState::Normal => (colors.bracket, colors.checkmark, colors.label),
         FocusState::Focused => (colors.focused, colors.checkmark, colors.focused),
+        FocusState::Hovered => (colors.focused, colors.checkmark, colors.focused),
         FocusState::Disabled => (colors.disabled, colors.disabled, colors.disabled),
     };
 

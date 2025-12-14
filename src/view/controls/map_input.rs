@@ -328,6 +328,7 @@ pub fn render_map(
 
     let label_color = match state.focus {
         FocusState::Focused => colors.focused,
+        FocusState::Hovered => colors.focused,
         FocusState::Disabled => colors.disabled,
         FocusState::Normal => colors.label,
     };

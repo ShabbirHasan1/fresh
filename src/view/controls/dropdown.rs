@@ -241,6 +241,7 @@ pub fn render_dropdown(
     let (label_color, selected_color, border_color, arrow_color) = match state.focus {
         FocusState::Normal => (colors.label, colors.selected, colors.border, colors.arrow),
         FocusState::Focused => (colors.focused, colors.selected, colors.focused, colors.focused),
+        FocusState::Hovered => (colors.focused, colors.selected, colors.focused, colors.focused),
         FocusState::Disabled => {
             (colors.disabled, colors.disabled, colors.disabled, colors.disabled)
         }

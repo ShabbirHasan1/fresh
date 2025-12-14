@@ -3890,10 +3890,30 @@ impl Editor {
         let col = mouse_event.column;
         let row = mouse_event.row;
 
-        // Only handle clicks for now
-        let MouseEventKind::Down(MouseButton::Left) = mouse_event.kind else {
-            return Ok(false);
-        };
+        // Track hover position and compute hover hit for visual feedback
+        match mouse_event.kind {
+            MouseEventKind::Moved => {
+                // Compute hover hit from cached layout
+                let hover_hit = self
+                    .cached_layout
+                    .settings_layout
+                    .as_ref()
+                    .and_then(|layout| layout.hit_test(col, row));
+
+                if let Some(ref mut state) = self.settings_state {
+                    let old_hit = state.hover_hit;
+                    state.hover_position = Some((col, row));
+                    state.hover_hit = hover_hit;
+                    // Re-render if hover target changed
+                    return Ok(old_hit != hover_hit);
+                }
+                return Ok(false);
+            }
+            MouseEventKind::Down(MouseButton::Left) => {
+                // Handle click below
+            }
+            _ => return Ok(false),
+        }
 
         // Use cached settings layout for hit testing
         let hit = self

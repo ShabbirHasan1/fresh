@@ -209,6 +209,7 @@ pub fn render_number_input(
     let (label_color, value_color, border_color, button_color) = match state.focus {
         FocusState::Normal => (colors.label, colors.value, colors.border, colors.button),
         FocusState::Focused => (colors.focused, colors.value, colors.focused, colors.focused),
+        FocusState::Hovered => (colors.focused, colors.value, colors.focused, colors.focused),
         FocusState::Disabled => {
             (colors.disabled, colors.disabled, colors.disabled, colors.disabled)
         }

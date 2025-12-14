@@ -164,6 +164,10 @@ pub fn render_button(
                 (colors.focused, colors.focused, None)
             }
         }
+        FocusState::Hovered => {
+            // Hover uses focused colors with slight distinction
+            (colors.focused, colors.focused, None)
+        }
         FocusState::Disabled => (colors.disabled, colors.disabled, None),
     };
 
