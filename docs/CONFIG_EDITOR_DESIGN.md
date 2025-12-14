@@ -806,18 +806,18 @@ The current `plugins/config_editor.ts` provides similar functionality via the pl
 | Phase 1: Controls Module | ✅ DONE | All controls implemented with tests |
 | Phase 2: Schema Generation | ✅ DONE | 5-line binary replaces 620-line build.rs |
 | Phase 3: Settings UI | ✅ DONE | Basic modal with navigation working |
-| Phase 4: Search & Polish | 🟡 PARTIAL | Help overlay done, confirmation dialog done (has bugs), search UI exists but broken |
+| Phase 4: Search & Polish | ✅ DONE | Help overlay, confirmation dialog, search UI all working |
 | Phase 5: Migration | ✅ DONE | Command palette, menu integration, keybinding added |
 
 ### Known Bugs (found during testing)
 
-| Bug | Severity | Description |
-|-----|----------|-------------|
-| Ctrl+, keybinding broken | Critical | Inserts comma character instead of opening settings. Must use command palette. |
-| Search text input broken | High | Typing in search mode doesn't display characters in the search box. |
-| Confirmation dialog empty | Medium | "Unsaved Changes" dialog doesn't list what changed (shows empty list). |
-| No button selection indicator | Medium | In confirmation dialog, can't see which button is selected when using arrow keys. |
-| No panel focus indicator | Low | Can't visually tell if categories or settings panel has focus. |
+| Bug | Severity | Status | Description |
+|-----|----------|--------|-------------|
+| Ctrl+, keybinding broken | Critical | Open | Inserts comma character instead of opening settings. Must use command palette. |
+| Search text input broken | High | ✅ Fixed | Settings actions weren't routed to handle_action. |
+| Confirmation dialog empty | Medium | ✅ Fixed | Dialog height calculation was off by 1, causing changes to overlap with separator. |
+| No button selection indicator | Medium | ✅ Fixed | Added ▶ indicator and bold styling for selected button. |
+| No panel focus indicator | Low | Open | Can't visually tell if categories or settings panel has focus. |
 
 ### Phase 1: Core Controls Module ✅
 

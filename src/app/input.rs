@@ -420,7 +420,16 @@ impl Editor {
                         self.settings_navigate_down();
                         return Ok(());
                     }
-                    // Other settings actions are handled by handle_action
+                    // Route other settings actions to handle_action
+                    Action::SettingsToggleFocus
+                    | Action::SettingsActivate
+                    | Action::SettingsSearch
+                    | Action::SettingsSave
+                    | Action::SettingsReset
+                    | Action::SettingsHelp
+                    | Action::CloseSettings => {
+                        return self.handle_action(action);
+                    }
                     _ => {}
                 }
             }

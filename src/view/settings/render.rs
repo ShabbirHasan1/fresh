@@ -608,7 +608,9 @@ fn render_confirm_dialog(
     // Calculate dialog size
     let changes = state.get_change_descriptions();
     let dialog_width = 50.min(parent_area.width.saturating_sub(4));
-    let dialog_height = (6 + changes.len() as u16).min(20).min(parent_area.height.saturating_sub(4));
+    // Base height: 2 borders + 2 prompt lines + 1 separator + 1 buttons + 1 help = 7
+    // Plus one line per change
+    let dialog_height = (7 + changes.len() as u16).min(20).min(parent_area.height.saturating_sub(4));
 
     // Center the dialog
     let dialog_x = parent_area.x + (parent_area.width.saturating_sub(dialog_width)) / 2;
@@ -645,8 +647,8 @@ fn render_confirm_dialog(
     y += 2;
 
     // List changes
-    let change_style = Style::default().fg(theme.line_number_fg);
-    for change in changes.iter().take((dialog_height as usize).saturating_sub(6)) {
+    let change_style = Style::default().fg(theme.popup_text_fg);
+    for change in changes.iter().take((dialog_height as usize).saturating_sub(7)) {
         let truncated = if change.len() > inner.width as usize - 2 {
             format!("• {}...", &change[..inner.width as usize - 5])
         } else {
@@ -678,20 +680,26 @@ fn render_confirm_dialog(
         let is_selected = idx == state.confirm_dialog_selection;
         let button_width = label.len() as u16 + 4;
 
-        let (fg, bg) = if is_selected {
-            (theme.menu_highlight_fg, theme.menu_highlight_bg)
+        let style = if is_selected {
+            Style::default()
+                .fg(theme.menu_highlight_fg)
+                .bg(theme.menu_highlight_bg)
+                .add_modifier(ratatui::style::Modifier::BOLD)
         } else {
-            (theme.popup_text_fg, theme.popup_bg)
+            Style::default().fg(theme.popup_text_fg)
         };
 
-        let style = Style::default().fg(fg).bg(bg);
-        let text = format!("[ {} ]", label);
+        let text = if is_selected {
+            format!("▶[ {} ]", label)
+        } else {
+            format!(" [ {} ]", label)
+        };
         frame.render_widget(
             Paragraph::new(text).style(style),
-            Rect::new(x, button_y, button_width, 1),
+            Rect::new(x, button_y, button_width + 1, 1),
         );
 
-        x += button_width + 2;
+        x += button_width + 3;
     }
 
     // Help text
