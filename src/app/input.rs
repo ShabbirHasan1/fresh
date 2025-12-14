@@ -472,9 +472,7 @@ impl Editor {
             if number_editing {
                 // Handle number input
                 match code {
-                    crossterm::event::KeyCode::Char(c)
-                        if c.is_ascii_digit() || c == '-' =>
-                    {
+                    crossterm::event::KeyCode::Char(c) if c.is_ascii_digit() || c == '-' => {
                         if let Some(ref mut state) = self.settings_state {
                             state.number_insert(c);
                         }
