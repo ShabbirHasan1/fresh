@@ -239,7 +239,7 @@ fn render_settings_panel(
     let total_items = page.items.len();
     let scroll_offset = state.scroll_offset;
 
-    // Calculate how many items can fit with dynamic heights
+    // Calculate how many items can fit with dynamic heights (from current scroll position)
     let mut visible_items = 0;
     let mut cumulative_height = 0u16;
     for idx in scroll_offset..total_items {
@@ -251,6 +251,19 @@ fn render_settings_panel(
         visible_items += 1;
     }
     visible_items = visible_items.max(1);
+
+    // Calculate visible items from start of list for consistent scrollbar thumb size
+    let mut scrollbar_visible_items = 0;
+    let mut cumulative_height_from_start = 0u16;
+    for idx in 0..total_items {
+        let item_h = page.items[idx].item_height();
+        if cumulative_height_from_start + item_h > available_height {
+            break;
+        }
+        cumulative_height_from_start += item_h;
+        scrollbar_visible_items += 1;
+    }
+    scrollbar_visible_items = scrollbar_visible_items.max(1);
 
     // Update visible_items in state for scrolling calculations
     state.visible_items = visible_items;
@@ -277,25 +290,24 @@ fn render_settings_panel(
         current_y += item_h;
     }
 
-    // Track the settings panel area for scroll hit testing
-    let panel_content_height = current_y.saturating_sub(items_start_y);
+    // Track the settings panel area for scroll hit testing (use fixed available_height)
     layout.settings_panel_area = Some(Rect::new(
         area.x,
         items_start_y,
         content_width,
-        panel_content_height.max(1),
+        available_height.max(1),
     ));
 
-    // Render scrollbar if needed
+    // Render scrollbar if needed (use fixed available_height for consistent size)
     if total_items > visible_items {
-        let scrollbar_height = panel_content_height.max(1);
         let scrollbar_area = Rect::new(
             area.x + content_width,
             items_start_y,
             1,
-            scrollbar_height,
+            available_height.max(1),
         );
-        let scrollbar_state = ScrollbarState::new(total_items, visible_items, scroll_offset);
+        // Use scrollbar_visible_items for consistent thumb size regardless of scroll position
+        let scrollbar_state = ScrollbarState::new(total_items, scrollbar_visible_items, scroll_offset);
         let scrollbar_colors = ScrollbarColors::from_theme(theme);
         render_scrollbar(frame, scrollbar_area, &scrollbar_state, &scrollbar_colors);
 
