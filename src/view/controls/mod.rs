@@ -9,6 +9,7 @@
 //! - `Dropdown` - Selection from a list of options
 //! - `TextInput` - Single-line text entry
 //! - `TextList` - List of strings with add/remove
+//! - `MapInput` - Key-value map with expandable entries
 //! - `Button` - Clickable action button
 //!
 //! ## Pattern
@@ -19,6 +20,7 @@
 
 pub mod button;
 pub mod dropdown;
+pub mod map_input;
 pub mod number_input;
 pub mod text_input;
 pub mod text_list;
@@ -26,6 +28,7 @@ pub mod toggle;
 
 pub use button::{render_button, ButtonColors, ButtonLayout, ButtonState};
 pub use dropdown::{render_dropdown, DropdownColors, DropdownLayout, DropdownState};
+pub use map_input::{render_map, MapColors, MapLayout, MapState};
 pub use number_input::{render_number_input, NumberInputColors, NumberInputLayout, NumberInputState};
 pub use text_input::{render_text_input, TextInputColors, TextInputLayout, TextInputState};
 pub use text_list::{render_text_list, TextListColors, TextListLayout, TextListState};

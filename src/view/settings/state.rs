@@ -47,6 +47,8 @@ pub struct SettingsState {
     pub scroll_offset: usize,
     /// Number of visible items (set during rendering)
     pub visible_items: usize,
+    /// Whether we're in text editing mode (for TextList controls)
+    pub editing_text: bool,
 }
 
 impl SettingsState {
@@ -74,6 +76,7 @@ impl SettingsState {
             showing_help: false,
             scroll_offset: 0,
             visible_items: 10, // Will be updated during rendering
+            editing_text: false,
         })
     }
 
@@ -271,6 +274,7 @@ impl SettingsState {
                     SettingControl::Dropdown(state) => state.focus = focus,
                     SettingControl::Text(state) => state.focus = focus,
                     SettingControl::TextList(state) => state.focus = focus,
+                    SettingControl::Map(state) => state.focus = focus,
                     SettingControl::Complex { .. } => {}
                 }
             }
@@ -383,6 +387,104 @@ impl SettingsState {
         self.showing_help = false;
     }
 
+    /// Start text editing mode for TextList controls
+    pub fn start_editing(&mut self) {
+        if let Some(item) = self.current_item() {
+            if matches!(item.control, SettingControl::TextList(_)) {
+                self.editing_text = true;
+            }
+        }
+    }
+
+    /// Stop text editing mode
+    pub fn stop_editing(&mut self) {
+        self.editing_text = false;
+    }
+
+    /// Check if the current item is a TextList
+    pub fn is_text_list(&self) -> bool {
+        self.current_item()
+            .map_or(false, |item| matches!(item.control, SettingControl::TextList(_)))
+    }
+
+    /// Insert a character into the current TextList
+    pub fn text_insert(&mut self, c: char) {
+        if let Some(item) = self.current_item_mut() {
+            if let SettingControl::TextList(state) = &mut item.control {
+                state.insert(c);
+            }
+        }
+    }
+
+    /// Backspace in the current TextList
+    pub fn text_backspace(&mut self) {
+        if let Some(item) = self.current_item_mut() {
+            if let SettingControl::TextList(state) = &mut item.control {
+                state.backspace();
+            }
+        }
+    }
+
+    /// Move cursor left in the current TextList
+    pub fn text_move_left(&mut self) {
+        if let Some(item) = self.current_item_mut() {
+            if let SettingControl::TextList(state) = &mut item.control {
+                state.move_left();
+            }
+        }
+    }
+
+    /// Move cursor right in the current TextList
+    pub fn text_move_right(&mut self) {
+        if let Some(item) = self.current_item_mut() {
+            if let SettingControl::TextList(state) = &mut item.control {
+                state.move_right();
+            }
+        }
+    }
+
+    /// Move focus to previous item in TextList
+    pub fn text_focus_prev(&mut self) {
+        if let Some(item) = self.current_item_mut() {
+            if let SettingControl::TextList(state) = &mut item.control {
+                state.focus_prev();
+            }
+        }
+    }
+
+    /// Move focus to next item in TextList
+    pub fn text_focus_next(&mut self) {
+        if let Some(item) = self.current_item_mut() {
+            if let SettingControl::TextList(state) = &mut item.control {
+                state.focus_next();
+            }
+        }
+    }
+
+    /// Add new item in TextList (from the new item field)
+    pub fn text_add_item(&mut self) {
+        if let Some(item) = self.current_item_mut() {
+            if let SettingControl::TextList(state) = &mut item.control {
+                state.add_item();
+            }
+        }
+        // Record the change
+        self.on_value_changed();
+    }
+
+    /// Remove the currently focused item in TextList
+    pub fn text_remove_focused(&mut self) {
+        if let Some(item) = self.current_item_mut() {
+            if let SettingControl::TextList(state) = &mut item.control {
+                if let Some(idx) = state.focused_item {
+                    state.remove_item(idx);
+                }
+            }
+        }
+        // Record the change
+        self.on_value_changed();
+    }
+
     /// Get list of pending changes for display
     pub fn get_change_descriptions(&self) -> Vec<String> {
         self.pending_changes
@@ -432,6 +534,15 @@ fn update_control_from_value(control: &mut SettingControl, value: &serde_json::V
                     .iter()
                     .filter_map(|v| v.as_str().map(String::from))
                     .collect();
+            }
+        }
+        SettingControl::Map(state) => {
+            if let Some(obj) = value.as_object() {
+                state.entries = obj
+                    .iter()
+                    .map(|(k, v)| (k.clone(), v.clone()))
+                    .collect();
+                state.entries.sort_by(|a, b| a.0.cmp(&b.0));
             }
         }
         SettingControl::Complex { .. } => {}

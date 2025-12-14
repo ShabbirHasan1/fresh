@@ -358,6 +358,74 @@ impl Editor {
                 }
             }
 
+            // Check if text editing is active (for TextList controls)
+            let editing_text = self
+                .settings_state
+                .as_ref()
+                .map_or(false, |s| s.editing_text);
+
+            if editing_text {
+                // In text editing mode, handle input for TextList controls
+                match code {
+                    crossterm::event::KeyCode::Char(c) if modifiers.is_empty() => {
+                        if let Some(ref mut state) = self.settings_state {
+                            state.text_insert(c);
+                        }
+                        return Ok(());
+                    }
+                    crossterm::event::KeyCode::Backspace => {
+                        if let Some(ref mut state) = self.settings_state {
+                            state.text_backspace();
+                        }
+                        return Ok(());
+                    }
+                    crossterm::event::KeyCode::Left => {
+                        if let Some(ref mut state) = self.settings_state {
+                            state.text_move_left();
+                        }
+                        return Ok(());
+                    }
+                    crossterm::event::KeyCode::Right => {
+                        if let Some(ref mut state) = self.settings_state {
+                            state.text_move_right();
+                        }
+                        return Ok(());
+                    }
+                    crossterm::event::KeyCode::Up => {
+                        if let Some(ref mut state) = self.settings_state {
+                            state.text_focus_prev();
+                        }
+                        return Ok(());
+                    }
+                    crossterm::event::KeyCode::Down => {
+                        if let Some(ref mut state) = self.settings_state {
+                            state.text_focus_next();
+                        }
+                        return Ok(());
+                    }
+                    crossterm::event::KeyCode::Enter => {
+                        if let Some(ref mut state) = self.settings_state {
+                            // Add the item and record change
+                            state.text_add_item();
+                        }
+                        return Ok(());
+                    }
+                    crossterm::event::KeyCode::Esc => {
+                        if let Some(ref mut state) = self.settings_state {
+                            state.stop_editing();
+                        }
+                        return Ok(());
+                    }
+                    crossterm::event::KeyCode::Delete => {
+                        if let Some(ref mut state) = self.settings_state {
+                            state.text_remove_focused();
+                        }
+                        return Ok(());
+                    }
+                    _ => {}
+                }
+            }
+
             // Check if search is active
             let search_active = self
                 .settings_state

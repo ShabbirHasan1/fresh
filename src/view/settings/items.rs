@@ -4,7 +4,7 @@
 
 use super::schema::{SettingCategory, SettingSchema, SettingType};
 use crate::view::controls::{
-    DropdownState, NumberInputState, TextInputState, TextListState, ToggleState,
+    DropdownState, MapState, NumberInputState, TextInputState, TextListState, ToggleState,
 };
 
 /// A renderable setting item
@@ -32,8 +32,51 @@ pub enum SettingControl {
     Dropdown(DropdownState),
     Text(TextInputState),
     TextList(TextListState),
+    /// Map/dictionary control for key-value pairs
+    Map(MapState),
     /// Complex settings that can't be edited inline
     Complex { type_name: String },
+}
+
+impl SettingControl {
+    /// Calculate the height needed for this control (in lines)
+    pub fn control_height(&self) -> u16 {
+        match self {
+            // TextList needs: 1 label line + items + 1 "add new" row
+            SettingControl::TextList(state) => {
+                // 1 for label + items count + 1 for add-new row
+                (state.items.len() + 2) as u16
+            }
+            // Map needs: 1 label + entries + expanded content + 1 add-new row
+            SettingControl::Map(state) => {
+                let base = 1 + state.entries.len() + 1; // label + entries + add-new
+                // Add extra height for expanded entries (up to 6 lines each)
+                let expanded_height: usize = state
+                    .expanded
+                    .iter()
+                    .filter_map(|&idx| state.entries.get(idx))
+                    .map(|(_, v)| {
+                        if let Some(obj) = v.as_object() {
+                            obj.len().min(5) + if obj.len() > 5 { 1 } else { 0 }
+                        } else {
+                            0
+                        }
+                    })
+                    .sum();
+                (base + expanded_height) as u16
+            }
+            // All other controls fit in 1 line
+            _ => 1,
+        }
+    }
+}
+
+impl SettingItem {
+    /// Calculate the total height needed for this item (name line + control + spacing)
+    pub fn item_height(&self) -> u16 {
+        // 1 line for name + control height + 1 line spacing
+        1 + self.control.control_height() + 1
+    }
 }
 
 /// A page of settings (corresponds to a category)
@@ -186,9 +229,17 @@ fn build_item(schema: &SettingSchema, config_value: &serde_json::Value) -> Setti
             type_name: "Object".to_string(),
         },
 
-        SettingType::Map { .. } => SettingControl::Complex {
-            type_name: "Map".to_string(),
-        },
+        SettingType::Map { value_schema } => {
+            // Get current map value or default
+            let map_value = current_value
+                .cloned()
+                .or_else(|| schema.default.clone())
+                .unwrap_or_else(|| serde_json::json!({}));
+
+            let mut state = MapState::new(&schema.name).with_entries(&map_value);
+            state = state.with_value_schema((**value_schema).clone());
+            SettingControl::Map(state)
+        }
 
         SettingType::Complex => SettingControl::Complex {
             type_name: "Complex".to_string(),
@@ -239,6 +290,8 @@ pub fn control_to_value(control: &SettingControl) -> serde_json::Value {
                 .collect();
             serde_json::Value::Array(arr)
         }
+
+        SettingControl::Map(state) => state.to_value(),
 
         SettingControl::Complex { .. } => serde_json::Value::Null,
     }

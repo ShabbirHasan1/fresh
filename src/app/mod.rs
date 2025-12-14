@@ -1742,6 +1742,7 @@ impl Editor {
                     SettingControl::Dropdown(_) => "dropdown",
                     SettingControl::Text(_) => "text",
                     SettingControl::TextList(_) => "textlist",
+                    SettingControl::Map(_) => "map",
                     SettingControl::Complex { .. } => "complex",
                 })
             } else {
@@ -1770,6 +1771,12 @@ impl Editor {
                         }
                     }
                     state.on_value_changed();
+                }
+            }
+            Some("textlist") => {
+                // Enter text editing mode for TextList controls
+                if let Some(ref mut state) = self.settings_state {
+                    state.start_editing();
                 }
             }
             _ => {}

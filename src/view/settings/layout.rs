@@ -155,6 +155,13 @@ impl SettingsLayout {
                             }
                         }
                     }
+                    ControlLayoutInfo::Map { entry_rows } => {
+                        for (row_idx, row_area) in entry_rows.iter().enumerate() {
+                            if self.contains(*row_area, x, y) {
+                                return Some(SettingsHit::ControlMapRow(item.index, row_idx));
+                            }
+                        }
+                    }
                     ControlLayoutInfo::Complex => {}
                 }
 
@@ -194,6 +201,8 @@ pub enum SettingsHit {
     ControlText(usize),
     /// Click on text list row (item_idx, row_idx)
     ControlTextListRow(usize, usize),
+    /// Click on map row (item_idx, row_idx)
+    ControlMapRow(usize, usize),
     /// Click on save button
     SaveButton,
     /// Click on cancel button

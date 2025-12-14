@@ -7,9 +7,9 @@ use super::layout::SettingsLayout;
 use super::search::SearchResult;
 use super::state::SettingsState;
 use crate::view::controls::{
-    render_button, render_dropdown, render_number_input, render_text_input, render_text_list,
-    render_toggle, ButtonColors, ButtonState, DropdownColors, NumberInputColors, TextInputColors,
-    TextListColors, ToggleColors,
+    render_button, render_dropdown, render_map, render_number_input, render_text_input,
+    render_text_list, render_toggle, ButtonColors, ButtonState, DropdownColors, MapColors,
+    NumberInputColors, TextInputColors, TextListColors, ToggleColors,
 };
 use crate::view::theme::Theme;
 use crate::view::ui::{render_scrollbar, ScrollbarColors, ScrollbarState};
@@ -223,47 +223,60 @@ fn render_settings_panel(
     let header_height = (y - header_start_y) as usize;
     let items_start_y = y;
 
-    // Calculate how many items can fit (each item is 3 rows tall)
+    // Calculate available height for items
     let available_height = area.height.saturating_sub(header_height as u16 + 1); // +1 for scrollbar gutter
-    let item_height = 3u16;
-    let visible_items = (available_height / item_height) as usize;
 
-    // Update visible_items in state for scrolling calculations
-    state.visible_items = visible_items.max(1);
-
-    // Get page items and total count (need to re-borrow after updating state)
+    // Get page items and total count
     let page = state.current_page().unwrap();
     let total_items = page.items.len();
     let scroll_offset = state.scroll_offset;
+
+    // Calculate how many items can fit with dynamic heights
+    let mut visible_items = 0;
+    let mut cumulative_height = 0u16;
+    for idx in scroll_offset..total_items {
+        let item_h = page.items[idx].item_height();
+        if cumulative_height + item_h > available_height {
+            break;
+        }
+        cumulative_height += item_h;
+        visible_items += 1;
+    }
+    visible_items = visible_items.max(1);
+
+    // Update visible_items in state for scrolling calculations
+    state.visible_items = visible_items;
+
+    // Re-borrow page after updating state
+    let page = state.current_page().unwrap();
 
     // Reserve space for scrollbar if needed
     let scrollbar_width = if total_items > visible_items { 1 } else { 0 };
     let content_width = area.width.saturating_sub(scrollbar_width);
 
-    // Render visible items
-    for (display_idx, idx) in (scroll_offset..).take(visible_items).enumerate() {
-        if idx >= total_items {
-            break;
-        }
-
+    // Render visible items with dynamic heights
+    let mut current_y = items_start_y;
+    for idx in scroll_offset..(scroll_offset + visible_items).min(total_items) {
         let item = &page.items[idx];
-        let item_y = items_start_y + (display_idx as u16 * item_height);
+        let item_h = item.item_height();
 
-        if item_y + item_height > area.y + area.height {
+        if current_y + item_h > area.y + area.height {
             break;
         }
 
-        let item_area = Rect::new(area.x, item_y, content_width, item_height);
+        let item_area = Rect::new(area.x, current_y, content_width, item_h);
         render_setting_item(frame, item_area, item, idx, state, theme, layout);
+        current_y += item_h;
     }
 
     // Render scrollbar if needed
     if total_items > visible_items {
+        let scrollbar_height = current_y.saturating_sub(items_start_y).max(1);
         let scrollbar_area = Rect::new(
             area.x + content_width,
             items_start_y,
             1,
-            (visible_items as u16) * item_height,
+            scrollbar_height,
         );
         let scrollbar_state = ScrollbarState::new(total_items, visible_items, scroll_offset);
         let scrollbar_colors = ScrollbarColors::from_theme(theme);
@@ -283,10 +296,11 @@ fn render_setting_item(
 ) {
     let is_selected = !state.category_focus && idx == state.selected_item;
 
-    // Draw selection highlight background
+    // Draw selection highlight background (cover name line + control area)
     if is_selected {
         let bg_style = Style::default().bg(theme.current_line_bg);
-        for row in 0..area.height.min(2) {
+        let highlight_height = 1 + item.control.control_height(); // name line + control
+        for row in 0..highlight_height.min(area.height) {
             let row_area = Rect::new(area.x, area.y + row, area.width, 1);
             frame.render_widget(Paragraph::new("").style(bg_style), row_area);
         }
@@ -315,7 +329,8 @@ fn render_setting_item(
     );
 
     // Control on second line (indented to align with name after prefix)
-    let control_area = Rect::new(area.x + 4, area.y + 1, area.width.saturating_sub(4), 1);
+    let control_height = item.control.control_height();
+    let control_area = Rect::new(area.x + 4, area.y + 1, area.width.saturating_sub(4), control_height);
     let control_layout = render_control(frame, control_area, &item.control, theme);
 
     layout.add_item(idx, item.path.clone(), area, control_layout);
@@ -365,6 +380,14 @@ fn render_control(
             }
         }
 
+        SettingControl::Map(state) => {
+            let colors = MapColors::from_theme(theme);
+            let map_layout = render_map(frame, area, state, &colors, 20);
+            ControlLayoutInfo::Map {
+                entry_rows: map_layout.entry_areas.iter().map(|e| e.row_area).collect(),
+            }
+        }
+
         SettingControl::Complex { type_name } => {
             let style = Style::default().fg(theme.line_number_fg);
             let text = format!("<{} - edit in config.toml>", type_name);
@@ -389,6 +412,7 @@ pub enum ControlLayoutInfo {
     Dropdown(Rect),
     Text(Rect),
     TextList { rows: Vec<Rect> },
+    Map { entry_rows: Vec<Rect> },
     Complex,
 }
 
