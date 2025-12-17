@@ -98,10 +98,12 @@ pub fn render_settings(
     render_separator(frame, separator_area, theme);
 
     // Render settings (right panel) or search results
+    // Add horizontal padding from separator
+    let horizontal_padding = 2;
     let settings_inner = Rect::new(
-        settings_area.x + 1,
+        settings_area.x + horizontal_padding,
         settings_area.y,
-        settings_area.width.saturating_sub(1),
+        settings_area.width.saturating_sub(horizontal_padding),
         settings_area.height,
     );
 
@@ -333,6 +335,47 @@ fn render_settings_panel(
     }
 }
 
+/// Wrap text to fit within a given width
+fn wrap_text(text: &str, width: usize) -> Vec<String> {
+    if width == 0 || text.is_empty() {
+        return vec![text.to_string()];
+    }
+
+    let mut lines = Vec::new();
+    let mut current_line = String::new();
+    let mut current_len = 0;
+
+    for word in text.split_whitespace() {
+        let word_len = word.chars().count();
+
+        if current_len == 0 {
+            // First word on line
+            current_line = word.to_string();
+            current_len = word_len;
+        } else if current_len + 1 + word_len <= width {
+            // Word fits on current line
+            current_line.push(' ');
+            current_line.push_str(word);
+            current_len += 1 + word_len;
+        } else {
+            // Start new line
+            lines.push(current_line);
+            current_line = word.to_string();
+            current_len = word_len;
+        }
+    }
+
+    if !current_line.is_empty() {
+        lines.push(current_line);
+    }
+
+    if lines.is_empty() {
+        lines.push(String::new());
+    }
+
+    lines
+}
+
 /// Pure render function for a setting item (returns layout, doesn't modify external state)
 ///
 /// # Arguments
@@ -363,30 +406,83 @@ fn render_setting_item_pure(
         _ => false,
     };
 
-    // Draw selection or hover highlight background (for visible portion)
-    if is_selected || is_item_hovered {
+    let is_focused_or_hovered = is_selected || is_item_hovered;
+
+    // Calculate content height - expanded when focused/hovered
+    let content_height = if is_focused_or_hovered {
+        item.content_height_expanded(area.width)
+    } else {
+        item.content_height()
+    };
+    // Adjust for skipped rows
+    let visible_content_height = content_height.saturating_sub(skip_top);
+
+    // Draw selection or hover highlight background (only for content rows, not spacing)
+    if is_focused_or_hovered {
         let bg_style = if is_selected {
             Style::default().bg(theme.current_line_bg)
         } else {
             Style::default().bg(theme.menu_hover_bg)
         };
-        for row in 0..area.height {
+        for row in 0..visible_content_height.min(area.height) {
             let row_area = Rect::new(area.x, area.y + row, area.width, 1);
             frame.render_widget(Paragraph::new("").style(bg_style), row_area);
         }
     }
 
-    // All controls render their own label, so just render the control
-    render_control(
+    // Calculate control height and area
+    let control_height = item.control.control_height();
+    let visible_control_height = control_height.saturating_sub(skip_top);
+    let control_area = Rect::new(area.x, area.y, area.width, visible_control_height.min(area.height));
+
+    // Render the control
+    let layout = render_control(
         frame,
-        area,
+        control_area,
         &item.control,
         &item.name,
         item.modified,
         skip_top,
         theme,
         label_width,
-    )
+    );
+
+    // Render description below the control (if visible and exists)
+    if let Some(ref description) = item.description {
+        // Description starts after the control
+        let desc_start_row = control_height.saturating_sub(skip_top);
+        if desc_start_row < area.height {
+            let desc_y = area.y + desc_start_row;
+            let desc_style = Style::default().fg(theme.line_number_fg);
+            let max_width = area.width.saturating_sub(2) as usize;
+
+            if is_focused_or_hovered && description.len() > max_width {
+                // Wrap description to multiple lines when focused/hovered
+                let wrapped_lines = wrap_text(description, max_width);
+                let available_rows = area.height.saturating_sub(desc_start_row) as usize;
+
+                for (i, line) in wrapped_lines.iter().take(available_rows).enumerate() {
+                    frame.render_widget(
+                        Paragraph::new(line.as_str()).style(desc_style),
+                        Rect::new(area.x, desc_y + i as u16, area.width, 1),
+                    );
+                }
+            } else {
+                // Single line - truncate if too long
+                let display_desc = if description.len() > max_width {
+                    format!("{}...", &description[..max_width.saturating_sub(3)])
+                } else {
+                    description.clone()
+                };
+                frame.render_widget(
+                    Paragraph::new(display_desc).style(desc_style),
+                    Rect::new(area.x, desc_y, area.width, 1),
+                );
+            }
+        }
+    }
+
+    layout
 }
 
 /// Render the appropriate control for a setting

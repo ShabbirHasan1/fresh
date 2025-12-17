@@ -3,6 +3,7 @@
 //! Converts schema information into renderable setting items.
 
 use super::schema::{SettingCategory, SettingSchema, SettingType};
+use std::collections::HashSet;
 use crate::view::controls::{
     DropdownState, KeybindingListState, MapState, NumberInputState, TextInputState, TextListState,
     ToggleState,
@@ -92,11 +93,98 @@ impl SettingControl {
 }
 
 impl SettingItem {
-    /// Calculate the total height needed for this item (control + spacing)
+    /// Calculate the total height needed for this item (control + description + spacing)
     pub fn item_height(&self) -> u16 {
-        // All controls render their own label, so height is just control + spacing
-        self.control.control_height() + 1
+        // Height = control + description (if any) + spacing
+        let description_height = if self.description.is_some() { 1 } else { 0 };
+        self.control.control_height() + description_height + 1
     }
+
+    /// Calculate height with expanded description when focused
+    pub fn item_height_expanded(&self, width: u16) -> u16 {
+        let description_height = self.description_height_expanded(width);
+        self.control.control_height() + description_height + 1
+    }
+
+    /// Calculate description height when expanded (wrapped to width)
+    pub fn description_height_expanded(&self, width: u16) -> u16 {
+        if let Some(ref desc) = self.description {
+            if desc.is_empty() || width == 0 {
+                return 0;
+            }
+            // Calculate number of lines needed for wrapped description
+            let chars_per_line = width.saturating_sub(2) as usize; // Leave some margin
+            if chars_per_line == 0 {
+                return 1;
+            }
+            ((desc.len() + chars_per_line - 1) / chars_per_line) as u16
+        } else {
+            0
+        }
+    }
+
+    /// Calculate the content height (control + description, excluding spacing)
+    pub fn content_height(&self) -> u16 {
+        let description_height = if self.description.is_some() { 1 } else { 0 };
+        self.control.control_height() + description_height
+    }
+
+    /// Calculate content height with expanded description
+    pub fn content_height_expanded(&self, width: u16) -> u16 {
+        let description_height = self.description_height_expanded(width);
+        self.control.control_height() + description_height
+    }
+}
+
+/// Clean a description to remove redundancy with the name.
+/// Returns None if the description is empty or essentially just repeats the name.
+/// Otherwise returns the description with lowercase first letter.
+pub fn clean_description(name: &str, description: Option<&str>) -> Option<String> {
+    let desc = description?;
+    if desc.is_empty() {
+        return None;
+    }
+
+    // Build a set of significant words from the name (lowercase for comparison)
+    let name_words: HashSet<String> = name
+        .to_lowercase()
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty() && w.len() > 2)
+        .map(String::from)
+        .collect();
+
+    // Common filler words to ignore when checking for new info
+    let filler_words: HashSet<&str> = [
+        "the", "a", "an", "to", "for", "of", "in", "on", "is", "are", "be", "and", "or",
+        "when", "whether", "if", "this", "that", "with", "from", "by", "as", "at",
+        "show", "enable", "disable", "set", "use", "allow", "default", "true", "false",
+    ]
+    .into_iter()
+    .collect();
+
+    // Split description into words
+    let desc_words: Vec<&str> = desc
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .collect();
+
+    // Check if description has any meaningful new information
+    let has_new_info = desc_words.iter().any(|word| {
+        let lower = word.to_lowercase();
+        lower.len() > 2 && !name_words.contains(&lower) && !filler_words.contains(lower.as_str())
+    });
+
+    if !has_new_info {
+        return None;
+    }
+
+    // Keep the full description, just lowercase the first letter
+    let mut chars: Vec<char> = desc.chars().collect();
+    if !chars.is_empty() && chars[0].is_uppercase() {
+        chars[0] = chars[0].to_lowercase().next().unwrap_or(chars[0]);
+    }
+
+    Some(chars.into_iter().collect())
 }
 
 impl ScrollItem for SettingItem {
@@ -394,10 +482,13 @@ fn build_item(schema: &SettingSchema, config_value: &serde_json::Value) -> Setti
         _ => false,
     };
 
+    // Clean description to remove redundancy with name
+    let cleaned_description = clean_description(&schema.name, schema.description.as_deref());
+
     SettingItem {
         path: schema.path.clone(),
         name: schema.name.clone(),
-        description: schema.description.clone(),
+        description: cleaned_description,
         control,
         default: schema.default.clone(),
         modified,
@@ -523,6 +614,47 @@ mod tests {
         } else {
             panic!("Expected text control");
         }
+    }
+
+    #[test]
+    fn test_clean_description_keeps_full_desc_with_new_info() {
+        // "Tab Size" + "Number of spaces per tab character" -> keeps full desc (has "spaces", "character")
+        let result = clean_description("Tab Size", Some("Number of spaces per tab character"));
+        assert!(result.is_some());
+        let cleaned = result.unwrap();
+        // Should start lowercase and contain the full info
+        assert!(cleaned.starts_with('n')); // lowercase 'n' from "Number"
+        assert!(cleaned.contains("spaces"));
+        assert!(cleaned.contains("character"));
+    }
+
+    #[test]
+    fn test_clean_description_keeps_extra_info() {
+        // "Line Numbers" + "Show line numbers in the gutter" -> should keep full desc with "gutter"
+        let result = clean_description("Line Numbers", Some("Show line numbers in the gutter"));
+        assert!(result.is_some());
+        let cleaned = result.unwrap();
+        assert!(cleaned.contains("gutter"));
+    }
+
+    #[test]
+    fn test_clean_description_returns_none_for_pure_redundancy() {
+        // If description is just the name repeated, return None
+        let result = clean_description("Theme", Some("Theme"));
+        assert!(result.is_none());
+
+        // Or only filler words around the name
+        let result = clean_description("Theme", Some("The theme to use"));
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_clean_description_returns_none_for_empty() {
+        let result = clean_description("Theme", Some(""));
+        assert!(result.is_none());
+
+        let result = clean_description("Theme", None);
+        assert!(result.is_none());
     }
 
     #[test]

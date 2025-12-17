@@ -1031,6 +1031,67 @@ fn test_settings_change_theme_and_save() {
     );
 }
 
+/// Test settings descriptions are rendered properly
+///
+/// Descriptions should:
+/// 1. Not be cut off mid-word (e.g., "hether" instead of "whether")
+/// 2. Start with lowercase letter (since they're not sentence-initial)
+/// 3. Contain meaningful info (not just repeat the name)
+#[test]
+fn test_settings_descriptions_render_properly() {
+    let mut harness = EditorTestHarness::new(120, 40).unwrap();
+
+    // Open settings
+    harness
+        .send_key(KeyCode::Char(','), KeyModifiers::CONTROL)
+        .unwrap();
+    harness.render().unwrap();
+
+    // Navigate to Editor category which has settings with descriptions
+    harness.send_key(KeyCode::Down, KeyModifiers::NONE).unwrap();
+    harness.render().unwrap();
+
+    // Switch to settings panel
+    harness.send_key(KeyCode::Tab, KeyModifiers::NONE).unwrap();
+    harness.render().unwrap();
+
+    let screen = harness.screen_to_string();
+
+    // Check that descriptions are NOT cut off mid-word at the start
+    // These patterns would indicate broken descriptions (word starting with cut-off text):
+    // We check for patterns like " hether" (space + truncated word) to find words starting wrong
+    assert!(
+        !screen.contains(" hether") && !screen.contains("|hether"), // should be "whether"
+        "Description should not be cut mid-word (found 'hether' at start of word)"
+    );
+    assert!(
+        !screen.contains(" oll interval"), // should be "poll interval"
+        "Description should not be cut mid-word (found 'oll interval')"
+    );
+    assert!(
+        !screen.contains(" yntax "), // should be "syntax"
+        "Description should not be cut mid-word"
+    );
+
+    // Check that we can see some expected description content
+    // These descriptions should exist for Editor settings
+    assert!(
+        screen.contains("indent") || screen.contains("Indent"),
+        "Should show indent-related description"
+    );
+
+    // Verify descriptions start with lowercase (our clean_description function does this)
+    // Find a line that contains "whether" and verify it's "whether" not "Whether"
+    let has_lowercase_whether = screen.contains("whether to enable");
+    assert!(
+        has_lowercase_whether,
+        "Description should start with lowercase 'whether'"
+    );
+
+    // Close settings
+    harness.send_key(KeyCode::Esc, KeyModifiers::NONE).unwrap();
+}
+
 /// Test that global shortcuts (Ctrl+P, Ctrl+Q) are consumed by settings dialog
 ///
 /// When the settings dialog is open, it should capture all keyboard input

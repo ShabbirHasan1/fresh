@@ -814,6 +814,18 @@ The `plugins/config_editor.ts` plugin has been fully removed. The built-in Setti
 | Phase 4: Search & Polish | ✅ DONE | Help overlay, confirmation dialog, search UI all working |
 | Phase 5: Migration | ✅ DONE | Plugin removed, Settings UI is now the only config editor |
 
+### Current Implementation Details
+
+The settings panel now includes:
+
+1. **Description display**: Each setting shows its description below the control in a subdued color. Descriptions are truncated with "..." if they exceed the available width.
+
+2. **Smart highlighting**: Selection and hover highlights only cover content rows (control + description), not the empty spacing row between items. This provides cleaner visual feedback.
+
+3. **Horizontal padding**: Settings panel content has 2-character padding from the vertical separator for better visual separation.
+
+4. **Column alignment**: All single-row controls (Toggle, Number, Dropdown, Text) align their labels in columns using a calculated maximum label width.
+
 ### Known Bugs (found during testing)
 
 | Bug | Severity | Status | Description |
