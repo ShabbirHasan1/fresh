@@ -310,7 +310,10 @@ impl MenuState {
             return false;
         };
 
-        matches!(items.get(highlighted_item), Some(MenuItem::Submenu { .. }))
+        matches!(
+            items.get(highlighted_item),
+            Some(MenuItem::Submenu { .. } | MenuItem::DynamicSubmenu { .. })
+        )
     }
 
     /// Get the menu index at a given x position in the menu bar
@@ -377,11 +380,16 @@ impl MenuRenderer {
         theme: &Theme,
         hover_target: Option<&crate::app::HoverTarget>,
     ) {
-        // Combine config menus with plugin menus
-        let all_menus: Vec<&Menu> = menu_config
+        // Combine config menus with plugin menus, expanding any DynamicSubmenus
+        let all_menus: Vec<Menu> = menu_config
             .menus
             .iter()
             .chain(menu_state.plugin_menus.iter())
+            .cloned()
+            .map(|mut menu| {
+                menu.expand_dynamic_items();
+                menu
+            })
             .collect();
 
         // Build spans for each menu label
@@ -464,7 +472,7 @@ impl MenuRenderer {
         menu: &Menu,
         menu_state: &MenuState,
         menu_index: usize,
-        all_menus: &[&Menu],
+        all_menus: &[Menu],
         keybindings: &crate::input::keybindings::KeybindingResolver,
         theme: &Theme,
         hover_target: Option<&crate::app::HoverTarget>,
@@ -517,7 +525,17 @@ impl MenuRenderer {
             // If not at the deepest level, navigate into the submenu for next iteration
             if !is_deepest {
                 let submenu_idx = menu_state.submenu_path[depth];
-                if let Some(MenuItem::Submenu { items, .. }) = current_items.get(submenu_idx) {
+                // Handle both Submenu and DynamicSubmenu
+                let submenu_items = match current_items.get(submenu_idx) {
+                    Some(MenuItem::Submenu { items, .. }) => Some(items.as_slice()),
+                    Some(MenuItem::DynamicSubmenu { .. }) => {
+                        // DynamicSubmenu items will be generated and stored temporarily
+                        // This case shouldn't happen in normal flow since we expand before entering
+                        None
+                    }
+                    _ => None,
+                };
+                if let Some(items) = submenu_items {
                     current_items = items;
                     // Position submenu to the right of parent, aligned with the highlighted item
                     current_x = dropdown_rect

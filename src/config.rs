@@ -561,6 +561,18 @@ pub struct Menu {
     pub items: Vec<MenuItem>,
 }
 
+impl Menu {
+    /// Expand all DynamicSubmenu items in this menu to regular Submenu items
+    /// This should be called before the menu is used for rendering/navigation
+    pub fn expand_dynamic_items(&mut self) {
+        self.items = self
+            .items
+            .iter()
+            .map(|item| item.expand_dynamic())
+            .collect();
+    }
+}
+
 /// A menu item (action, separator, or submenu)
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(untagged)]

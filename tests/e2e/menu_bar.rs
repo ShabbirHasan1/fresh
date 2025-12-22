@@ -428,3 +428,73 @@ fn test_view_menu_other_checkboxes_sync() {
         screen
     );
 }
+
+/// Test that the "Copy with Formatting" submenu expands with dynamically generated theme options
+#[test]
+fn test_copy_with_formatting_submenu_shows_themes() {
+    let mut harness = EditorTestHarness::new(100, 30).unwrap();
+    harness.render().unwrap();
+
+    // Open Edit menu
+    harness
+        .send_key(KeyCode::Char('e'), KeyModifiers::ALT)
+        .unwrap();
+    harness.render().unwrap();
+
+    // Edit menu should be open with Copy with Formatting visible
+    harness.assert_screen_contains("Undo");
+    harness.assert_screen_contains("Copy with Formatting");
+
+    // Navigate down to "Copy with Formatting" submenu
+    // Edit menu items: Undo(0), Redo(1), [separator], Cut, Copy, Copy with Formatting, ...
+    // Separators are skipped during navigation
+    // We need to find the submenu - let's navigate and check each step
+    // Down 1: Undo -> Redo
+    harness.send_key(KeyCode::Down, KeyModifiers::NONE).unwrap();
+    // Down 2: Redo -> Cut (skips separator)
+    harness.send_key(KeyCode::Down, KeyModifiers::NONE).unwrap();
+    // Down 3: Cut -> Copy
+    harness.send_key(KeyCode::Down, KeyModifiers::NONE).unwrap();
+    // Down 4: Copy -> Copy with Formatting
+    harness.send_key(KeyCode::Down, KeyModifiers::NONE).unwrap();
+    harness.render().unwrap();
+
+    // Verify we can see the submenu indicator (">") for Copy with Formatting
+    let screen_before = harness.screen_to_string();
+    assert!(
+        screen_before.contains("Copy with Formatting"),
+        "Copy with Formatting should be visible in menu. Screen:\n{}",
+        screen_before
+    );
+
+    // Open the submenu with Enter key (triggers execute which opens submenu)
+    harness
+        .send_key(KeyCode::Enter, KeyModifiers::NONE)
+        .unwrap();
+    harness.render().unwrap();
+
+    // The submenu should show dynamically generated theme options
+    // These come from Theme::available_themes()
+    let screen = harness.screen_to_string();
+
+    assert!(
+        screen.contains("dark"),
+        "Copy with Formatting submenu should show 'dark' theme. Screen:\n{}",
+        screen
+    );
+    assert!(
+        screen.contains("light"),
+        "Copy with Formatting submenu should show 'light' theme. Screen:\n{}",
+        screen
+    );
+    assert!(
+        screen.contains("high-contrast"),
+        "Copy with Formatting submenu should show 'high-contrast' theme. Screen:\n{}",
+        screen
+    );
+    assert!(
+        screen.contains("nostalgia"),
+        "Copy with Formatting submenu should show 'nostalgia' theme. Screen:\n{}",
+        screen
+    );
+}

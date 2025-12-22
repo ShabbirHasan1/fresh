@@ -8,7 +8,7 @@ use crate::config::{Menu, MenuItem};
 use crate::input::keybindings::Action;
 
 impl Editor {
-    /// Get all menus (config menus + plugin menus).
+    /// Get all menus (config menus + plugin menus) with DynamicSubmenus expanded.
     fn all_menus(&self) -> Vec<Menu> {
         self.config
             .menu
@@ -16,6 +16,10 @@ impl Editor {
             .iter()
             .chain(self.menu_state.plugin_menus.iter())
             .cloned()
+            .map(|mut menu| {
+                menu.expand_dynamic_items();
+                menu
+            })
             .collect()
     }
 
