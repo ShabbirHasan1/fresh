@@ -1758,7 +1758,6 @@ pub fn action_to_events(
         | Action::NextSplit
         | Action::PrevSplit
         | Action::Copy
-        | Action::CopyWithFormatting
         | Action::CopyWithTheme(_)
         | Action::Cut
         | Action::Paste
