@@ -687,6 +687,21 @@ interface EditorAPI {
    */
   setBufferCursor(buffer_id: number, position: number): boolean;
 
+  /**
+   * Compute syntax highlighting for a buffer range
+   * @param buffer_id - Buffer ID
+   * @param start - Start byte offset
+   * @param end - End byte offset
+   * @returns List of highlight spans
+   */
+  getHighlights(buffer_id: number, start: number, end: number): Promise<{ start: number, end: number, color: [number, number, number], bold: boolean, italic: boolean }[]>;
+  /**
+   * Find a buffer ID by its file path
+   * @param path - Absolute file path
+   * @returns Buffer ID, or 0 if not found
+   */
+  findBufferByPath(path: string): number;
+
   // === Async Operations ===
   /**
    * Run an external command and capture its output

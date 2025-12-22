@@ -468,6 +468,9 @@ pub struct Editor {
 
     /// Terminal color capability (true color, 256, or 16 colors)
     color_capability: crate::view::color_support::ColorCapability,
+
+    /// Hunks for the Review Diff tool
+    review_hunks: Vec<crate::services::plugins::api::ReviewHunk>,
 }
 
 impl Editor {
@@ -6080,6 +6083,13 @@ impl Editor {
             }
             PluginCommand::SetSplitScroll { split_id, top_byte } => {
                 self.handle_set_split_scroll(split_id, top_byte);
+            }
+            PluginCommand::RequestHighlights {
+                buffer_id,
+                range,
+                request_id,
+            } => {
+                self.handle_request_highlights(buffer_id, range, request_id);
             }
             PluginCommand::CloseSplit { split_id } => {
                 self.handle_close_split(split_id);
