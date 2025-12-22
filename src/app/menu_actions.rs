@@ -148,6 +148,7 @@ impl Editor {
                 .filter_map(|item| match item {
                     MenuItem::Action { label, .. } => Some(label.len() + 20),
                     MenuItem::Submenu { label, .. } => Some(label.len() + 20),
+                    MenuItem::DynamicSubmenu { label, .. } => Some(label.len() + 20),
                     MenuItem::Separator { .. } => Some(20),
                     MenuItem::Label { info } => Some(info.len() + 4),
                 })
@@ -235,6 +236,7 @@ impl Editor {
                 .filter_map(|item| match item {
                     MenuItem::Action { label, .. } => Some(label.len() + 20),
                     MenuItem::Submenu { label, .. } => Some(label.len() + 20),
+                    MenuItem::DynamicSubmenu { label, .. } => Some(label.len() + 20),
                     MenuItem::Separator { .. } => Some(20),
                     MenuItem::Label { info } => Some(info.len() + 4),
                 })
@@ -291,6 +293,16 @@ impl Editor {
                             self.menu_state.submenu_path.truncate(*depth);
                             // Then add this submenu
                             if !submenu_items.is_empty() {
+                                self.menu_state.submenu_path.push(item_idx);
+                                self.menu_state.highlighted_item = Some(0);
+                            }
+                            return Ok(Some(Ok(())));
+                        }
+                        MenuItem::DynamicSubmenu { source, .. } => {
+                            // Clicked on dynamic submenu - open it
+                            self.menu_state.submenu_path.truncate(*depth);
+                            let generated = MenuItem::generate_dynamic_items(source);
+                            if !generated.is_empty() {
                                 self.menu_state.submenu_path.push(item_idx);
                                 self.menu_state.highlighted_item = Some(0);
                             }

@@ -657,6 +657,22 @@
           ]
         },
         {
+          "description": "A dynamic submenu whose items are generated at runtime\nThe `source` field specifies what to generate (e.g., \"themes\")",
+          "type": "object",
+          "properties": {
+            "label": {
+              "type": "string"
+            },
+            "source": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "label",
+            "source"
+          ]
+        },
+        {
           "description": "A disabled info label (no action)",
           "type": "object",
           "properties": {

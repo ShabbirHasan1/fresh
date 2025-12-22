@@ -581,8 +581,54 @@ pub enum MenuItem {
     },
     /// A submenu (for future extensibility)
     Submenu { label: String, items: Vec<MenuItem> },
+    /// A dynamic submenu whose items are generated at runtime
+    /// The `source` field specifies what to generate (e.g., "themes")
+    DynamicSubmenu { label: String, source: String },
     /// A disabled info label (no action)
     Label { info: String },
+}
+
+impl MenuItem {
+    /// Expand a DynamicSubmenu into a regular Submenu with generated items.
+    /// Returns the original item if not a DynamicSubmenu.
+    pub fn expand_dynamic(&self) -> MenuItem {
+        match self {
+            MenuItem::DynamicSubmenu { label, source } => {
+                let items = Self::generate_dynamic_items(source);
+                MenuItem::Submenu {
+                    label: label.clone(),
+                    items,
+                }
+            }
+            other => other.clone(),
+        }
+    }
+
+    /// Generate menu items for a dynamic source
+    pub fn generate_dynamic_items(source: &str) -> Vec<MenuItem> {
+        match source {
+            "copy_with_theme" => {
+                // Generate theme options from available themes
+                crate::view::theme::Theme::available_themes()
+                    .into_iter()
+                    .map(|theme_name| {
+                        let mut args = HashMap::new();
+                        args.insert("theme".to_string(), serde_json::json!(theme_name));
+                        MenuItem::Action {
+                            label: theme_name.to_string(),
+                            action: "copy_with_theme".to_string(),
+                            args,
+                            when: Some(context_keys::HAS_SELECTION.to_string()),
+                            checkbox: None,
+                        }
+                    })
+                    .collect()
+            }
+            _ => vec![MenuItem::Label {
+                info: format!("Unknown source: {}", source),
+            }],
+        }
+    }
 }
 
 impl Default for Config {
@@ -1258,57 +1304,9 @@ impl Config {
                         when: None,
                         checkbox: None,
                     },
-                    MenuItem::Submenu {
+                    MenuItem::DynamicSubmenu {
                         label: "Copy with Formatting".to_string(),
-                        items: vec![
-                            MenuItem::Action {
-                                label: "Dark".to_string(),
-                                action: "copy_with_theme".to_string(),
-                                args: {
-                                    let mut map = HashMap::new();
-                                    map.insert("theme".to_string(), serde_json::json!("dark"));
-                                    map
-                                },
-                                when: Some(context_keys::HAS_SELECTION.to_string()),
-                                checkbox: None,
-                            },
-                            MenuItem::Action {
-                                label: "Light".to_string(),
-                                action: "copy_with_theme".to_string(),
-                                args: {
-                                    let mut map = HashMap::new();
-                                    map.insert("theme".to_string(), serde_json::json!("light"));
-                                    map
-                                },
-                                when: Some(context_keys::HAS_SELECTION.to_string()),
-                                checkbox: None,
-                            },
-                            MenuItem::Action {
-                                label: "High Contrast".to_string(),
-                                action: "copy_with_theme".to_string(),
-                                args: {
-                                    let mut map = HashMap::new();
-                                    map.insert(
-                                        "theme".to_string(),
-                                        serde_json::json!("high-contrast"),
-                                    );
-                                    map
-                                },
-                                when: Some(context_keys::HAS_SELECTION.to_string()),
-                                checkbox: None,
-                            },
-                            MenuItem::Action {
-                                label: "Nostalgia".to_string(),
-                                action: "copy_with_theme".to_string(),
-                                args: {
-                                    let mut map = HashMap::new();
-                                    map.insert("theme".to_string(), serde_json::json!("nostalgia"));
-                                    map
-                                },
-                                when: Some(context_keys::HAS_SELECTION.to_string()),
-                                checkbox: None,
-                            },
-                        ],
+                        source: "copy_with_theme".to_string(),
                     },
                     MenuItem::Action {
                         label: "Paste".to_string(),
@@ -2021,5 +2019,68 @@ mod tests {
 
         // Should have all default languages
         assert_eq!(loaded.languages.len(), defaults.languages.len());
+    }
+
+    #[test]
+    fn test_dynamic_submenu_expansion() {
+        // Test that DynamicSubmenu expands to Submenu with generated items
+        let dynamic = MenuItem::DynamicSubmenu {
+            label: "Test".to_string(),
+            source: "copy_with_theme".to_string(),
+        };
+
+        let expanded = dynamic.expand_dynamic();
+
+        // Should expand to a Submenu
+        match expanded {
+            MenuItem::Submenu { label, items } => {
+                assert_eq!(label, "Test");
+                // Should have items for each available theme
+                let themes = crate::view::theme::Theme::available_themes();
+                assert_eq!(items.len(), themes.len());
+
+                // Each item should be an Action with copy_with_theme
+                for (item, theme_name) in items.iter().zip(themes.iter()) {
+                    match item {
+                        MenuItem::Action {
+                            label,
+                            action,
+                            args,
+                            ..
+                        } => {
+                            assert_eq!(label, theme_name);
+                            assert_eq!(action, "copy_with_theme");
+                            assert_eq!(
+                                args.get("theme").and_then(|v| v.as_str()),
+                                Some(theme_name.as_str())
+                            );
+                        }
+                        _ => panic!("Expected Action item"),
+                    }
+                }
+            }
+            _ => panic!("Expected Submenu after expansion"),
+        }
+    }
+
+    #[test]
+    fn test_non_dynamic_item_unchanged() {
+        // Non-DynamicSubmenu items should be unchanged by expand_dynamic
+        let action = MenuItem::Action {
+            label: "Test".to_string(),
+            action: "test".to_string(),
+            args: HashMap::new(),
+            when: None,
+            checkbox: None,
+        };
+
+        let expanded = action.expand_dynamic();
+        match expanded {
+            MenuItem::Action { label, action, .. } => {
+                assert_eq!(label, "Test");
+                assert_eq!(action, "test");
+            }
+            _ => panic!("Action should remain Action after expand_dynamic"),
+        }
     }
 }

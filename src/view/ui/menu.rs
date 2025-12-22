@@ -136,20 +136,34 @@ impl MenuState {
         };
 
         // Get the current menu items
-        let Some(items) = self.get_current_items(menus, active_idx) else {
+        let Some(menu) = menus.get(active_idx) else {
+            return false;
+        };
+        let Some(items) = self.get_current_items_cloned(menu) else {
             return false;
         };
 
-        // Check if highlighted item is a submenu
-        if let Some(MenuItem::Submenu {
-            items: submenu_items,
-            ..
-        }) = items.get(highlighted)
-        {
-            if !submenu_items.is_empty() {
-                self.submenu_path.push(highlighted);
-                self.highlighted_item = Some(0);
-                return true;
+        // Check if highlighted item is a submenu (including DynamicSubmenu which was expanded)
+        if let Some(item) = items.get(highlighted) {
+            match item {
+                MenuItem::Submenu {
+                    items: submenu_items,
+                    ..
+                } if !submenu_items.is_empty() => {
+                    self.submenu_path.push(highlighted);
+                    self.highlighted_item = Some(0);
+                    return true;
+                }
+                MenuItem::DynamicSubmenu { source, .. } => {
+                    // Generate items to check if non-empty
+                    let generated = MenuItem::generate_dynamic_items(source);
+                    if !generated.is_empty() {
+                        self.submenu_path.push(highlighted);
+                        self.highlighted_item = Some(0);
+                        return true;
+                    }
+                }
+                _ => {}
             }
         }
         false
@@ -191,16 +205,18 @@ impl MenuState {
     }
 
     /// Get owned vec of current items (for use when Menu is cloned)
+    /// DynamicSubmenus are expanded to regular Submenus
     pub fn get_current_items_cloned(&self, menu: &Menu) -> Option<Vec<MenuItem>> {
-        let mut items = menu.items.clone();
+        // Expand all items (handles DynamicSubmenu -> Submenu)
+        let mut items: Vec<MenuItem> = menu.items.iter().map(|i| i.expand_dynamic()).collect();
 
         for &idx in &self.submenu_path {
-            match items.get(idx)? {
+            match items.get(idx)?.expand_dynamic() {
                 MenuItem::Submenu {
                     items: submenu_items,
                     ..
                 } => {
-                    items = submenu_items.clone();
+                    items = submenu_items;
                 }
                 _ => return None,
             }
@@ -531,6 +547,7 @@ impl MenuRenderer {
             .filter_map(|item| match item {
                 MenuItem::Action { label, .. } => Some(label.len() + 20),
                 MenuItem::Submenu { label, .. } => Some(label.len() + 20),
+                MenuItem::DynamicSubmenu { label, .. } => Some(label.len() + 20),
                 MenuItem::Separator { .. } => Some(20),
                 MenuItem::Label { info } => Some(info.len() + 4),
             })
@@ -681,7 +698,7 @@ impl MenuRenderer {
                             .bg(theme.menu_dropdown_bg),
                     )])
                 }
-                MenuItem::Submenu { label, .. } => {
+                MenuItem::Submenu { label, .. } | MenuItem::DynamicSubmenu { label, .. } => {
                     // Highlight submenu items that have an open child
                     let style = if is_highlighted || has_open_submenu {
                         Style::default()

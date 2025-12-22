@@ -3644,7 +3644,7 @@ impl Editor {
             self.start_copy_with_formatting_prompt();
             return;
         }
-        use crate::services::styled_image::render_styled_html;
+        use crate::services::styled_html::render_styled_html;
 
         // Load the requested theme
         let theme = crate::view::theme::Theme::from_name(theme_name);
