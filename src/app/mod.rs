@@ -3624,7 +3624,7 @@ impl Editor {
     ///
     /// This opens a prompt to select a theme, then copies the selected text as HTML
     /// with inline CSS styles using that theme's colors.
-    pub fn copy_selection_as_image(&mut self) {
+    pub fn copy_selection_with_formatting(&mut self) {
         // Check if there's a selection first
         let has_selection = {
             let state = self.active_state();
