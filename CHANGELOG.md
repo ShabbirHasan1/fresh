@@ -1,5 +1,9 @@
 # Release Notes
 
+## 0.1.64
+
+* To prevent accidental deletion of files, removed 'd' / delete key bindings from File Explorer, changed the underlying delete to show a prompt and to move files to trash instead of really deleting.
+
 ## 0.1.63
 
 ### Features
