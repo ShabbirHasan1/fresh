@@ -114,9 +114,16 @@ impl Editor {
     ) -> OnSaveResult {
         let file_path_str = file_path.display().to_string();
 
-        // Check if command exists (for optional actions)
-        if action.optional && !command_exists(&action.command) {
-            return OnSaveResult::CommandNotFound(action.command.clone());
+        // Check if command exists
+        if !command_exists(&action.command) {
+            if action.optional {
+                return OnSaveResult::CommandNotFound(action.command.clone());
+            } else {
+                return OnSaveResult::Error(format!(
+                    "On-save action '{}' failed: command not found",
+                    action.command
+                ));
+            }
         }
 
         // Build the command
