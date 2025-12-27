@@ -94,7 +94,7 @@ impl TextInputState {
             return;
         }
         self.value.insert(self.cursor, c);
-        self.cursor += 1;
+        self.cursor += c.len_utf8();
     }
 
     /// Delete the character before the cursor (backspace)
@@ -102,8 +102,14 @@ impl TextInputState {
         if !self.is_enabled() || self.cursor == 0 {
             return;
         }
-        self.cursor -= 1;
-        self.value.remove(self.cursor);
+        // Find the previous character boundary
+        let prev_boundary = self.value[..self.cursor]
+            .char_indices()
+            .next_back()
+            .map(|(i, _)| i)
+            .unwrap_or(0);
+        self.value.remove(prev_boundary);
+        self.cursor = prev_boundary;
     }
 
     /// Delete the character at the cursor (delete)
@@ -114,17 +120,27 @@ impl TextInputState {
         self.value.remove(self.cursor);
     }
 
-    /// Move cursor left
+    /// Move cursor left (to previous character boundary)
     pub fn move_left(&mut self) {
         if self.cursor > 0 {
-            self.cursor -= 1;
+            // Find the previous character boundary
+            self.cursor = self.value[..self.cursor]
+                .char_indices()
+                .next_back()
+                .map(|(i, _)| i)
+                .unwrap_or(0);
         }
     }
 
-    /// Move cursor right
+    /// Move cursor right (to next character boundary)
     pub fn move_right(&mut self) {
         if self.cursor < self.value.len() {
-            self.cursor += 1;
+            // Find the next character boundary
+            self.cursor = self.value[self.cursor..]
+                .char_indices()
+                .nth(1)
+                .map(|(i, _)| self.cursor + i)
+                .unwrap_or(self.value.len());
         }
     }
 

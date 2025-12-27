@@ -179,17 +179,27 @@ impl Prompt {
         }
     }
 
-    /// Move cursor left
+    /// Move cursor left (to previous character boundary)
     pub fn cursor_left(&mut self) {
         if self.cursor_pos > 0 {
-            self.cursor_pos -= 1;
+            // Find the previous character boundary
+            self.cursor_pos = self.input[..self.cursor_pos]
+                .char_indices()
+                .next_back()
+                .map(|(i, _)| i)
+                .unwrap_or(0);
         }
     }
 
-    /// Move cursor right
+    /// Move cursor right (to next character boundary)
     pub fn cursor_right(&mut self) {
         if self.cursor_pos < self.input.len() {
-            self.cursor_pos += 1;
+            // Find the next character boundary
+            self.cursor_pos = self.input[self.cursor_pos..]
+                .char_indices()
+                .nth(1)
+                .map(|(i, _)| self.cursor_pos + i)
+                .unwrap_or(self.input.len());
         }
     }
 
@@ -202,8 +212,14 @@ impl Prompt {
     /// Delete character before cursor (backspace)
     pub fn backspace(&mut self) {
         if self.cursor_pos > 0 {
-            self.input.remove(self.cursor_pos - 1);
-            self.cursor_pos -= 1;
+            // Find the previous character boundary
+            let prev_boundary = self.input[..self.cursor_pos]
+                .char_indices()
+                .next_back()
+                .map(|(i, _)| i)
+                .unwrap_or(0);
+            self.input.remove(prev_boundary);
+            self.cursor_pos = prev_boundary;
         }
     }
 
