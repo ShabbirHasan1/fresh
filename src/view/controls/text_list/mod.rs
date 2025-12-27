@@ -40,6 +40,8 @@ pub struct TextListState {
     pub label: String,
     /// Focus state
     pub focus: FocusState,
+    /// Whether the add-new input is being actively edited
+    pub editing: bool,
 }
 
 impl TextListState {
@@ -52,6 +54,7 @@ impl TextListState {
             new_item_text: String::new(),
             label: label.into(),
             focus: FocusState::Normal,
+            editing: false,
         }
     }
 
@@ -79,6 +82,7 @@ impl TextListState {
         }
         self.items.push(std::mem::take(&mut self.new_item_text));
         self.cursor = 0;
+        // Stay in editing mode so user can add more items
     }
 
     /// Remove an item by index
@@ -106,10 +110,18 @@ impl TextListState {
         }
     }
 
-    /// Focus on the new item field
+    /// Focus on the new item field and start editing
     pub fn focus_new_item(&mut self) {
         self.focused_item = None;
         self.cursor = self.new_item_text.len();
+        self.editing = true;
+    }
+
+    /// Cancel editing and clear the new item text
+    pub fn cancel_editing(&mut self) {
+        self.new_item_text.clear();
+        self.cursor = 0;
+        self.editing = false;
     }
 
     /// Insert a character in the focused field

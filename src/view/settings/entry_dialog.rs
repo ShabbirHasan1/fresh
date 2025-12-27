@@ -598,11 +598,14 @@ impl EntryDialogState {
         }
     }
 
-    /// Stop text editing mode
+    /// Stop text editing mode (cancels and clears any in-progress input)
     pub fn stop_editing(&mut self) {
         if let Some(item) = self.current_item_mut() {
             match &mut item.control {
                 SettingControl::Number(state) => {
+                    state.cancel_editing();
+                }
+                SettingControl::TextList(state) => {
                     state.cancel_editing();
                 }
                 _ => {}

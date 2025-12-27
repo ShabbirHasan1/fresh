@@ -947,26 +947,46 @@ fn render_text_list_partial(
         }
 
         let is_focused = state.focused_item == Some(idx) && state.focus == FocusState::Focused;
-        let (border_color, text_color) = if is_focused {
-            (colors.focused, colors.text)
+        let (border_color, text_color, bg_color) = if is_focused && state.editing {
+            (colors.focused, colors.text, Some(ratatui::style::Color::DarkGray))
+        } else if is_focused {
+            (colors.focused, colors.text, None)
         } else if state.focus == FocusState::Disabled {
-            (colors.disabled, colors.disabled)
+            (colors.disabled, colors.disabled, None)
         } else {
-            (colors.border, colors.text)
+            (colors.border, colors.text, None)
         };
 
         let inner_width = actual_field_width.saturating_sub(2) as usize;
         let visible: String = item.chars().take(inner_width).collect();
         let padded = format!("{:width$}", visible, width = inner_width);
 
-        let line = Line::from(vec![
+        let text_style = if let Some(bg) = bg_color {
+            Style::default().fg(text_color).bg(bg)
+        } else {
+            Style::default().fg(text_color)
+        };
+
+        let mut spans = vec![
             Span::raw(" ".repeat(indent as usize)),
             Span::styled("[", Style::default().fg(border_color)),
-            Span::styled(padded, Style::default().fg(text_color)),
+            Span::styled(padded, text_style),
             Span::styled("]", Style::default().fg(border_color)),
             Span::raw(" "),
             Span::styled("[x]", Style::default().fg(colors.remove_button)),
-        ]);
+        ];
+
+        // Add hint when item is focused and editing
+        if is_focused && state.editing {
+            spans.push(Span::styled(
+                "  Del:remove  Esc:done",
+                Style::default()
+                    .fg(colors.label)
+                    .add_modifier(ratatui::style::Modifier::DIM),
+            ));
+        }
+
+        let line = Line::from(spans);
 
         let row_area = Rect::new(area.x, y, area.width, 1);
         frame.render_widget(Paragraph::new(line), row_area);
@@ -985,11 +1005,9 @@ fn render_text_list_partial(
 
     // Add-new row
     if y < area.y + area.height && content_row >= skip_rows {
-        // Check if we're focused on the add-new input (focused_item is None and focused)
-        let is_add_focused = state.focused_item.is_none() && state.focus == FocusState::Focused;
-
-        if is_add_focused {
-            // Show input field with new_item_text
+        // Check if we're actively editing the add-new input (editing AND focused on add-new row)
+        if state.editing && state.focused_item.is_none() {
+            // Show input field with new_item_text (editing mode)
             let inner_width = actual_field_width.saturating_sub(2) as usize;
             let visible: String = state.new_item_text.chars().take(inner_width).collect();
             let padded = format!("{:width$}", visible, width = inner_width);
@@ -997,10 +1015,21 @@ fn render_text_list_partial(
             let line = Line::from(vec![
                 Span::raw(" ".repeat(indent as usize)),
                 Span::styled("[", Style::default().fg(colors.focused)),
-                Span::styled(padded, Style::default().fg(colors.text)),
+                Span::styled(
+                    padded,
+                    Style::default()
+                        .fg(colors.text)
+                        .bg(ratatui::style::Color::DarkGray),
+                ),
                 Span::styled("]", Style::default().fg(colors.focused)),
                 Span::raw(" "),
                 Span::styled("[+]", Style::default().fg(colors.add_button)),
+                Span::styled(
+                    "  Enter:add  Esc:cancel",
+                    Style::default()
+                        .fg(colors.label)
+                        .add_modifier(ratatui::style::Modifier::DIM),
+                ),
             ]);
             let row_area = Rect::new(area.x, y, area.width, 1);
             frame.render_widget(Paragraph::new(line), row_area);
