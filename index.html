@@ -764,6 +764,7 @@
             .hero {
                 padding: 60px 16px 24px;
                 min-height: auto;
+                justify-content: flex-start;
             }
 
             .hero h1 {
@@ -788,6 +789,8 @@
 
             .hero-content {
                 margin-bottom: 16px;
+                width: 100%;
+                max-width: 100%;
             }
 
             .btn-download {
@@ -798,6 +801,8 @@
             .quick-install-row {
                 flex-direction: column;
                 gap: 8px;
+                width: 100%;
+                align-items: center;
             }
 
             .desktop-only {
@@ -816,6 +821,23 @@
 
             .quick-install-cmd.copyable {
                 width: 100%;
+                max-width: 100%;
+                box-sizing: border-box;
+            }
+
+            .quick-install-cmd.copyable code {
+                overflow-x: auto !important;
+                text-overflow: ellipsis;
+            }
+
+            .download-section {
+                width: 100%;
+                max-width: 100%;
+            }
+
+            .quick-install {
+                width: 100%;
+                max-width: 100%;
             }
         }
 
