@@ -885,7 +885,7 @@
     <nav>
         <div class="nav-container">
             <a href="#" class="nav-logo">
-                >_ Fresh <span id="version-badge">v...</span>
+                >_ Fresh <span id="version-badge"></span>
             </a>
             <div class="nav-links">
                 <a href="#features">Features</a>
@@ -1234,13 +1234,20 @@
 
         // Fetch latest version from GitHub releases
         fetch('https://api.github.com/repos/sinelaw/fresh/releases/latest')
-            .then(response => response.json())
+            .then(response => {
+                if (!response.ok) throw new Error('Failed to fetch');
+                return response.json();
+            })
             .then(data => {
-                const version = data.tag_name || 'v0.9';
-                document.getElementById('version-badge').textContent = version;
+                if (data.tag_name) {
+                    document.getElementById('version-badge').textContent = data.tag_name;
+                } else {
+                    document.getElementById('version-badge').style.display = 'none';
+                }
             })
             .catch(() => {
-                document.getElementById('version-badge').textContent = 'v0.9';
+                // Hide version badge if fetch fails (e.g., CORS, rate limiting)
+                document.getElementById('version-badge').style.display = 'none';
             });
     </script>
 
