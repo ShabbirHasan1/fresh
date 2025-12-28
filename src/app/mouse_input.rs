@@ -232,8 +232,24 @@ impl Editor {
                     .cloned()
                     .collect();
 
-                // Clear any open submenus since we're at the main dropdown level
+                // If this item is the parent of the currently open submenu, keep it open.
+                // This prevents blinking when hovering over the parent item of an open submenu.
+                if self.menu_state.submenu_path.first() == Some(&item_idx) {
+                    tracing::trace!(
+                        "menu hover: staying on submenu parent item_idx={}, submenu_path={:?}",
+                        item_idx,
+                        self.menu_state.submenu_path
+                    );
+                    return changed;
+                }
+
+                // Clear any open submenus since we're at a different item in the main dropdown
                 if !self.menu_state.submenu_path.is_empty() {
+                    tracing::trace!(
+                        "menu hover: clearing submenu_path={:?} for different item_idx={}",
+                        self.menu_state.submenu_path,
+                        item_idx
+                    );
                     self.menu_state.submenu_path.clear();
                     self.menu_state.highlighted_item = Some(item_idx);
                     return true;
@@ -245,6 +261,7 @@ impl Editor {
                         menu.items.get(item_idx)
                     {
                         if !items.is_empty() {
+                            tracing::trace!("menu hover: opening submenu at item_idx={}", item_idx);
                             self.menu_state.submenu_path.push(item_idx);
                             self.menu_state.highlighted_item = Some(0);
                             return true;
@@ -260,8 +277,29 @@ impl Editor {
 
             // If hovering over a submenu item, handle submenu navigation
             if let Some(HoverTarget::SubmenuItem(depth, item_idx)) = new_target {
+                // If this item is the parent of a currently open nested submenu, keep it open.
+                // This prevents blinking when hovering over the parent item of an open nested submenu.
+                // submenu_path[depth] stores the index of the nested submenu opened from this level.
+                if self.menu_state.submenu_path.len() > depth
+                    && self.menu_state.submenu_path.get(depth) == Some(&item_idx)
+                {
+                    tracing::trace!(
+                        "menu hover: staying on nested submenu parent depth={}, item_idx={}, submenu_path={:?}",
+                        depth,
+                        item_idx,
+                        self.menu_state.submenu_path
+                    );
+                    return changed;
+                }
+
                 // Truncate submenu path to this depth (close any deeper submenus)
                 if self.menu_state.submenu_path.len() > depth {
+                    tracing::trace!(
+                        "menu hover: truncating submenu_path={:?} to depth={} for item_idx={}",
+                        self.menu_state.submenu_path,
+                        depth,
+                        item_idx
+                    );
                     self.menu_state.submenu_path.truncate(depth);
                 }
 
@@ -287,6 +325,11 @@ impl Editor {
                         if !sub_items.is_empty()
                             && !self.menu_state.submenu_path.contains(&item_idx)
                         {
+                            tracing::trace!(
+                                "menu hover: opening nested submenu at depth={}, item_idx={}",
+                                depth,
+                                item_idx
+                            );
                             self.menu_state.submenu_path.push(item_idx);
                             self.menu_state.highlighted_item = Some(0);
                             return true;
