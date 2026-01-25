@@ -8,7 +8,7 @@ export default defineConfig({
   srcDir: ".",
   outDir: "../dist/docs",
 
-  head: [["link", { rel: "icon", href: "/fresh/favicon.ico" }]],
+  head: [["link", { rel: "icon", href: "/fresh/docs/logo.svg" }]],
 
   cleanUrls: true,
   lastUpdated: true,
