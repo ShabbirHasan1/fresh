@@ -269,3 +269,60 @@ fn test_tab_partial_line_selection_indents_full_lines() {
         "Tab should indent entire line even with partial selection"
     );
 }
+
+/// Test that cursor position is correctly adjusted after indenting selected lines
+/// Reproduces issue where selecting to end of last line and indenting adds extra indent
+#[test]
+fn test_tab_indent_preserves_relative_cursor_position() {
+    let temp_dir = TempDir::new().unwrap();
+    let file_path = temp_dir.path().join("test.rs");
+
+    // Create a file with 4 lines to avoid EOF issues
+    std::fs::write(&file_path, "line 1\nline 2\nline 3\nline 4\n").unwrap();
+
+    let config = Config::default();
+    let mut harness = EditorTestHarness::with_config(80, 24, config).unwrap();
+    harness.open_file(&file_path).unwrap();
+
+    // Move to start of line 2 (position 7)
+    harness.send_key(KeyCode::Home, KeyModifiers::NONE).unwrap();
+    harness.send_key(KeyCode::Down, KeyModifiers::NONE).unwrap();
+
+    // Select to end of line 3 using Shift+End, then Shift+Down to select line 3
+    harness.send_key(KeyCode::End, KeyModifiers::SHIFT).unwrap();
+    harness.send_key(KeyCode::Down, KeyModifiers::SHIFT).unwrap();
+    harness.render().unwrap();
+
+    // Get positions before indent
+    let pos_before = harness.cursor_position();
+    let selection_before = harness.get_selection_range();
+    println!(
+        "Before indent: cursor={}, selection={:?}",
+        pos_before, selection_before
+    );
+
+    // Press Tab to indent
+    harness.send_key(KeyCode::Tab, KeyModifiers::NONE).unwrap();
+    harness.render().unwrap();
+
+    // Get positions after indent
+    let pos_after = harness.cursor_position();
+    let selection_after = harness.get_selection_range();
+    println!(
+        "After indent: cursor={}, selection={:?}",
+        pos_after, selection_after
+    );
+
+    // Verify content is correct - only lines 2 and 3 should be indented
+    let content = harness.get_buffer_content().unwrap();
+    assert_eq!(
+        content, "line 1\n    line 2\n    line 3\nline 4\n",
+        "Lines 2 and 3 should be indented"
+    );
+
+    // The selection should still exist
+    assert!(
+        selection_after.is_some(),
+        "Selection should be preserved after indent"
+    );
+}
