@@ -1,17 +1,12 @@
 # LSP Integration
 
-### LSP Integration
-
-
-
-
 Fresh has native support for the Language Server Protocol (LSP), providing features like:
 
 *   **Real-time diagnostics:** See errors and warnings in your code as you type.
 *   **Code completion:** Get intelligent code completion suggestions.
 *   **Go-to-definition:** Quickly jump to the definition of a symbol.
 
-#### Built-in LSP Support
+## Built-in LSP Support
 
 Fresh includes built-in LSP configurations for many popular languages. Simply install the language server and Fresh will use it automatically:
 
@@ -27,7 +22,7 @@ Fresh includes built-in LSP configurations for many popular languages. Simply in
 | Markdown | marksman | `brew install marksman` |
 | C/C++ | clangd | `brew install llvm` |
 
-#### Python LSP Configuration
+## Python LSP Configuration
 
 Fresh includes built-in support for Python with `pylsp` (Python Language Server). However, you can also use alternative Python language servers:
 
@@ -87,7 +82,7 @@ pylsp supports various plugins for enhanced functionality:
 }
 ```
 
-#### Configuring LSP for a New Language
+## Configuring LSP for a New Language
 
 To add LSP support for a language, you need to configure two sections in your `~/.config/fresh/config.json`:
 
@@ -118,7 +113,7 @@ For example, to add C# support:
 
 The language name (e.g., `"csharp"`) must match in both sections. Fresh includes built-in language definitions for Rust, JavaScript, TypeScript, and Python, but you can add any language by configuring it in your config file.
 
-#### Configuring Language Detection via Settings UI
+## Configuring Language Detection via Settings UI
 
 You can also configure language detection using the Settings UI instead of editing `config.json` directly:
 
@@ -130,7 +125,7 @@ You can also configure language detection using the Settings UI instead of editi
    - **Filenames**: Specific filenames without extensions (e.g., `Makefile`, `.bashrc`, `.zshrc`)
    - **Grammar**: The syntax highlighting grammar to use (must match a grammar name from syntect)
 
-##### Example: Adding Shell Script Detection for Dotfiles
+### Example: Adding Shell Script Detection for Dotfiles
 
 To make Fresh recognize `.bashrc`, `.zshrc`, and similar files as shell scripts:
 

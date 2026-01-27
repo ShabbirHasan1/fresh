@@ -8,13 +8,13 @@ Fresh's functionality can be extended with plugins written in TypeScript. Fresh 
 
 > On macOS, plugins folder needs to live either in the same directory as the binary OR in the directory that fresh is run from. If installed via homebrew, the binary lives in ```/opt/homebrew/bin/fresh```. The simplest, cleanest way to to create a symbolic link in that folder pointing to your plugins. i.e. ``` ln -s /Users/username/freshplugins /opt/homebrew/bin/plugins```
 
-### Package Manager
+## Package Manager
 
 Fresh includes a built-in package manager for installing plugins and themes from git repositories.
 
-#### Installing Packages
+### Installing Packages
 
-Use the command palette (`Ctrl+P`) and search for:
+Use the command palette (`Ctrl+P >`) and search for:
 
 | Command | Description |
 |---------|-------------|
@@ -25,7 +25,7 @@ Use the command palette (`Ctrl+P`) and search for:
 | `pkg: Update All` | Update all installed packages |
 | `pkg: Remove Package` | Remove an installed package |
 
-#### Installing from Git URL
+### Installing from Git URL
 
 Any git repository can be installed directly:
 
@@ -42,7 +42,7 @@ https://github.com/user/fresh-plugins#packages/rainbow-brackets
 
 This installs only the `packages/rainbow-brackets` directory from the repository.
 
-#### Package Locations
+### Package Locations
 
 Installed packages are stored in:
 - **Plugins:** `~/.config/fresh/plugins/packages/`
@@ -50,7 +50,7 @@ Installed packages are stored in:
 
 Each package is a git repository, so you can update manually with `git pull` if needed.
 
-#### Registry Sources
+### Registry Sources
 
 By default, Fresh uses the official package registry. You can add additional registries in your config:
 
@@ -67,6 +67,6 @@ By default, Fresh uses the official package registry. You can add additional reg
 
 Run `pkg: Sync Registry` to fetch the latest package lists.
 
-### Clangd helper plugin
+## Clangd helper plugin
 
 Fresh ships `plugins/clangd_support.ts` with the source tree; see `plugins/clangd_support.md` for an overview of the plugin commands and how it surfaces clangd-specific notifications in the status bar.

@@ -1,8 +1,8 @@
 # Filesystem, Path, and Environment API
 
-### File System Operations
+## File System Operations
 
-#### `readFile`
+### `readFile`
 
 Read entire file contents as UTF-8 string
 Throws if file doesn't exist, isn't readable, or isn't valid UTF-8.

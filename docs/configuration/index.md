@@ -3,7 +3,7 @@
 
 Fresh uses a layered configuration system that allows you to customize settings at different levels of scope.
 
-### Configuration Layers
+## Configuration Layers
 
 Settings are loaded from multiple layers, with higher layers overriding lower ones:
 
@@ -18,11 +18,11 @@ Settings are loaded from multiple layers, with higher layers overriding lower on
 - On Windows, User config is at `%APPDATA%\fresh\config.json`
 - Project config is found by searching up from the current directory for `.fresh/config.json`
 
-### How Layers Are Merged
+## How Layers Are Merged
 
 When Fresh loads configuration, it merges all layers together. The merge behavior depends on the type of setting:
 
-#### Simple Values (strings, numbers, booleans)
+### Simple Values (strings, numbers, booleans)
 
 Higher layers completely override lower layers. If a setting is not specified in a higher layer, it falls through to the next lower layer.
 
@@ -33,7 +33,7 @@ Project: (not set)           ← Falls through
 Session: theme = "light"     ← Final value: "light"
 ```
 
-#### Nested Objects (editor, terminal, file_explorer)
+### Nested Objects (editor, terminal, file_explorer)
 
 Nested objects are **deep-merged** field by field. Each field follows the same "higher wins" rule independently.
 
@@ -49,7 +49,7 @@ Nested objects are **deep-merged** field by field. Each field follows the same "
 { "editor": { "tab_size": 4, "line_numbers": true, "line_wrap": true } }
 ```
 
-#### Languages Map (deep merge)
+### Languages Map (deep merge)
 
 The `languages` map uses **deep merging with field-level override**:
 - Entries from all layers are combined (you can add new languages at any layer)
@@ -70,7 +70,7 @@ The `languages` map uses **deep merging with field-level override**:
 // Result: Rust keeps all system defaults, with tab_size and format_on_save overridden
 ```
 
-#### LSP Map (deep merge)
+### LSP Map (deep merge)
 
 The `lsp` map uses **deep merging with field-level override**:
 - Entries from all layers are combined
@@ -101,17 +101,17 @@ The `lsp` map uses **deep merging with field-level override**:
 // Result: command="rust-analyzer" (from defaults) + your initialization_options
 ```
 
-#### Lists (keybindings, on_save actions)
+### Lists (keybindings, on_save actions)
 
 Lists are **replaced entirely** by higher layers - they are not merged or appended.
 
 **Example:** If you define `keybindings` in your Project config, it completely replaces User keybindings (not extends them).
 
-#### Removing/Unsetting Values
+### Removing/Unsetting Values
 
 There is currently no explicit mechanism to "remove" or "unset" a value defined in a lower layer. You can only override values with different settings. For boolean settings, you can set them to `false` to disable a feature enabled in a lower layer.
 
-### Using the Settings UI
+## Using the Settings UI
 
 The easiest way to configure Fresh is through the Settings UI:
 
@@ -125,7 +125,7 @@ The easiest way to configure Fresh is through the Settings UI:
 
 For complex configurations (like LSP args or custom keybindings), click the `[ Edit ]` button in the Settings footer to open the raw JSON config file for the selected layer.
 
-### Example Configurations
+## Example Configurations
 
 **User config** (`~/.config/fresh/config.json`) - your personal defaults:
 ```json
@@ -154,9 +154,9 @@ For complex configurations (like LSP args or custom keybindings), click the `[ E
 }
 ```
 
-### Common Configuration Tasks
+## Common Configuration Tasks
 
-#### Add a Custom Language
+### Add a Custom Language
 
 To add syntax highlighting and LSP support for a new language:
 
@@ -180,7 +180,7 @@ To add syntax highlighting and LSP support for a new language:
 }
 ```
 
-#### Customize LSP Settings
+### Customize LSP Settings
 
 Configure initialization options for a language server:
 
@@ -198,7 +198,7 @@ Configure initialization options for a language server:
 }
 ```
 
-#### Project-Specific Tab Size
+### Project-Specific Tab Size
 
 Create `.fresh/config.json` in your project:
 ```json
@@ -210,7 +210,7 @@ Create `.fresh/config.json` in your project:
 }
 ```
 
-### Layer Source Indicators
+## Layer Source Indicators
 
 In the Settings UI, each setting shows where its current value comes from:
 - **(user)** - Set in your User config
@@ -218,7 +218,7 @@ In the Settings UI, each setting shows where its current value comes from:
 - **(session)** - Temporary session override
 - *(no indicator)* - Using system default
 
-### Process Resource Limits
+## Process Resource Limits
 
 To prevent LSP servers from consuming too many resources, Fresh can limit their memory and CPU usage. This is configured in the `process_limits` section of your `config.json` file.
 

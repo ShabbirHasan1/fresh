@@ -1,8 +1,8 @@
 # Virtual Buffers and Composite Buffers API
 
-### Virtual Buffer Operations
+## Virtual Buffer Operations
 
-#### `createVirtualBufferInSplit`
+### `createVirtualBufferInSplit`
 
 Create a virtual buffer in a new horizontal split below current pane
 Use for results panels, diagnostics, logs, etc. The panel_id enables
@@ -57,7 +57,7 @@ panel_id: "search"
 });
 ```
 
-#### `createVirtualBufferInExistingSplit`
+### `createVirtualBufferInExistingSplit`
 
 Create a virtual buffer in an existing split
 
@@ -71,7 +71,7 @@ createVirtualBufferInExistingSplit(options: CreateVirtualBufferInExistingSplitOp
 |------|------|-------------|
 | `options` | `CreateVirtualBufferInExistingSplitOptions` | Configuration for the virtual buffer |
 
-#### `createVirtualBuffer`
+### `createVirtualBuffer`
 
 Create a virtual buffer in the current split as a new tab
 This is useful for help panels, documentation, etc. that should open
@@ -87,7 +87,7 @@ createVirtualBuffer(options: CreateVirtualBufferInCurrentSplitOptions): Promise<
 |------|------|-------------|
 | `options` | `CreateVirtualBufferInCurrentSplitOptions` | Configuration for the virtual buffer |
 
-#### `defineMode`
+### `defineMode`
 
 Define a buffer mode with keybindings
 editor.defineMode("diagnostics-list", "special", [
@@ -117,7 +117,7 @@ editor.defineMode("diagnostics-list", "special", [
 ], true);
 ```
 
-#### `showBuffer`
+### `showBuffer`
 
 Switch the current split to display a buffer
 
@@ -131,7 +131,7 @@ showBuffer(buffer_id: number): boolean
 |------|------|-------------|
 | `buffer_id` | `number` | ID of the buffer to show |
 
-#### `closeBuffer`
+### `closeBuffer`
 
 Close a buffer and remove it from all splits
 
@@ -145,7 +145,7 @@ closeBuffer(buffer_id: number): boolean
 |------|------|-------------|
 | `buffer_id` | `number` | ID of the buffer to close |
 
-#### `focusSplit`
+### `focusSplit`
 
 Focus a specific split
 
@@ -159,7 +159,7 @@ focusSplit(split_id: number): boolean
 |------|------|-------------|
 | `split_id` | `number` | ID of the split to focus |
 
-#### `setSplitBuffer`
+### `setSplitBuffer`
 
 Set the buffer displayed in a specific split
 
@@ -174,7 +174,7 @@ setSplitBuffer(split_id: number, buffer_id: number): boolean
 | `split_id` | `number` | ID of the split |
 | `buffer_id` | `number` | ID of the buffer to display in the split |
 
-#### `closeSplit`
+### `closeSplit`
 
 Close a split (if not the last one)
 
@@ -188,7 +188,7 @@ closeSplit(split_id: number): boolean
 |------|------|-------------|
 | `split_id` | `number` | ID of the split to close |
 
-#### `getTextPropertiesAtCursor`
+### `getTextPropertiesAtCursor`
 
 Get text properties at the cursor position in a buffer
 const props = editor.getTextPropertiesAtCursor(bufferId);
@@ -215,7 +215,7 @@ editor.openFile(props[0].location.file, props[0].location.line, 0);
 }
 ```
 
-#### `setVirtualBufferContent`
+### `setVirtualBufferContent`
 
 Set the content of a virtual buffer with text properties
 

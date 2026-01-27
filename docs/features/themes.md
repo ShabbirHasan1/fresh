@@ -3,11 +3,11 @@
 
 Fresh supports customizable color themes for the editor, UI elements, and syntax highlighting.
 
-### Selecting a Theme
+## Selecting a Theme
 
 Use the command palette (`Ctrl+P`) and search for "Select Theme" to choose from available themes. Built-in themes and user themes are both shown.
 
-### Creating and Editing Themes
+## Creating and Editing Themes
 
 Fresh includes a visual Theme Editor for creating and customizing themes:
 
@@ -45,7 +45,7 @@ Fresh includes a visual Theme Editor for creating and customizing themes:
    - **Diagnostics**: LSP diagnostic colors (errors, warnings)
    - **Syntax Highlighting**: Code colors (keywords, strings, comments)
 
-### Theme File Format
+## Theme File Format
 
 Themes are stored as JSON files. You can also edit them directly at `~/.config/fresh/themes/`. Example:
 

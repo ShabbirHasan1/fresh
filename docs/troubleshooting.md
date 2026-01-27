@@ -1,25 +1,23 @@
 # Troubleshooting
 
-## Troubleshooting
-
-### Terminal Color Support
+## Terminal Color Support
 
 Fresh automatically detects your terminal's color capability and converts theme colors accordingly. Most modern terminals support 24-bit "truecolor", but some terminals and multiplexers have limited support.
 
-#### Color Modes
+### Color Modes
 
 - **Truecolor (24-bit)**: Full RGB color support (16 million colors). Used by modern terminals like Kitty, Alacritty, iTerm2, and most others with `COLORTERM=truecolor`.
 - **256 colors**: Extended palette. Used by xterm-256color and similar terminals.
 - **16 colors**: Basic ANSI colors. Used by the Linux console and very old terminals.
 
-#### Terminal Multiplexers
+### Terminal Multiplexers
 
 GNU Screen and tmux add a layer between your terminal and Fresh, which can affect color rendering:
 
 - **GNU Screen**: Does not support truecolor. Fresh automatically uses 256 colors when `TERM` starts with `screen`.
 - **tmux**: Supports 256 colors by default. Some configurations support truecolor with `TERM=tmux-direct`.
 
-#### Manual Override
+### Manual Override
 
 If colors look wrong, you can force a specific color mode with the `FRESH_COLOR_MODE` environment variable:
 
@@ -34,7 +32,7 @@ FRESH_COLOR_MODE=16 fresh
 FRESH_COLOR_MODE=truecolor fresh
 ```
 
-#### Common Issues
+### Common Issues
 
 | Symptom | Likely Cause | Solution |
 | :--- | :--- | :--- |
@@ -42,7 +40,7 @@ FRESH_COLOR_MODE=truecolor fresh
 | Weird artifacts/rendering issues | Terminal multiplexer interference | Try `FRESH_COLOR_MODE=256` or check TERM |
 | Very limited/ugly colors | 16-color mode detected | Check your terminal supports 256 colors |
 
-#### Checking Your Terminal
+### Checking Your Terminal
 
 ```bash
 # Check TERM variable

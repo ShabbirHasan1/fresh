@@ -1,8 +1,8 @@
 # Events and Hooks API
 
-### Event/Hook Operations
+## Event/Hook Operations
 
-#### `on`
+### `on`
 
 Subscribe to an editor event
 Handler must be a global function name (not a closure).

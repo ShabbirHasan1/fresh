@@ -1,8 +1,8 @@
 # Overlays and Virtual Text API
 
-### Overlay Operations
+## Overlay Operations
 
-#### `addOverlay`
+### `addOverlay`
 
 Add a colored highlight overlay to text without modifying content
 Overlays are visual decorations that persist until explicitly removed.

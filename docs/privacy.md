@@ -1,7 +1,5 @@
 # Privacy & Telemetry
 
-## Privacy & Telemetry
-
 Fresh checks for new versions to notify you when upgrades are available. Alongside this, it sends basic anonymous telemetry to help understand usage patterns. Both are part of the same daily check.
 
 The data collected includes:
@@ -12,7 +10,7 @@ The data collected includes:
 
 No personal data, file contents, or usage behavior is collected. The check runs once on startup and then once daily.
 
-### Disabling Upgrade Checks and Telemetry
+## Disabling Upgrade Checks and Telemetry
 
 You can disable both upgrade checking and telemetry with the same flag:
 

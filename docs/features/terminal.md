@@ -1,17 +1,13 @@
 # Integrated Terminal
 
-### Integrated Terminal
-
-
-
 Fresh includes a built-in terminal emulator that lets you run shell commands without leaving the editor.
 
-#### Opening a Terminal
+## Opening a Terminal
 
 *   **Command Palette:** Press `Ctrl+P` and search for "Open Terminal"
 *   **Multiple Terminals:** You can open multiple terminal tabs and switch between them like regular file buffers
 
-#### Terminal Modes
+## Terminal Modes
 
 The terminal has two modes, indicated in the status bar:
 
@@ -19,12 +15,12 @@ The terminal has two modes, indicated in the status bar:
 
 2.  **Scrollback Mode** (status bar shows "Terminal (read only)"): The terminal output becomes a read-only buffer that you can scroll through, search, and copy text from.
 
-#### Switching Between Modes
+## Switching Between Modes
 
 *   **`Ctrl+Space`**: Toggle between terminal mode and scrollback mode
 *   **`Ctrl+]`**: Exit terminal mode (same as `Ctrl+Space`)
 
-#### Keyboard Capture
+## Keyboard Capture
 
 By default, most editor keybindings (like `Ctrl+P` for command palette) still work in terminal mode. If you need to send these keys to the terminal instead:
 
@@ -32,7 +28,7 @@ By default, most editor keybindings (like `Ctrl+P` for command palette) still wo
 *   When keyboard capture is enabled (status bar shows "Terminal [capture]"), all keys except `F9` are sent to the terminal
 *   **Visual indicator:** The UI dims (menu bar, status bar, other splits) to clearly show focus is exclusively on the terminal
 
-#### Scrollback Navigation
+## Scrollback Navigation
 
 In scrollback mode, you can use standard editor navigation:
 
@@ -41,7 +37,7 @@ In scrollback mode, you can use standard editor navigation:
 *   **`Ctrl+End`**: Jump to the end
 *   **`Ctrl+F`**: Search through terminal output
 
-#### Tips and Quirks
+## Tips and Quirks
 
 *   **Session Persistence:** Terminal sessions are preserved when you close and reopen Fresh. Your scrollback history and running processes are maintained.
 *   **Automatic Scroll:** When new output arrives while you're in scrollback mode, the terminal automatically returns to terminal mode to show the latest output. Disable this with the `terminal.jump_to_end_on_output` config option.
