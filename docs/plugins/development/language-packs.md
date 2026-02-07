@@ -179,9 +179,8 @@ Before writing a grammar from scratch, search online for existing Sublime Text o
 - Standalone grammars from Package Control that don't use `extends`
 
 **To test compatibility:**
-```bash
-fresh --check-plugin /path/to/your-language-pack
-```
+
+Try installing your language pack locally (see Testing section below) and check the logs for parse errors.
 
 If you find a grammar that uses `extends`, you'll need to either:
 1. Find an alternative standalone grammar
@@ -323,8 +322,8 @@ Always validate your package before publishing:
 # Validate package.json schema
 ./validate.sh
 
-# Check grammar compatibility
-fresh --check-plugin /path/to/your-language-pack
+# Test by installing locally and checking logs
+# (see Troubleshooting section for log commands)
 ```
 
 ## Troubleshooting
@@ -335,15 +334,14 @@ fresh --check-plugin /path/to/your-language-pack
 # Show log locations
 fresh --show-paths
 
-# View Fresh logs
+# View Fresh logs (check for grammar parse errors)
 tail -f ~/.local/state/fresh/logs/fresh-*.log
 
 # Check LSP logs
 tail -f ~/.local/state/fresh/logs/lsp/<language>-*.log
 
-# Validate package
+# Validate package.json
 ./validate.sh
-fresh --check-plugin /path/to/your-language-pack
 ```
 
 ### Common Issues
