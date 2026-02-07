@@ -5,7 +5,7 @@
 use crate::app::keybinding_editor::{
     BindingSource, ContextFilter, EditMode, KeybindingEditor, SearchMode, SourceFilter,
 };
-use crate::input::keybindings::format_keybinding;
+use crate::input::keybindings::{format_keybinding, KeybindingResolver};
 use crate::view::theme::Theme;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
@@ -212,12 +212,14 @@ fn render_table(frame: &mut Frame, area: Rect, editor: &KeybindingEditor, theme:
 
     let inner_width = area.width.saturating_sub(2); // Leave room for scrollbar
 
-    // Column widths (adaptive)
-    let key_col_width = (inner_width as f32 * 0.22).min(22.0) as u16;
-    let action_col_width = (inner_width as f32 * 0.38).min(40.0) as u16;
-    let context_col_width =
-        14u16.min(inner_width.saturating_sub(key_col_width + action_col_width + 8));
+    // Column widths (adaptive): Key | Action Name | Description | Context | Source
+    let key_col_width = (inner_width as f32 * 0.16).min(20.0) as u16;
+    let action_name_col_width = (inner_width as f32 * 0.22).min(28.0) as u16;
+    let context_col_width = 14u16;
     let source_col_width = 8u16;
+    let fixed_cols =
+        key_col_width + action_name_col_width + context_col_width + source_col_width + 5; // +5 for spacers
+    let description_col_width = inner_width.saturating_sub(fixed_cols);
 
     // Header line
     let header = Line::from(vec![
@@ -230,7 +232,14 @@ fn render_table(frame: &mut Frame, area: Rect, editor: &KeybindingEditor, theme:
         ),
         Span::styled(" ", Style::default()),
         Span::styled(
-            pad_right("Action", action_col_width as usize),
+            pad_right("Action", action_name_col_width as usize),
+            Style::default()
+                .fg(theme.help_key_fg)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(" ", Style::default()),
+        Span::styled(
+            pad_right("Description", description_col_width as usize),
             Style::default()
                 .fg(theme.help_key_fg)
                 .add_modifier(Modifier::BOLD),
@@ -305,6 +314,13 @@ fn render_table(frame: &mut Frame, area: Rect, editor: &KeybindingEditor, theme:
                 theme.help_key_fg
             })
             .bg(row_bg);
+        let action_name_style = Style::default()
+            .fg(if is_selected {
+                theme.editor_fg
+            } else {
+                theme.diagnostic_info_fg
+            })
+            .bg(row_bg);
         let action_style = Style::default().fg(row_fg).bg(row_bg);
         let context_style = Style::default()
             .fg(if is_selected {
@@ -333,9 +349,14 @@ fn render_table(frame: &mut Frame, area: Rect, editor: &KeybindingEditor, theme:
                 pad_right(&binding.key_display, key_col_width as usize),
                 key_style,
             ),
+            Span::styled(" ", action_name_style),
+            Span::styled(
+                pad_right(&binding.action, action_name_col_width as usize),
+                action_name_style,
+            ),
             Span::styled(" ", action_style),
             Span::styled(
-                pad_right(&binding.action_display, action_col_width as usize),
+                pad_right(&binding.action_display, description_col_width as usize),
                 action_style,
             ),
             Span::styled(" ", context_style),
@@ -503,7 +524,7 @@ fn render_edit_dialog(
     theme: &Theme,
 ) {
     let width = 56u16.min(area.width.saturating_sub(4));
-    let height = 16u16.min(area.height.saturating_sub(4));
+    let height = 18u16.min(area.height.saturating_sub(4));
     let x = area.x + (area.width.saturating_sub(width)) / 2;
     let y = area.y + (area.height.saturating_sub(height)) / 2;
 
@@ -534,6 +555,7 @@ fn render_edit_dialog(
         Constraint::Length(1), // Spacer
         Constraint::Length(1), // Key field
         Constraint::Length(1), // Action field
+        Constraint::Length(1), // Action description (read-only)
         Constraint::Length(1), // Context field
         Constraint::Length(1), // Spacer
         Constraint::Min(3),    // Conflicts / error
@@ -618,6 +640,26 @@ fn render_edit_dialog(
     }
     frame.render_widget(Paragraph::new(Line::from(action_spans)), chunks[3]);
 
+    // Action description (read-only, shown when action text is a valid action)
+    if !dialog.action_text.is_empty() {
+        let description = KeybindingResolver::format_action_from_str(&dialog.action_text);
+        // Only show if description differs from the raw action name
+        if description.to_lowercase() != dialog.action_text.replace('_', " ").to_lowercase() {
+            frame.render_widget(
+                Paragraph::new(Line::from(vec![
+                    Span::styled("            ", Style::default().fg(theme.line_number_fg)),
+                    Span::styled(
+                        format!("\u{2192} {}", description),
+                        Style::default()
+                            .fg(theme.line_number_fg)
+                            .add_modifier(Modifier::ITALIC),
+                    ),
+                ])),
+                chunks[4],
+            );
+        }
+    }
+
     // Context field
     let ctx_focused = dialog.focus_area == 2;
     let ctx_label_style = if ctx_focused {
@@ -643,7 +685,7 @@ fn render_edit_dialog(
                 Span::raw("")
             },
         ])),
-        chunks[4],
+        chunks[5],
     );
 
     // Conflicts or error in the info area
@@ -671,7 +713,7 @@ fn render_edit_dialog(
         }
     }
     if !info_lines.is_empty() {
-        frame.render_widget(Paragraph::new(info_lines), chunks[6]);
+        frame.render_widget(Paragraph::new(info_lines), chunks[7]);
     }
 
     // Buttons
@@ -699,7 +741,7 @@ fn render_edit_dialog(
             Span::raw("  "),
             Span::styled(" Cancel ", cancel_style),
         ])),
-        chunks[7],
+        chunks[8],
     );
 
     // Render autocomplete popup on top of everything if visible
