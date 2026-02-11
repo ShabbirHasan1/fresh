@@ -2304,6 +2304,7 @@ impl JsEditorApi {
                 show_cursors: opts.show_cursors.unwrap_or(true),
                 editing_disabled: opts.editing_disabled.unwrap_or(false),
                 line_wrap: opts.line_wrap,
+                before: opts.before.unwrap_or(false),
                 request_id: Some(id),
             });
         Ok(id)

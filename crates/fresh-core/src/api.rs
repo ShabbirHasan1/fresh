@@ -1128,6 +1128,8 @@ pub enum PluginCommand {
         editing_disabled: bool,
         /// Whether line wrapping is enabled for this split (None = use global setting)
         line_wrap: Option<bool>,
+        /// Place the new buffer before (left/top of) the existing content (default: false/after)
+        before: bool,
         /// Optional request ID for async response (if set, editor will send back buffer ID)
         request_id: Option<u64>,
     },
@@ -1829,6 +1831,10 @@ pub struct CreateVirtualBufferInSplitOptions {
     #[serde(default, rename = "lineWrap")]
     #[ts(optional, rename = "lineWrap")]
     pub line_wrap: Option<bool>,
+    /// Place the new buffer before (left/top of) the existing content (default: false)
+    #[serde(default)]
+    #[ts(optional)]
+    pub before: Option<bool>,
     /// Initial content entries with optional properties
     #[serde(default)]
     #[ts(optional)]

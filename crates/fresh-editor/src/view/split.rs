@@ -579,10 +579,32 @@ impl SplitManager {
         new_buffer_id: BufferId,
         ratio: f32,
     ) -> Result<SplitId, String> {
+        self.split_active_positioned(direction, new_buffer_id, ratio, false)
+    }
+
+    /// Split the active pane, placing the new buffer before (left/top) the existing content.
+    /// `ratio` still controls the first child's proportion of space.
+    pub fn split_active_before(
+        &mut self,
+        direction: SplitDirection,
+        new_buffer_id: BufferId,
+        ratio: f32,
+    ) -> Result<SplitId, String> {
+        self.split_active_positioned(direction, new_buffer_id, ratio, true)
+    }
+
+    pub fn split_active_positioned(
+        &mut self,
+        direction: SplitDirection,
+        new_buffer_id: BufferId,
+        ratio: f32,
+        before: bool,
+    ) -> Result<SplitId, String> {
         let active_id = self.active_split;
 
         // Find the parent of the active split
-        let result = self.replace_split_with_split(active_id, direction, new_buffer_id, ratio);
+        let result =
+            self.replace_split_with_split(active_id, direction, new_buffer_id, ratio, before);
 
         if let Ok(new_split_id) = result {
             // Set the new split as active
@@ -593,13 +615,15 @@ impl SplitManager {
         }
     }
 
-    /// Replace a split with a new split container
+    /// Replace a split with a new split container.
+    /// When `before` is true, the new buffer is placed as the first child (left/top).
     fn replace_split_with_split(
         &mut self,
         target_id: SplitId,
         direction: SplitDirection,
         new_buffer_id: BufferId,
         ratio: f32,
+        before: bool,
     ) -> Result<SplitId, String> {
         // Pre-allocate all IDs before any borrowing
         let temp_id = self.allocate_split_id();
@@ -610,14 +634,15 @@ impl SplitManager {
         if self.root.id() == target_id {
             let old_root =
                 std::mem::replace(&mut self.root, SplitNode::leaf(new_buffer_id, temp_id));
+            let new_leaf = SplitNode::leaf(new_buffer_id, new_leaf_id);
 
-            self.root = SplitNode::split(
-                direction,
-                old_root,
-                SplitNode::leaf(new_buffer_id, new_leaf_id),
-                ratio,
-                new_split_id,
-            );
+            let (first, second) = if before {
+                (new_leaf, old_root)
+            } else {
+                (old_root, new_leaf)
+            };
+
+            self.root = SplitNode::split(direction, first, second, ratio, new_split_id);
 
             return Ok(new_leaf_id);
         }
@@ -625,14 +650,15 @@ impl SplitManager {
         // Find and replace the target node
         if let Some(node) = self.root.find_mut(target_id) {
             let old_node = std::mem::replace(node, SplitNode::leaf(new_buffer_id, temp_id));
+            let new_leaf = SplitNode::leaf(new_buffer_id, new_leaf_id);
 
-            *node = SplitNode::split(
-                direction,
-                old_node,
-                SplitNode::leaf(new_buffer_id, new_leaf_id),
-                ratio,
-                new_split_id,
-            );
+            let (first, second) = if before {
+                (new_leaf, old_node)
+            } else {
+                (old_node, new_leaf)
+            };
+
+            *node = SplitNode::split(direction, first, second, ratio, new_split_id);
 
             Ok(new_leaf_id)
         } else {

@@ -5043,6 +5043,7 @@ impl Editor {
                 show_cursors,
                 editing_disabled,
                 line_wrap,
+                before,
                 request_id,
             } => {
                 // Check if this panel already exists (for idempotent operations)
@@ -5142,7 +5143,7 @@ impl Editor {
 
                 // Create a split with the new buffer
                 let created_split_id =
-                    match self.split_manager.split_active(split_dir, buffer_id, ratio) {
+                    match self.split_manager.split_active_positioned(split_dir, buffer_id, ratio, before) {
                         Ok(new_split_id) => {
                             // Create independent view state for the new split with the buffer in tabs
                             let mut view_state = SplitViewState::with_buffer(
@@ -5612,46 +5613,56 @@ impl Editor {
                         let buffer_id =
                             self.create_terminal_buffer_attached(terminal_id, active_split);
 
-                        // Determine split direction
-                        let split_dir = match direction.as_deref() {
-                            Some("horizontal") => {
-                                crate::model::event::SplitDirection::Horizontal
-                            }
-                            _ => crate::model::event::SplitDirection::Vertical,
-                        };
-
-                        // Create a split for the terminal
-                        let split_ratio = ratio.unwrap_or(0.5);
-                        let created_split_id = match self
-                            .split_manager
-                            .split_active(split_dir, buffer_id, split_ratio)
-                        {
-                            Ok(new_split_id) => {
-                                let mut view_state = SplitViewState::with_buffer(
-                                    self.terminal_width,
-                                    self.terminal_height,
-                                    buffer_id,
-                                );
-                                view_state.viewport.line_wrap_enabled = false;
-                                self.split_view_states.insert(new_split_id, view_state);
-
-                                if focus.unwrap_or(true) {
-                                    self.split_manager.set_active_split(new_split_id);
+                        // If direction is specified, create a new split for the terminal.
+                        // If direction is None, just place the terminal in the active split
+                        // (no new split created — useful when the plugin manages layout).
+                        let created_split_id = if let Some(dir_str) = direction.as_deref() {
+                            let split_dir = match dir_str {
+                                "horizontal" => {
+                                    crate::model::event::SplitDirection::Horizontal
                                 }
+                                _ => crate::model::event::SplitDirection::Vertical,
+                            };
 
-                                tracing::info!(
-                                    "Created {:?} split for terminal {:?} with buffer {:?}",
-                                    split_dir,
-                                    terminal_id,
-                                    buffer_id
-                                );
-                                Some(new_split_id)
+                            let split_ratio = ratio.unwrap_or(0.5);
+                            match self
+                                .split_manager
+                                .split_active(split_dir, buffer_id, split_ratio)
+                            {
+                                Ok(new_split_id) => {
+                                    let mut view_state = SplitViewState::with_buffer(
+                                        self.terminal_width,
+                                        self.terminal_height,
+                                        buffer_id,
+                                    );
+                                    view_state.viewport.line_wrap_enabled = false;
+                                    self.split_view_states.insert(new_split_id, view_state);
+
+                                    if focus.unwrap_or(true) {
+                                        self.split_manager.set_active_split(new_split_id);
+                                    }
+
+                                    tracing::info!(
+                                        "Created {:?} split for terminal {:?} with buffer {:?}",
+                                        split_dir,
+                                        terminal_id,
+                                        buffer_id
+                                    );
+                                    Some(new_split_id)
+                                }
+                                Err(e) => {
+                                    tracing::error!(
+                                        "Failed to create split for terminal: {}",
+                                        e
+                                    );
+                                    self.set_active_buffer(buffer_id);
+                                    None
+                                }
                             }
-                            Err(e) => {
-                                tracing::error!("Failed to create split for terminal: {}", e);
-                                self.set_active_buffer(buffer_id);
-                                None
-                            }
+                        } else {
+                            // No split — just switch to the terminal buffer in the active split
+                            self.set_active_buffer(buffer_id);
+                            None
                         };
 
                         // Resize terminal to match actual split content area
