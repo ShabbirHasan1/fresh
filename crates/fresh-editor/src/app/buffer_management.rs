@@ -694,6 +694,7 @@ impl Editor {
             },
             view_mode: Default::default(),
             compose_width: None,
+            plugin_state: std::collections::HashMap::new(),
         };
 
         // Save to disk

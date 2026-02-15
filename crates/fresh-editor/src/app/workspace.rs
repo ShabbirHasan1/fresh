@@ -367,6 +367,7 @@ impl Editor {
             },
             view_mode: Default::default(),
             compose_width: None,
+            plugin_state: std::collections::HashMap::new(),
         };
 
         // Save to disk immediately
@@ -1036,6 +1037,7 @@ impl Editor {
                 SerializedViewMode::Compose => ViewMode::Compose,
             };
             buf_state.compose_width = file_state.compose_width;
+            buf_state.plugin_state = file_state.plugin_state.clone();
 
             tracing::trace!(
                 "Restored keyed state for {:?}: cursor={}, top_byte={}, view_mode={:?}",
@@ -1259,6 +1261,7 @@ fn serialize_split_view_state(
                                 ViewMode::Compose => SerializedViewMode::Compose,
                             },
                             compose_width: buf_state.compose_width,
+                            plugin_state: buf_state.plugin_state.clone(),
                         },
                     );
                 }

@@ -91,6 +91,11 @@ pub struct BufferViewState {
     /// While true, incoming SubmitViewTransform commands are rejected as stale
     /// (their tokens have source_offsets from before the edit).
     pub view_transform_stale: bool,
+
+    /// Plugin-managed state (arbitrary key-value pairs).
+    /// Plugins can store per-buffer-per-split state here via the `setViewState`/`getViewState` API.
+    /// Persisted across sessions via workspace serialization.
+    pub plugin_state: std::collections::HashMap<String, serde_json::Value>,
 }
 
 impl BufferViewState {
@@ -105,6 +110,7 @@ impl BufferViewState {
             compose_prev_line_numbers: None,
             view_transform: None,
             view_transform_stale: false,
+            plugin_state: std::collections::HashMap::new(),
         }
     }
 }

@@ -1930,6 +1930,26 @@ impl EditorTestHarness {
             self.advance_time(WAIT_SLEEP);
         }
     }
+    /// Like `wait_until`, but after the condition is met, continues waiting
+    /// until the screen stops changing (two consecutive renders produce the
+    /// same output).  Use this when the semantic condition can be met before
+    /// all async plugin work (conceals, soft-breaks, etc.) has settled.
+    pub fn wait_until_stable<F>(&mut self, mut condition: F) -> anyhow::Result<()>
+    where
+        F: FnMut(&Self) -> bool,
+    {
+        // Phase 1: wait for the semantic condition
+        self.wait_until(&mut condition)?;
+        // Phase 2: wait for screen stability
+        let mut prev = String::new();
+        self.wait_until(|h| {
+            let s = h.screen_to_string();
+            let stable = s == prev;
+            prev = s;
+            stable
+        })
+    }
+
     // ===== File Explorer Wait Helpers =====
 
     /// Wait for file explorer to be initialized (has a view)

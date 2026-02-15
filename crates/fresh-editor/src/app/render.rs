@@ -323,7 +323,17 @@ impl Editor {
                 "lines_changed hooks total"
             );
 
-            // Process any plugin commands (like AddOverlay) that resulted from the hooks
+            // Process any plugin commands (like AddOverlay) that resulted from the hooks.
+            //
+            // This is non-blocking: we collect whatever the plugin has sent so far.
+            // The plugin thread runs in parallel, and because we proactively call
+            // handle_refresh_lines after cursor_moved (in fire_cursor_hooks), the
+            // lines_changed hook fires early in the render cycle. By the time we
+            // reach this point, the plugin has typically already processed all hooks
+            // and sent back conceal/overlay commands. On rare occasions (high CPU
+            // load), the response arrives one frame late, which is imperceptible
+            // at 60fps. The plugin's own refreshLines() call from cursor_moved
+            // ensures a follow-up render cycle picks up any missed commands.
             let commands = self.plugin_manager.process_commands();
             if !commands.is_empty() {
                 let cmd_names: Vec<&str> = commands

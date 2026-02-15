@@ -988,6 +988,27 @@ impl Editor {
         }
     }
 
+    /// Handle SetViewState command — persist plugin state in BufferViewState
+    pub(super) fn handle_set_view_state(
+        &mut self,
+        buffer_id: BufferId,
+        key: String,
+        value: Option<serde_json::Value>,
+    ) {
+        let active_split = self.split_manager.active_split();
+        if let Some(view_state) = self.split_view_states.get_mut(&active_split) {
+            let buf_state = view_state.ensure_buffer_state(buffer_id);
+            match value {
+                Some(v) => {
+                    buf_state.plugin_state.insert(key, v);
+                }
+                None => {
+                    buf_state.plugin_state.remove(&key);
+                }
+            }
+        }
+    }
+
     /// Handle SetLineNumbers command
     pub(super) fn handle_set_line_numbers(&mut self, buffer_id: BufferId, enabled: bool) {
         if let Some(state) = self.buffers.get_mut(&buffer_id) {
@@ -1042,6 +1063,18 @@ impl Editor {
         if let Some(view_state) = self.split_view_states.get_mut(&target_split) {
             view_state.view_transform = None;
             view_state.compose_width = None;
+        }
+    }
+
+    /// Handle RefreshAllLines command — clear seen_byte_ranges for every buffer
+    /// so the lines_changed hook re-fires for all visible content.
+    /// Called when a plugin registers for the lines_changed hook to handle the
+    /// race where render marks lines as "seen" before the plugin has initialized.
+    pub(super) fn handle_refresh_all_lines(&mut self) {
+        self.seen_byte_ranges.clear();
+        #[cfg(feature = "plugins")]
+        {
+            self.plugin_render_requested = true;
         }
     }
 

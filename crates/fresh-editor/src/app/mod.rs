@@ -2378,6 +2378,7 @@ impl Editor {
         let buffer_id = self.active_buffer();
 
         // Convert event to hook args and fire the appropriate hook
+        let mut cursor_changed_lines = false;
         let hook_args = match event {
             Event::Insert { position, text, .. } => {
                 let insert_position = *position;
@@ -2490,8 +2491,10 @@ impl Editor {
                 new_position,
                 ..
             } => {
-                // Get the line number for the new position (1-indexed for plugins)
+                // Get line numbers for old and new positions (1-indexed for plugins)
+                let old_line = self.active_state().buffer.get_line_number(*old_position) + 1;
                 let line = self.active_state().buffer.get_line_number(*new_position) + 1;
+                cursor_changed_lines = old_line != line;
                 Some((
                     "cursor_moved",
                     crate::services::plugins::hooks::HookArgs::CursorMoved {
@@ -2507,14 +2510,28 @@ impl Editor {
         };
 
         // Fire the hook to TypeScript plugins
-        if let Some((hook_name, args)) = hook_args {
+        if let Some((hook_name, ref args)) = hook_args {
             // Update the full plugin state snapshot BEFORE firing the hook
             // This ensures the plugin can read up-to-date state (diff, cursors, viewport, etc.)
             // Without this, there's a race condition where the async hook might read stale data
             #[cfg(feature = "plugins")]
             self.update_plugin_state_snapshot();
 
-            self.plugin_manager.run_hook(hook_name, args);
+            self.plugin_manager.run_hook(hook_name, args.clone());
+        }
+
+        // After inter-line cursor_moved, proactively refresh lines so
+        // cursor-dependent conceals (e.g. emphasis auto-expose in compose
+        // mode tables) update in the same frame. Without this, there's a
+        // one-frame lag: the cursor_moved hook fires async to the plugin
+        // which calls refreshLines() back, but that round-trip means the
+        // first render after the cursor move still shows stale conceals.
+        //
+        // Only refresh on inter-line movement: intra-line moves (e.g.
+        // Left/Right within a row) don't change which row is auto-exposed,
+        // and the plugin's async refreshLines() handles span-level changes.
+        if cursor_changed_lines {
+            self.handle_refresh_lines(buffer_id);
         }
     }
 
@@ -4242,6 +4259,14 @@ impl Editor {
         // Process TypeScript plugin commands
         let processed_any_commands = self.process_plugin_commands();
 
+        // Re-sync snapshot after commands — commands like SetViewMode change
+        // state that plugins read via getBufferInfo().  Without this, a
+        // subsequent lines_changed callback would see stale values.
+        #[cfg(feature = "plugins")]
+        if processed_any_commands {
+            self.update_plugin_state_snapshot();
+        }
+
         // Process pending plugin action completions
         #[cfg(feature = "plugins")]
         self.process_pending_plugin_actions();
@@ -4484,6 +4509,41 @@ impl Editor {
 
             // Update editor mode (for vi mode and other modal editing)
             snapshot.editor_mode = self.editor_mode.clone();
+
+            // Update plugin view states from active split's BufferViewState.plugin_state.
+            // If the active split changed, fully repopulate. Otherwise, merge using
+            // or_insert to preserve JS-side write-through entries that haven't
+            // round-tripped through the command channel yet.
+            let active_split_id = self.split_manager.active_split().0;
+            let split_changed = snapshot.plugin_view_states_split != active_split_id;
+            if split_changed {
+                snapshot.plugin_view_states.clear();
+                snapshot.plugin_view_states_split = active_split_id;
+            }
+
+            // Clean up entries for buffers that are no longer open
+            {
+                let open_bids: Vec<_> = snapshot.buffers.keys().copied().collect();
+                snapshot
+                    .plugin_view_states
+                    .retain(|bid, _| open_bids.contains(bid));
+            }
+
+            // Merge from Rust-side plugin_state (source of truth for persisted state)
+            if let Some(active_vs) = self
+                .split_view_states
+                .get(&self.split_manager.active_split())
+            {
+                for (buffer_id, buf_state) in &active_vs.keyed_states {
+                    if !buf_state.plugin_state.is_empty() {
+                        let entry = snapshot.plugin_view_states.entry(*buffer_id).or_default();
+                        for (key, value) in &buf_state.plugin_state {
+                            // Use or_insert to preserve JS write-through values
+                            entry.entry(key.clone()).or_insert_with(|| value.clone());
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -4742,8 +4802,21 @@ impl Editor {
             } => {
                 self.handle_clear_view_transform(split_id);
             }
+            PluginCommand::SetViewState {
+                buffer_id,
+                key,
+                value,
+            } => {
+                self.handle_set_view_state(buffer_id, key, value);
+            }
             PluginCommand::RefreshLines { buffer_id } => {
                 self.handle_refresh_lines(buffer_id);
+            }
+            PluginCommand::RefreshAllLines => {
+                self.handle_refresh_all_lines();
+            }
+            PluginCommand::HookCompleted { .. } => {
+                // Sentinel processed in render loop; no-op if encountered elsewhere.
             }
             PluginCommand::SetLineIndicator {
                 buffer_id,
