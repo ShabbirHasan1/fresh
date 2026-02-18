@@ -25,6 +25,13 @@
 //!   "Semantic tokens range request failed: LSP error: <semantic>
 //!    TypeScript Server Error (5.9.3)
 //!    TypeError: Cannot read properties of undefined (reading 'charCount')"
+//!
+//! Note: The original issue #952 was initially reported as "any edit causes
+//! LSP to deactivate", but further investigation by the reporter (comment 6)
+//! narrowed the trigger to the toggle off/on flow. Normal editing without
+//! toggle does not cause the crash — confirmed via tmux testing with
+//! auto_start=true, manual start via LspRestart, and various editing
+//! patterns including typing, saving, and deleting.
 
 use crate::common::fake_lsp::FakeLspServer;
 use crate::common::harness::EditorTestHarness;
@@ -266,6 +273,97 @@ fn test_lsp_toggle_off_edit_toggle_on_causes_desync() -> anyhow::Result<()> {
         "BUG REPRODUCTION: Expected exactly 1 didOpen (the re-enable didOpen is missing). \
          Got {}. If this fails with 2, the bug may be fixed!",
         did_open_count
+    );
+
+    Ok(())
+}
+
+/// Test that toggling LSP off does NOT send didClose to the server.
+///
+/// This is the other half of the desync bug: when LSP is toggled off,
+/// the editor clears `lsp_opened_with` but does NOT send didClose to
+/// the server. This means `document_versions` in the async handler
+/// still has the path, causing `should_skip_did_open` to return true
+/// when the LSP is toggled back on.
+///
+/// The fix should either:
+/// - Send didClose when toggling off (so document_versions is cleared), OR
+/// - Clear document_versions for the path when toggling off, OR
+/// - Not skip didOpen when re-enabling (force re-open)
+#[test]
+#[cfg_attr(target_os = "windows", ignore)] // Uses Bash-based fake LSP server
+fn test_lsp_toggle_off_does_not_send_did_close() -> anyhow::Result<()> {
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter("fresh=debug")
+        .try_init();
+
+    let script_path = create_body_logging_lsp_script();
+    let _fake_server = FakeLspServer::spawn()?;
+
+    let temp_dir = tempfile::tempdir()?;
+    let log_file = temp_dir.path().join("lsp_toggle_close_log.txt");
+    let test_file = temp_dir.path().join("test.rs");
+    std::fs::write(&test_file, "fn main() {}\n")?;
+
+    let mut config = fresh::config::Config::default();
+    config.lsp.insert(
+        "rust".to_string(),
+        fresh::services::lsp::LspServerConfig {
+            command: script_path.to_string_lossy().to_string(),
+            args: vec![log_file.to_string_lossy().to_string()],
+            enabled: true,
+            auto_start: true,
+            process_limits: fresh::services::process_limits::ProcessLimits::default(),
+            initialization_options: None,
+        },
+    );
+
+    config.keybindings.push(fresh::config::Keybinding {
+        key: "t".to_string(),
+        modifiers: vec!["alt".to_string()],
+        keys: vec![],
+        action: "lsp_toggle_for_buffer".to_string(),
+        args: std::collections::HashMap::new(),
+        when: None,
+    });
+
+    let mut harness = EditorTestHarness::with_config_and_working_dir(
+        120,
+        30,
+        config,
+        temp_dir.path().to_path_buf(),
+    )?;
+
+    harness.open_file(&test_file)?;
+    harness.render()?;
+
+    // Wait for didOpen
+    harness.wait_until(|_| {
+        let log = std::fs::read_to_string(&log_file).unwrap_or_default();
+        log.contains("METHOD:textDocument/didOpen")
+    })?;
+
+    // Toggle LSP OFF
+    harness.send_key(KeyCode::Char('t'), KeyModifiers::ALT)?;
+    harness.render()?;
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    harness.process_async_and_render()?;
+
+    let log = std::fs::read_to_string(&log_file).unwrap_or_default();
+    eprintln!("[TEST] LSP log after toggle off:\n{}", log);
+
+    let did_close_count = log.matches("METHOD:textDocument/didClose").count();
+
+    // THE BUG: No didClose is sent when toggling LSP off.
+    // This means document_versions still has the path, causing
+    // should_skip_did_open to block re-opening on toggle on.
+    //
+    // Once fixed, change this to assert_eq!(did_close_count, 1).
+    assert_eq!(
+        did_close_count, 0,
+        "BUG: Expected 0 didClose messages (toggle off doesn't send didClose). \
+         Got {}. If this fails with 1, the bug may be fixed!",
+        did_close_count
     );
 
     Ok(())
