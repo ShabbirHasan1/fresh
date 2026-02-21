@@ -432,8 +432,10 @@ struct CharStyleContext<'a> {
     is_cursor: bool,
     is_selected: bool,
     theme: &'a crate::view::theme::Theme,
-    highlight_spans: &'a [crate::primitives::highlighter::HighlightSpan],
-    semantic_token_spans: &'a [crate::primitives::highlighter::HighlightSpan],
+    /// Pre-resolved syntax highlight color for this byte position (from cursor-based lookup)
+    highlight_color: Option<Color>,
+    /// Pre-resolved semantic token color for this byte position (from cursor-based lookup)
+    semantic_token_color: Option<Color>,
     viewport_overlays: &'a [(crate::view::overlay::Overlay, Range<usize>)],
     primary_cursor_position: usize,
     is_active: bool,
@@ -596,17 +598,33 @@ fn render_left_margin(
     }
 }
 
+/// Advance a cursor through sorted, non-overlapping spans to find the color at `byte_pos`.
+/// Returns the color if `byte_pos` falls inside a span, and advances `cursor` past any
+/// spans that end before `byte_pos` so subsequent calls are O(1) amortized.
+#[inline]
+fn span_color_at(
+    spans: &[crate::primitives::highlighter::HighlightSpan],
+    cursor: &mut usize,
+    byte_pos: usize,
+) -> Option<Color> {
+    while *cursor < spans.len() {
+        let span = &spans[*cursor];
+        if span.range.end <= byte_pos {
+            *cursor += 1;
+        } else if span.range.start > byte_pos {
+            return None;
+        } else {
+            return Some(span.color);
+        }
+    }
+    None
+}
+
 /// Compute the style for a character by layering: token -> ANSI -> syntax -> semantic -> overlays -> selection -> cursor
 fn compute_char_style(ctx: &CharStyleContext) -> CharStyleOutput {
     use crate::view::overlay::OverlayFace;
 
-    // Find highlight color for this byte position
-    let highlight_color = ctx.byte_pos.and_then(|bp| {
-        ctx.highlight_spans
-            .iter()
-            .find(|span| span.range.contains(&bp))
-            .map(|span| span.color)
-    });
+    let highlight_color = ctx.highlight_color;
 
     // Find overlays for this byte position
     let overlays: Vec<&crate::view::overlay::Overlay> = if let Some(bp) = ctx.byte_pos {
@@ -677,14 +695,8 @@ fn compute_char_style(ctx: &CharStyleContext) -> CharStyleOutput {
 
     // Apply LSP semantic token foreground color when no custom token style is set.
     if ctx.token_style.is_none() {
-        if let Some(bp) = ctx.byte_pos {
-            if let Some(token_span) = ctx
-                .semantic_token_spans
-                .iter()
-                .find(|span| span.range.contains(&bp))
-            {
-                style = style.fg(token_span.color);
-            }
+        if let Some(color) = ctx.semantic_token_color {
+            style = style.fg(color);
         }
     }
 
@@ -1826,6 +1838,7 @@ impl SplitRenderer {
         let mut rendered = 0usize;
         let mut current_span_text = String::new();
         let mut current_style: Option<Style> = None;
+        let mut hl_cursor = 0usize;
 
         for (char_idx, ch) in chars.iter().enumerate() {
             let char_width = char_width(*ch);
@@ -1844,13 +1857,9 @@ impl SplitRenderer {
             // Get source byte position for this character
             let byte_pos = char_source_bytes.get(char_idx).and_then(|b| *b);
 
-            // Get syntax highlight color from highlight_spans
-            let highlight_color = byte_pos.and_then(|bp| {
-                highlight_spans
-                    .iter()
-                    .find(|span| span.range.contains(&bp))
-                    .map(|span| span.color)
-            });
+            // Get syntax highlight color via cursor-based O(1) lookup
+            let highlight_color =
+                byte_pos.and_then(|bp| span_color_at(highlight_spans, &mut hl_cursor, bp));
 
             // Check if this character is in an inline diff range
             let in_inline_range = inline_ranges.iter().any(|r| r.contains(&char_idx));
@@ -4066,6 +4075,10 @@ impl SplitRenderer {
         let diagnostic_lines = &decorations.diagnostic_lines;
         let line_indicators = &decorations.line_indicators;
 
+        // Cursors for O(1) amortized span lookups (spans are sorted by byte range)
+        let mut hl_cursor = 0usize;
+        let mut sem_cursor = 0usize;
+
         let mut lines = Vec::new();
         let mut view_line_mappings = Vec::new();
         let mut lines_rendered = 0usize;
@@ -4337,6 +4350,16 @@ impl SplitRenderer {
                     let token_style = line_char_styles
                         .get(display_char_idx)
                         .and_then(|s| s.as_ref());
+
+                    // Resolve highlight/semantic colors via cursor-based O(1) lookup
+                    let (highlight_color, semantic_token_color) = match byte_pos {
+                        Some(bp) => (
+                            span_color_at(highlight_spans, &mut hl_cursor, bp),
+                            span_color_at(semantic_token_spans, &mut sem_cursor, bp),
+                        ),
+                        None => (None, None),
+                    };
+
                     let CharStyleOutput {
                         style,
                         is_secondary_cursor,
@@ -4347,8 +4370,8 @@ impl SplitRenderer {
                         is_cursor,
                         is_selected,
                         theme,
-                        highlight_spans,
-                        semantic_token_spans,
+                        highlight_color,
+                        semantic_token_color,
                         viewport_overlays,
                         primary_cursor_position,
                         is_active,
