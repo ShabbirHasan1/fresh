@@ -78,6 +78,21 @@ impl std::fmt::Display for LargeFileEncodingConfirmation {
 
 impl std::error::Error for LargeFileEncodingConfirmation {}
 
+/// A chunk-sized work item for incremental line-feed scanning.
+#[derive(Debug, Clone)]
+pub struct LineScanChunk {
+    /// Index of the leaf in the piece tree's leaf array.
+    pub leaf_index: usize,
+    /// Byte offset within the leaf where this chunk starts.
+    pub offset_in_leaf: usize,
+    /// Number of bytes to scan in this chunk.
+    pub byte_len: usize,
+    /// True if this is the last chunk for this leaf.
+    pub is_last_chunk: bool,
+    /// True if the leaf already had a known line_feed_cnt (no I/O needed).
+    pub already_known: bool,
+}
+
 // Large file support configuration
 /// Default threshold for considering a file "large" (100 MB)
 pub const DEFAULT_LARGE_FILE_THRESHOLD: usize = 100 * 1024 * 1024;
@@ -2352,6 +2367,87 @@ impl TextBuffer {
         self.piece_tree.update_leaf_line_feeds(&updates);
         self.line_feeds_scanned = true;
         Ok(())
+    }
+
+    /// Get the raw piece tree leaves (for storing alongside scan chunks).
+    pub fn piece_tree_leaves(&self) -> Vec<crate::model::piece_tree::LeafData> {
+        self.piece_tree.get_leaves()
+    }
+
+    /// Prepare chunk-sized work items for an incremental line scan.
+    ///
+    /// Large leaves are split into `LOAD_CHUNK_SIZE` (1MB) sub-ranges so that
+    /// each work item completes quickly and the UI can show progress between them.
+    /// Returns `(chunks, total_bytes)`.
+    pub fn prepare_line_scan(&self) -> (Vec<LineScanChunk>, usize) {
+        let leaves = self.piece_tree.get_leaves();
+        let total_bytes: usize = leaves.iter().map(|l| l.bytes).sum();
+        let mut chunks = Vec::new();
+
+        for (idx, leaf) in leaves.iter().enumerate() {
+            if leaf.line_feed_cnt.is_some() {
+                // Already known — emit a no-op chunk so scanned_bytes still advances.
+                chunks.push(LineScanChunk {
+                    leaf_index: idx,
+                    offset_in_leaf: 0,
+                    byte_len: leaf.bytes,
+                    is_last_chunk: true,
+                    already_known: true,
+                });
+                continue;
+            }
+
+            // Split into LOAD_CHUNK_SIZE sub-ranges.
+            let mut off = 0;
+            while off < leaf.bytes {
+                let len = LOAD_CHUNK_SIZE.min(leaf.bytes - off);
+                let is_last = off + len >= leaf.bytes;
+                chunks.push(LineScanChunk {
+                    leaf_index: idx,
+                    offset_in_leaf: off,
+                    byte_len: len,
+                    is_last_chunk: is_last,
+                    already_known: false,
+                });
+                off += len;
+            }
+        }
+
+        (chunks, total_bytes)
+    }
+
+    /// Count `\n` bytes in one chunk of a leaf.
+    pub fn scan_chunk(&self, leaf: &crate::model::piece_tree::LeafData, chunk: &LineScanChunk) -> std::io::Result<usize> {
+        let buffer_id = leaf.location.buffer_id();
+        let buffer = self.buffers.get(buffer_id).ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::NotFound, "buffer not found")
+        })?;
+
+        let count = match &buffer.data {
+            crate::model::piece_tree::BufferData::Loaded { data, .. } => {
+                let start = leaf.offset + chunk.offset_in_leaf;
+                let end = (start + chunk.byte_len).min(data.len());
+                data[start..end].iter().filter(|&&b| b == b'\n').count()
+            }
+            crate::model::piece_tree::BufferData::Unloaded {
+                file_path,
+                file_offset,
+                ..
+            } => {
+                let read_offset = *file_offset as u64
+                    + leaf.offset as u64
+                    + chunk.offset_in_leaf as u64;
+                let data = self.fs.read_range(file_path, read_offset, chunk.byte_len)?;
+                data.iter().filter(|&&b| b == b'\n').count()
+            }
+        };
+        Ok(count)
+    }
+
+    /// Apply the results of an incremental line scan.
+    pub fn apply_scan_updates(&mut self, updates: &[(usize, usize)]) {
+        self.piece_tree.update_leaf_line_feeds(updates);
+        self.line_feeds_scanned = true;
     }
 
     /// Resolve the exact byte offset for a given line number (0-indexed).

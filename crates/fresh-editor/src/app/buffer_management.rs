@@ -2222,4 +2222,96 @@ impl Editor {
 
         processed_any
     }
+
+    /// Process chunks for the incremental line-feed scan.
+    /// Returns `true` if the UI should re-render (progress updated or scan finished).
+    pub fn process_line_scan(&mut self) -> bool {
+        let scan = match self.line_scan_state.as_mut() {
+            Some(s) => s,
+            None => return false,
+        };
+
+        let buffer_id = scan.buffer_id;
+
+        if let Err(e) = self.process_line_scan_batch(buffer_id) {
+            tracing::warn!("Line scan error: {e}");
+            self.finish_line_scan_with_error(e);
+            return true;
+        }
+
+        let scan = self.line_scan_state.as_ref().unwrap();
+        if scan.next_chunk >= scan.chunks.len() {
+            self.finish_line_scan_ok();
+        } else {
+            let pct = if scan.total_bytes > 0 {
+                (scan.scanned_bytes * 100) / scan.total_bytes
+            } else {
+                100
+            };
+            self.set_status_message(
+                t!("goto.scanning_progress", percent = pct).to_string(),
+            );
+        }
+        true
+    }
+
+    /// Process chunks until 50ms have elapsed, then yield for a render.
+    /// Each chunk is at most LOAD_CHUNK_SIZE (1 MB), so individual I/O calls are fast.
+    fn process_line_scan_batch(&mut self, buffer_id: BufferId) -> std::io::Result<()> {
+        let budget = std::time::Duration::from_millis(50);
+        let deadline = self.time_source.now() + budget;
+        let state = self.buffers.get(&buffer_id);
+        let scan = self.line_scan_state.as_mut().unwrap();
+
+        while scan.next_chunk < scan.chunks.len() {
+            let chunk = scan.chunks[scan.next_chunk].clone();
+            scan.next_chunk += 1;
+            scan.scanned_bytes += chunk.byte_len;
+
+            if !chunk.already_known {
+                if let Some(state) = state {
+                    let leaf = &scan.leaves[chunk.leaf_index];
+                    let count = state.buffer.scan_chunk(leaf, &chunk)?;
+                    scan.leaf_lf_count += count;
+                }
+            }
+
+            // When we finish the last chunk of a leaf, record the total
+            if chunk.is_last_chunk && !chunk.already_known {
+                scan.updates.push((chunk.leaf_index, scan.leaf_lf_count));
+                scan.leaf_lf_count = 0;
+            }
+
+            if self.time_source.now() >= deadline {
+                break;
+            }
+        }
+        Ok(())
+    }
+
+    fn finish_line_scan_ok(&mut self) {
+        let scan = self.line_scan_state.take().unwrap();
+        if let Some(state) = self.buffers.get_mut(&scan.buffer_id) {
+            state.buffer.apply_scan_updates(&scan.updates);
+        }
+        self.set_status_message(t!("goto.scan_complete").to_string());
+        self.open_goto_line_if_active(scan.buffer_id);
+    }
+
+    fn finish_line_scan_with_error(&mut self, e: std::io::Error) {
+        let scan = self.line_scan_state.take().unwrap();
+        self.set_status_message(
+            t!("goto.scan_failed", error = e.to_string()).to_string(),
+        );
+        self.open_goto_line_if_active(scan.buffer_id);
+    }
+
+    fn open_goto_line_if_active(&mut self, buffer_id: BufferId) {
+        if self.active_buffer() == buffer_id {
+            self.start_prompt(
+                t!("file.goto_line_prompt").to_string(),
+                PromptType::GotoLine,
+            );
+        }
+    }
 }

@@ -757,6 +757,10 @@ fn test_approximate_line_number_indicator_and_scan() {
     harness
         .send_key(KeyCode::Enter, KeyModifiers::NONE)
         .unwrap();
+    // The scan is now incremental — drive it to completion.
+    // With TestTimeSource, time doesn't advance so the 50ms budget never expires
+    // and the scan completes in a single process_line_scan() call.
+    while harness.editor_mut().process_line_scan() {}
     // After scanning, the Go To Line prompt opens (with exact line numbers now)
     // Cancel it
     harness.send_key(KeyCode::Esc, KeyModifiers::NONE).unwrap();
@@ -799,5 +803,93 @@ fn test_approximate_line_number_indicator_and_scan() {
         screen.contains("Ln 500"),
         "Should have jumped to line 500.\nScreen:\n{}",
         screen
+    );
+}
+
+/// Test that answering "y" to the scan confirmation shows "Scanning..." progress
+/// in the status bar and eventually opens the Go To Line prompt.
+#[test]
+fn test_line_scan_progress_updates() {
+    use std::fs;
+    use tempfile::TempDir;
+
+    let temp_dir = TempDir::new().unwrap();
+    let file_path = temp_dir.path().join("scan_progress.txt");
+
+    // Create a multi-MB file to trigger large file mode.
+    let lines = 100_000;
+    let mut content = String::new();
+    for i in 0..lines {
+        content.push_str(&format!("Line {:06} content\n", i));
+    }
+    fs::write(&file_path, &content).unwrap();
+
+    let mut harness =
+        EditorTestHarness::with_working_dir(80, 24, temp_dir.path().to_path_buf()).unwrap();
+    harness.open_file(&file_path).unwrap();
+    harness.render().unwrap();
+
+    // Open Ctrl+G scan confirmation and answer "y"
+    harness
+        .send_key(KeyCode::Char('g'), KeyModifiers::CONTROL)
+        .unwrap();
+    let _ = harness.type_text("y");
+    harness
+        .send_key(KeyCode::Enter, KeyModifiers::NONE)
+        .unwrap();
+
+    // After answering "y" but before any tick, the status bar should show
+    // the initial "Scanning... 0%" progress message.
+    harness.render().unwrap();
+    let status = harness.get_status_bar();
+    assert!(
+        status.contains("Scanning"),
+        "Status bar should show 'Scanning...' after answering 'y'.\nStatus bar: '{}'",
+        status
+    );
+
+    // Drive the incremental scan to completion.
+    while harness.editor_mut().process_line_scan() {}
+
+    // After the scan completes, the Go To Line prompt should be open
+    harness.render().unwrap();
+    let screen = harness.screen_to_string();
+    assert!(
+        screen.contains("Go to line"),
+        "After scan completes, Go To Line prompt should open.\nScreen:\n{}",
+        screen
+    );
+
+    // Verify the status bar shows the completion message
+    let status = harness.get_status_bar();
+    assert!(
+        status.contains("Line ind"),
+        "Status bar should show scan complete message.\nStatus bar: '{}'",
+        status
+    );
+
+    // Verify the scan actually worked — press Esc and re-open Ctrl+G,
+    // it should go directly to Go To Line (no scan confirmation)
+    harness.send_key(KeyCode::Esc, KeyModifiers::NONE).unwrap();
+    harness
+        .send_key(KeyCode::Char('g'), KeyModifiers::CONTROL)
+        .unwrap();
+    let screen = harness.screen_to_string();
+    assert!(
+        screen.contains("Go to line"),
+        "After scan, Ctrl+G should open Go To Line directly.\nScreen:\n{}",
+        screen
+    );
+
+    // Navigate to a specific line to verify exact line numbers work
+    let _ = harness.type_text("500");
+    harness
+        .send_key(KeyCode::Enter, KeyModifiers::NONE)
+        .unwrap();
+    let status = harness.get_status_bar();
+    assert!(
+        status.contains("Ln 500"),
+        "Should have jumped to line 500.\nStatus bar: '{}'",
+        status
     );
 }

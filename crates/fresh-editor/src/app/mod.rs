@@ -61,6 +61,9 @@ pub fn editor_tick(
     if editor.process_pending_file_opens() {
         needs_render = true;
     }
+    if editor.process_line_scan() {
+        needs_render = true;
+    }
     if editor.check_mouse_hover_timer() {
         needs_render = true;
     }
@@ -786,6 +789,9 @@ pub struct Editor {
 
     /// Stdin streaming state (if reading from stdin)
     stdin_streaming: Option<StdinStreamingState>,
+
+    /// Incremental line scan state (for non-blocking progress during Go to Line)
+    line_scan_state: Option<LineScanState>,
 }
 
 /// A file that should be opened after the TUI starts
@@ -797,6 +803,22 @@ pub struct PendingFileOpen {
     pub line: Option<usize>,
     /// Column number to navigate to (1-indexed, optional)
     pub column: Option<usize>,
+}
+
+/// State for an incremental line-feed scan (non-blocking Go to Line)
+struct LineScanState {
+    buffer_id: BufferId,
+    /// Original leaves from the piece tree (needed for `scan_chunk`).
+    leaves: Vec<crate::model::piece_tree::LeafData>,
+    /// Chunk-sized work items (each ≤ LOAD_CHUNK_SIZE bytes).
+    chunks: Vec<crate::model::buffer::LineScanChunk>,
+    next_chunk: usize,
+    /// Running line-feed count for the current leaf (accumulated across chunks).
+    leaf_lf_count: usize,
+    total_bytes: usize,
+    scanned_bytes: usize,
+    /// Completed per-leaf updates: (leaf_index, lf_count).
+    updates: Vec<(usize, usize)>,
 }
 
 /// State for tracking stdin streaming in background
@@ -1369,6 +1391,7 @@ impl Editor {
             color_capability,
             pending_file_opens: Vec::new(),
             stdin_streaming: None,
+            line_scan_state: None,
             review_hunks: Vec::new(),
             active_action_popup: None,
             composite_buffers: HashMap::new(),

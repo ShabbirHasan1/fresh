@@ -150,26 +150,34 @@ impl Editor {
             PromptType::GotoLineScanConfirm => {
                 let answer = input.trim().to_lowercase();
                 if answer == "y" || answer == "yes" {
-                    // Scan for exact line numbers
+                    // Start incremental scan (non-blocking, updates progress in status bar)
                     let buffer_id = self.active_buffer();
-                    if let Some(state) = self.buffers.get_mut(&buffer_id) {
-                        match state.buffer.scan_line_index() {
-                            Ok(()) => {
-                                self.set_status_message(t!("goto.scan_complete").to_string());
-                            }
-                            Err(e) => {
-                                self.set_status_message(
-                                    t!("goto.scan_failed", error = e.to_string()).to_string(),
-                                );
-                            }
-                        }
+                    if let Some(state) = self.buffers.get(&buffer_id) {
+                        let leaves = state.buffer.piece_tree_leaves();
+                        let (chunks, total_bytes) = state.buffer.prepare_line_scan();
+                        self.line_scan_state = Some(super::LineScanState {
+                            buffer_id,
+                            leaves,
+                            chunks,
+                            next_chunk: 0,
+                            leaf_lf_count: 0,
+                            total_bytes,
+                            scanned_bytes: 0,
+                            updates: Vec::new(),
+                        });
+                        self.set_status_message(
+                            t!("goto.scanning_progress", percent = 0).to_string(),
+                        );
                     }
+                    // The GotoLine prompt will be opened when the scan completes
+                    // (in process_line_scan)
+                } else {
+                    // Open the regular Go To Line prompt immediately (approximate mode)
+                    self.start_prompt(
+                        t!("file.goto_line_prompt").to_string(),
+                        PromptType::GotoLine,
+                    );
                 }
-                // Open the regular Go To Line prompt (with exact or approximate behavior)
-                self.start_prompt(
-                    t!("file.goto_line_prompt").to_string(),
-                    PromptType::GotoLine,
-                );
             }
             PromptType::QuickOpen => {
                 // Handle Quick Open confirmation based on prefix
