@@ -893,3 +893,178 @@ fn test_line_scan_progress_updates() {
         status
     );
 }
+
+/// End-to-end test for the full large-file line-number lifecycle:
+///   1. Open large file (unloaded, approximate line numbers)
+///   2. Make edits BEFORE scanning
+///   3. Scan line numbers
+///   4. Verify exact line numbers (no ~ prefix), jump to line
+///   5. Make MORE edits in previously-untouched (unloaded) chunks
+///   6. Jump around, verify line numbers stay exact
+#[test]
+fn test_edit_scan_edit_line_numbers_stay_exact() {
+    use std::fs;
+    use tempfile::TempDir;
+
+    let temp_dir = TempDir::new().unwrap();
+    let file_path = temp_dir.path().join("edit_scan_edit.txt");
+
+    // Create a multi-MB file to trigger large file mode.
+    let lines = 100_000;
+    let mut content = String::new();
+    for i in 0..lines {
+        content.push_str(&format!("Line {:06} content\n", i));
+    }
+    fs::write(&file_path, &content).unwrap();
+
+    let mut harness =
+        EditorTestHarness::with_working_dir(80, 24, temp_dir.path().to_path_buf()).unwrap();
+    harness.open_file(&file_path).unwrap();
+    harness.render().unwrap();
+
+    // === Step 1: Verify approximate line numbers (~ prefix) ===
+    let screen = harness.screen_to_string();
+    let has_tilde = screen
+        .lines()
+        .any(|line| line.trim_start().starts_with('~'));
+    assert!(
+        has_tilde,
+        "Before scan, gutter should show ~ prefix.\nScreen:\n{}",
+        screen
+    );
+
+    // === Step 2: Make an edit BEFORE scanning ===
+    // Type some text at the very beginning of the file.
+    harness.type_text("PRE_SCAN_EDIT ").unwrap();
+    harness.render().unwrap();
+    let screen = harness.screen_to_string();
+    assert!(
+        screen.contains("PRE_SCAN_EDIT"),
+        "Edit before scan should be visible.\nScreen:\n{}",
+        screen
+    );
+
+    // === Step 3: Trigger line scan via Ctrl+G → "y" ===
+    harness
+        .send_key(KeyCode::Char('g'), KeyModifiers::CONTROL)
+        .unwrap();
+    let _ = harness.type_text("y");
+    harness
+        .send_key(KeyCode::Enter, KeyModifiers::NONE)
+        .unwrap();
+    // Drive the scan to completion.
+    while harness.editor_mut().process_line_scan() {}
+    // Cancel the Go To Line prompt that opens after scan.
+    harness.send_key(KeyCode::Esc, KeyModifiers::NONE).unwrap();
+
+    // === Step 4: Verify exact line numbers (no ~ prefix) ===
+    harness.render().unwrap();
+    let screen = harness.screen_to_string();
+    let still_has_tilde = screen.lines().any(|line| {
+        if let Some(before_sep) = line.split('│').next() {
+            let trimmed = before_sep.trim();
+            trimmed.starts_with('~') && trimmed.len() > 1
+        } else {
+            false
+        }
+    });
+    assert!(
+        !still_has_tilde,
+        "After scan, gutter should NOT show ~ prefix.\nScreen:\n{}",
+        screen
+    );
+
+    // Jump to a specific line and verify.
+    harness
+        .send_key(KeyCode::Char('g'), KeyModifiers::CONTROL)
+        .unwrap();
+    let screen = harness.screen_to_string();
+    assert!(
+        screen.contains("Go to line"),
+        "After scan, Ctrl+G should open Go To Line directly.\nScreen:\n{}",
+        screen
+    );
+    let _ = harness.type_text("500");
+    harness
+        .send_key(KeyCode::Enter, KeyModifiers::NONE)
+        .unwrap();
+    let status = harness.get_status_bar();
+    assert!(
+        status.contains("Ln 500"),
+        "Should have jumped to line 500.\nStatus bar: '{}'",
+        status
+    );
+
+    // === Step 5: Edit in a previously-untouched (far away) chunk ===
+    // Jump to line 50000 — deep in the file, likely in an unloaded chunk.
+    harness
+        .send_key(KeyCode::Char('g'), KeyModifiers::CONTROL)
+        .unwrap();
+    let _ = harness.type_text("50000");
+    harness
+        .send_key(KeyCode::Enter, KeyModifiers::NONE)
+        .unwrap();
+    let status = harness.get_status_bar();
+    assert!(
+        status.contains("Ln 50000"),
+        "Should have jumped to line 50000.\nStatus bar: '{}'",
+        status
+    );
+
+    // Type text on this line (forces loading the unloaded chunk).
+    harness.send_key(KeyCode::Home, KeyModifiers::NONE).unwrap();
+    harness.type_text("POST_SCAN_EDIT ").unwrap();
+    harness.render().unwrap();
+    let screen = harness.screen_to_string();
+    assert!(
+        screen.contains("POST_SCAN_EDIT"),
+        "Post-scan edit should be visible.\nScreen:\n{}",
+        screen
+    );
+
+    // === Step 6: Verify line numbers are STILL exact after the edit ===
+    let still_has_tilde = screen.lines().any(|line| {
+        if let Some(before_sep) = line.split('│').next() {
+            let trimmed = before_sep.trim();
+            trimmed.starts_with('~') && trimmed.len() > 1
+        } else {
+            false
+        }
+    });
+    assert!(
+        !still_has_tilde,
+        "After post-scan edit, gutter should still NOT show ~ prefix.\nScreen:\n{}",
+        screen
+    );
+
+    // Jump to another line to confirm navigation still works with exact numbers.
+    harness
+        .send_key(KeyCode::Char('g'), KeyModifiers::CONTROL)
+        .unwrap();
+    let _ = harness.type_text("99999");
+    harness
+        .send_key(KeyCode::Enter, KeyModifiers::NONE)
+        .unwrap();
+    let status = harness.get_status_bar();
+    assert!(
+        status.contains("Ln 99999"),
+        "Should have jumped to line 99999.\nStatus bar: '{}'",
+        status
+    );
+
+    // Jump back to the beginning and verify our first edit is still there.
+    harness
+        .send_key(KeyCode::Char('g'), KeyModifiers::CONTROL)
+        .unwrap();
+    let _ = harness.type_text("1");
+    harness
+        .send_key(KeyCode::Enter, KeyModifiers::NONE)
+        .unwrap();
+    harness.render().unwrap();
+    let screen = harness.screen_to_string();
+    assert!(
+        screen.contains("PRE_SCAN_EDIT"),
+        "Pre-scan edit should still be visible after jumping around.\nScreen:\n{}",
+        screen
+    );
+}
