@@ -147,6 +147,30 @@ impl Editor {
                     self.set_status_message(t!("error.invalid_line", input = &input).to_string());
                 }
             },
+            PromptType::GotoLineScanConfirm => {
+                let answer = input.trim().to_lowercase();
+                if answer == "y" || answer == "yes" {
+                    // Scan for exact line numbers
+                    let buffer_id = self.active_buffer();
+                    if let Some(state) = self.buffers.get_mut(&buffer_id) {
+                        match state.buffer.scan_line_index() {
+                            Ok(()) => {
+                                self.set_status_message(t!("goto.scan_complete").to_string());
+                            }
+                            Err(e) => {
+                                self.set_status_message(
+                                    t!("goto.scan_failed", error = e.to_string()).to_string(),
+                                );
+                            }
+                        }
+                    }
+                }
+                // Open the regular Go To Line prompt (with exact or approximate behavior)
+                self.start_prompt(
+                    t!("file.goto_line_prompt").to_string(),
+                    PromptType::GotoLine,
+                );
+            }
             PromptType::QuickOpen => {
                 // Handle Quick Open confirmation based on prefix
                 return self.handle_quick_open_confirm(&input, selected_index);

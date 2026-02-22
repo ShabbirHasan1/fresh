@@ -251,6 +251,12 @@ pub struct TextBuffer {
     /// Is this a large file (no line indexing, lazy loading enabled)?
     large_file: bool,
 
+    /// Has a line feed scan been performed on this large file?
+    /// When true, piece tree leaves have accurate `line_feed_cnt` values,
+    /// and edits will ensure the relevant chunk is loaded before splitting
+    /// so that `compute_line_feeds_static` can recount accurately.
+    line_feeds_scanned: bool,
+
     /// Is this a binary file? Binary files are opened read-only and render
     /// unprintable characters as code points.
     is_binary: bool,
@@ -308,6 +314,7 @@ impl TextBuffer {
             modified: false,
             recovery_pending: false,
             large_file: false,
+            line_feeds_scanned: false,
             is_binary: false,
             line_ending,
             original_line_ending: line_ending,
@@ -379,6 +386,7 @@ impl TextBuffer {
             modified: false,
             recovery_pending: false,
             large_file: false,
+            line_feeds_scanned: false,
             is_binary: true,
             saved_file_size: Some(bytes),
             version: 0,
@@ -421,6 +429,7 @@ impl TextBuffer {
             modified: false,
             recovery_pending: false,
             large_file: false,
+            line_feeds_scanned: false,
             is_binary: false,
             saved_file_size: Some(bytes), // Treat initial content as "saved" state
             version: 0,
@@ -467,6 +476,7 @@ impl TextBuffer {
             modified: false,
             recovery_pending: false,
             large_file: false,
+            line_feeds_scanned: false,
             is_binary: false,
             saved_file_size: Some(bytes),
             version: 0,
@@ -498,6 +508,7 @@ impl TextBuffer {
             modified: false,
             recovery_pending: false,
             large_file: false,
+            line_feeds_scanned: false,
             is_binary: false,
             line_ending,
             original_line_ending: line_ending,
@@ -742,6 +753,7 @@ impl TextBuffer {
             modified: false,
             recovery_pending: false,
             large_file: true,
+            line_feeds_scanned: false,
             is_binary,
             line_ending,
             original_line_ending: line_ending,
@@ -1294,7 +1306,15 @@ impl TextBuffer {
 
     /// Consolidate large file piece tree into a single piece pointing to the new file.
     /// This ensures that subsequent operations correctly reference the new content and offsets.
+    /// Preserves total line feed count from the old tree if a scan was previously done.
     fn consolidate_large_file(&mut self, path: &Path, file_size: usize) {
+        // Preserve line feed count from the old tree if we had scanned it
+        let preserved_lf = if self.line_feeds_scanned {
+            self.piece_tree.line_count().map(|c| c.saturating_sub(1))
+        } else {
+            None
+        };
+
         let buffer = StringBuffer {
             id: 0,
             data: BufferData::Unloaded {
@@ -1305,7 +1325,7 @@ impl TextBuffer {
         };
 
         self.piece_tree = if file_size > 0 {
-            PieceTree::new(BufferLocation::Stored(0), 0, file_size, None)
+            PieceTree::new(BufferLocation::Stored(0), 0, file_size, preserved_lf)
         } else {
             PieceTree::empty()
         };
@@ -1643,6 +1663,12 @@ impl TextBuffer {
                 (BufferLocation::Added(buffer_id), 0, text.len())
             };
 
+        // When line feeds have been scanned, ensure the chunk at the insertion
+        // point is loaded so compute_line_feeds_static can recount during splits.
+        if self.line_feeds_scanned {
+            self.ensure_chunk_loaded_at(offset);
+        }
+
         // Update piece tree (need to pass buffers reference)
         self.piece_tree.insert(
             offset,
@@ -1740,6 +1766,16 @@ impl TextBuffer {
     pub fn delete_bytes(&mut self, offset: usize, bytes: usize) {
         if bytes == 0 || offset >= self.total_bytes() {
             return;
+        }
+
+        // When line feeds have been scanned, ensure chunks at delete boundaries
+        // are loaded so compute_line_feeds_static can recount during splits.
+        if self.line_feeds_scanned {
+            self.ensure_chunk_loaded_at(offset);
+            let end = (offset + bytes).min(self.total_bytes());
+            if end > offset {
+                self.ensure_chunk_loaded_at(end.saturating_sub(1));
+            }
         }
 
         // Update piece tree
@@ -2234,9 +2270,141 @@ impl TextBuffer {
         self.recovery_pending = pending;
     }
 
+    /// Ensure the buffer chunk at the given byte offset is loaded.
+    ///
+    /// When `line_feeds_scanned` is true, piece splits during insert/delete need
+    /// the buffer data to be loaded so `compute_line_feeds_static` can accurately
+    /// recount line feeds for each half. This method loads the chunk if needed.
+    fn ensure_chunk_loaded_at(&mut self, offset: usize) {
+        if let Some(piece_info) = self.piece_tree.find_by_offset(offset) {
+            let buffer_id = piece_info.location.buffer_id();
+            if let Some(buffer) = self.buffers.get_mut(buffer_id) {
+                if !buffer.is_loaded() {
+                    if let Err(e) = buffer.load(&*self.fs) {
+                        tracing::warn!("Failed to load chunk at offset {offset}: {e}");
+                    }
+                }
+            }
+        }
+    }
+
     /// Check if this is a large file with lazy loading enabled
     pub fn is_large_file(&self) -> bool {
         self.large_file
+    }
+
+    /// Check if line feeds have been scanned for this large file.
+    /// When true, `line_count()` returns exact values.
+    pub fn has_line_feed_scan(&self) -> bool {
+        self.line_feeds_scanned
+    }
+
+    /// Scan the file to count line feeds in all pieces, streaming one chunk at a time.
+    ///
+    /// After this call, `line_count()` will return `Some(exact_count)` and all
+    /// line-number-based operations (goto line, gutter display) will be exact.
+    ///
+    /// Only one chunk of data is in memory at a time — unloaded chunks are read
+    /// from disk via `read_range`, newlines (`\n`) are counted, and the data is
+    /// dropped immediately. This matches the existing convention where only `\n`
+    /// bytes are counted (CRLF files store raw `\r\n`; the `\n` is what matters).
+    ///
+    /// The piece tree itself does no I/O — we read chunks here in TextBuffer and
+    /// pass the counts to `PieceTree::update_leaf_line_feeds`.
+    pub fn scan_line_index(&mut self) -> std::io::Result<()> {
+        let leaves = self.piece_tree.get_leaves();
+        let mut updates = Vec::new();
+
+        for (idx, leaf) in leaves.iter().enumerate() {
+            if leaf.line_feed_cnt.is_some() {
+                // Already known (e.g., from an insertion)
+                continue;
+            }
+
+            let buffer_id = leaf.location.buffer_id();
+            let buffer = self.buffers.get(buffer_id).ok_or_else(|| {
+                std::io::Error::new(std::io::ErrorKind::NotFound, "buffer not found")
+            })?;
+
+            let count = match &buffer.data {
+                crate::model::piece_tree::BufferData::Loaded { data, .. } => {
+                    let end = (leaf.offset + leaf.bytes).min(data.len());
+                    data[leaf.offset..end]
+                        .iter()
+                        .filter(|&&b| b == b'\n')
+                        .count()
+                }
+                crate::model::piece_tree::BufferData::Unloaded {
+                    file_path,
+                    file_offset,
+                    ..
+                } => {
+                    // Stream-read just this chunk, count \n, drop data
+                    let read_offset = *file_offset as u64 + leaf.offset as u64;
+                    let chunk = self.fs.read_range(file_path, read_offset, leaf.bytes)?;
+                    chunk.iter().filter(|&&b| b == b'\n').count()
+                }
+            };
+
+            updates.push((idx, count));
+        }
+
+        self.piece_tree.update_leaf_line_feeds(&updates);
+        self.line_feeds_scanned = true;
+        Ok(())
+    }
+
+    /// Resolve the exact byte offset for a given line number (0-indexed).
+    ///
+    /// Uses the tree's line feed counts to find the piece containing the target line,
+    /// then loads/reads that piece's data to find the exact newline position.
+    /// This works even when buffers are unloaded (large file with scanned line index).
+    pub fn resolve_line_byte_offset(&mut self, target_line: usize) -> Option<usize> {
+        if target_line == 0 {
+            return Some(0);
+        }
+
+        // Use tree metadata to find the piece containing the target line
+        let (doc_offset, buffer_id, piece_offset, piece_bytes, lines_before) =
+            self.piece_tree.piece_info_for_line(target_line)?;
+
+        // We need to find the (target_line - lines_before)-th newline within this piece
+        let lines_to_skip = target_line - lines_before;
+
+        // Get the piece data — either from loaded buffer or read from disk
+        let buffer = self.buffers.get(buffer_id)?;
+        let piece_data: Vec<u8> = match &buffer.data {
+            crate::model::piece_tree::BufferData::Loaded { data, .. } => {
+                let end = (piece_offset + piece_bytes).min(data.len());
+                data[piece_offset..end].to_vec()
+            }
+            crate::model::piece_tree::BufferData::Unloaded {
+                file_path,
+                file_offset,
+                ..
+            } => {
+                let read_offset = *file_offset as u64 + piece_offset as u64;
+                self.fs
+                    .read_range(file_path, read_offset, piece_bytes)
+                    .ok()?
+            }
+        };
+
+        // Count newlines to find the target line start
+        let mut newlines_found = 0;
+        for (i, &byte) in piece_data.iter().enumerate() {
+            if byte == b'\n' {
+                newlines_found += 1;
+                if newlines_found == lines_to_skip {
+                    // The target line starts right after this newline
+                    return Some(doc_offset + i + 1);
+                }
+            }
+        }
+
+        // If we didn't find enough newlines, the line starts in the next piece
+        // Return the end of this piece as an approximation
+        Some(doc_offset + piece_bytes)
     }
 
     /// Get the saved file size (size of the file on disk after last load/save)

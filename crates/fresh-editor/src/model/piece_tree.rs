@@ -293,6 +293,7 @@ pub struct PieceInfo {
     pub offset: usize,                  // Starting offset of this piece within that buffer
     pub bytes: usize,                   // Length of this piece in bytes
     pub offset_in_piece: Option<usize>, // For queries: how far into this piece the query point is
+    pub line_feeds: Option<usize>,      // Number of line feeds in this piece (None if unknown)
 }
 
 /// Result from finding a piece by byte offset
@@ -377,7 +378,7 @@ impl PieceTreeNode {
                 location,
                 offset: piece_offset,
                 bytes,
-                ..
+                line_feed_cnt,
             } => {
                 if offset < *bytes {
                     Some(OffsetFindResult {
@@ -386,6 +387,7 @@ impl PieceTreeNode {
                             offset: *piece_offset,
                             bytes: *bytes,
                             offset_in_piece: Some(offset),
+                            line_feeds: *line_feed_cnt,
                         },
                         bytes_before: 0,
                     })
@@ -615,6 +617,67 @@ impl PieceTreeNode {
                 // Convert to document offset
                 let offset_in_piece = target_offset_in_buffer.saturating_sub(*offset);
                 Some(current_offset + offset_in_piece.min(*bytes))
+            }
+        }
+    }
+
+    /// Find the piece (leaf) containing a target line using only tree metadata.
+    /// Returns `(doc_byte_offset, buffer_id, piece_offset, piece_bytes, lines_before)`
+    fn find_piece_for_line(
+        &self,
+        current_offset: usize,
+        lines_before: usize,
+        target_line: usize,
+    ) -> Option<(usize, usize, usize, usize, usize)> {
+        match self {
+            Self::Internal {
+                left_bytes,
+                lf_left,
+                left,
+                right,
+            } => {
+                let lf_left = lf_left.as_ref()?;
+                let lines_after_left = lines_before + lf_left;
+
+                if target_line <= lines_after_left {
+                    let result =
+                        left.find_piece_for_line(current_offset, lines_before, target_line);
+                    // Fall back to right if left doesn't contain it
+                    result.or_else(|| {
+                        right.find_piece_for_line(
+                            current_offset + left_bytes,
+                            lines_after_left,
+                            target_line,
+                        )
+                    })
+                } else {
+                    right.find_piece_for_line(
+                        current_offset + left_bytes,
+                        lines_after_left,
+                        target_line,
+                    )
+                }
+            }
+            Self::Leaf {
+                location,
+                offset,
+                bytes,
+                line_feed_cnt,
+            } => {
+                let line_feed_cnt = line_feed_cnt.as_ref()?;
+                let lines_in_piece = lines_before + line_feed_cnt;
+
+                if target_line >= lines_before && target_line <= lines_in_piece {
+                    Some((
+                        current_offset,
+                        location.buffer_id(),
+                        *offset,
+                        *bytes,
+                        lines_before,
+                    ))
+                } else {
+                    None
+                }
             }
         }
     }
@@ -1547,6 +1610,44 @@ impl PieceTree {
         self.root.total_line_feeds().map(|lf| lf + 1)
     }
 
+    /// Find the document byte offset and metadata for the piece containing a target line.
+    ///
+    /// Uses only the tree's `lf_left` / `line_feed_cnt` metadata (no buffer data needed).
+    /// Returns `(doc_byte_offset, buffer_id, piece_offset, piece_bytes, lines_before_piece)`
+    /// where `lines_before_piece` is the number of complete lines before this piece.
+    pub fn piece_info_for_line(
+        &self,
+        target_line: usize,
+    ) -> Option<(usize, usize, usize, usize, usize)> {
+        self.root.find_piece_for_line(0, 0, target_line)
+    }
+
+    /// Rebuild the tree with updated line feed counts from external data.
+    ///
+    /// Takes a slice of `(leaf_index, line_feed_count)` pairs. Each entry updates
+    /// the corresponding leaf (by order in the tree) with the given line feed count.
+    /// After updating, rebuilds the tree so that `lf_left` values on internal nodes
+    /// are correct.
+    ///
+    /// This keeps the piece tree free of I/O — the caller is responsible for
+    /// reading chunk data and counting line feeds externally.
+    pub fn update_leaf_line_feeds(&mut self, updates: &[(usize, usize)]) {
+        if updates.is_empty() {
+            return;
+        }
+
+        let mut leaves = Vec::new();
+        self.root.collect_leaves(&mut leaves);
+
+        for &(idx, lf_count) in updates {
+            if let Some(leaf) = leaves.get_mut(idx) {
+                leaf.line_feed_cnt = Some(lf_count);
+            }
+        }
+
+        self.root = Self::build_balanced(&leaves);
+    }
+
     /// Get tree statistics for debugging
     pub fn stats(&self) -> TreeStats {
         TreeStats {
@@ -1594,10 +1695,10 @@ impl PieceTree {
             // Get the buffer for this piece
             let buffer_id = piece_info.location.buffer_id();
             if let Some(buffer) = buffers.get(buffer_id) {
+                let offset_in_piece = piece_info.offset_in_piece.unwrap_or(0);
+
                 // Check if we have line starts available
                 if let Some(line_starts) = buffer.get_line_starts() {
-                    // Find position within the piece
-                    let offset_in_piece = piece_info.offset_in_piece.unwrap_or(0);
                     let byte_offset_in_buffer = piece_info.offset + offset_in_piece;
 
                     // Find which line within the buffer
@@ -1640,24 +1741,79 @@ impl PieceTree {
 
                     return Some((doc_line, column));
                 }
-                // No line starts available - return None
+
+                // No line_starts index, but buffer data may be loaded (e.g. scanned
+                // large file with lazy-loaded chunks). Count newlines directly.
+                if let Some(data) = buffer.get_data() {
+                    let piece_start = piece_info.offset;
+                    let scan_end = (piece_start + offset_in_piece).min(data.len());
+                    let line_in_piece = data[piece_start..scan_end]
+                        .iter()
+                        .filter(|&&b| b == b'\n')
+                        .count();
+                    let doc_line = lines_before + line_in_piece;
+
+                    // Column: bytes since last newline (or piece start)
+                    let column = if line_in_piece == 0 {
+                        if bytes_before == 0 {
+                            offset_in_piece
+                        } else {
+                            // First line of piece may span from previous piece
+                            let line_start = self.position_to_offset(doc_line, 0, buffers);
+                            offset.saturating_sub(line_start)
+                        }
+                    } else {
+                        // Find last newline before our offset within the piece
+                        let last_nl = data[piece_start..scan_end]
+                            .iter()
+                            .rposition(|&b| b == b'\n')
+                            .unwrap_or(0);
+                        offset_in_piece - last_nl - 1
+                    };
+
+                    return Some((doc_line, column));
+                }
+                // Buffer unloaded and no line starts.
+                // If we have line feed counts (scanned), estimate proportionally
+                // within the piece: lines_before + (offset_in_piece / piece_bytes) * piece_line_feeds
+                if let Some(lf_count) = piece_info.line_feeds {
+                    let piece_bytes = piece_info.bytes;
+                    let lines_in_partial = if piece_bytes > 0 {
+                        (offset_in_piece as u64 * lf_count as u64 / piece_bytes as u64) as usize
+                    } else {
+                        0
+                    };
+                    let doc_line = lines_before + lines_in_partial;
+                    // Column estimate: offset_in_piece modulo average bytes per line
+                    let avg_bytes_per_line = if lf_count > 0 {
+                        piece_bytes / lf_count
+                    } else {
+                        80
+                    };
+                    let column = if avg_bytes_per_line > 0 {
+                        offset_in_piece % avg_bytes_per_line
+                    } else {
+                        0
+                    };
+                    return Some((doc_line, column));
+                }
             }
         }
 
-        // Fallback: end of document
-        // Only if we have line metadata
-        match self.line_count() {
-            Some(line_count) => {
-                let last_line = line_count.saturating_sub(1);
-                let line_start = self.position_to_offset(last_line, 0, buffers);
-                let column = self.total_bytes.saturating_sub(line_start);
-                Some((last_line, column))
-            }
-            None => {
-                // No line metadata - cannot compute position
-                None
+        // Fallback: end of document or no metadata
+        // Only if we have line metadata and the offset is actually at/near the end
+        if offset >= self.total_bytes {
+            match self.line_count() {
+                Some(line_count) => {
+                    let last_line = line_count.saturating_sub(1);
+                    let line_start = self.position_to_offset(last_line, 0, buffers);
+                    let column = self.total_bytes.saturating_sub(line_start);
+                    return Some((last_line, column));
+                }
+                None => return None,
             }
         }
+        None
     }
 
     /// Convert line/column position to byte offset using tree's line metadata

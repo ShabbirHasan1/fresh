@@ -40,6 +40,8 @@ pub enum PromptType {
     QuickOpen,
     /// Go to a specific line number
     GotoLine,
+    /// Confirm whether to scan a large file for exact line numbers before Go To Line
+    GotoLineScanConfirm,
     /// Choose an ANSI background file
     SetBackgroundFile,
     /// Set background blend ratio (0-1)

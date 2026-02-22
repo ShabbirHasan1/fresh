@@ -732,7 +732,8 @@ impl Editor {
         let old_sticky_column = cursors.primary().sticky_column;
 
         if let Some(state) = self.buffers.get(&buffer_id) {
-            let is_large_file = state.buffer.line_count().is_none();
+            let has_line_index = state.buffer.line_count().is_some();
+            let has_line_scan = state.buffer.has_line_feed_scan();
             let buffer_len = state.buffer.len();
 
             // Convert 1-indexed line to 0-indexed
@@ -740,8 +741,27 @@ impl Editor {
             // Column is also 1-indexed, convert to 0-indexed
             let target_col = column.map(|c| c.saturating_sub(1)).unwrap_or(0);
 
-            let position = if is_large_file {
-                // Large file mode: estimate byte offset based on line number
+            // Track the known exact line number for scanned large files,
+            // since offset_to_position may not be able to reverse-resolve it accurately.
+            let mut known_line: Option<usize> = None;
+
+            let position = if has_line_scan && has_line_index {
+                // Scanned large file: use tree metadata to find exact line offset
+                let max_line = state.buffer.line_count().unwrap_or(1).saturating_sub(1);
+                let actual_line = target_line.min(max_line);
+                known_line = Some(actual_line);
+                // Need mutable access to potentially read chunk data from disk
+                if let Some(state) = self.buffers.get_mut(&buffer_id) {
+                    state
+                        .buffer
+                        .resolve_line_byte_offset(actual_line)
+                        .map(|offset| (offset + target_col).min(buffer_len))
+                        .unwrap_or(0)
+                } else {
+                    0
+                }
+            } else if !has_line_index {
+                // No line index at all: estimate byte offset based on line number
                 let estimated_offset = target_line * estimated_line_length;
                 let clamped_offset = estimated_offset.min(buffer_len);
 
@@ -757,7 +777,7 @@ impl Editor {
                     clamped_offset
                 }
             } else {
-                // Small file mode: use exact line position
+                // Small file with full line starts: use exact line position
                 let max_line = state.buffer.line_count().unwrap_or(1).saturating_sub(1);
                 let actual_line = target_line.min(max_line);
                 state.buffer.line_col_to_position(actual_line, target_col)
@@ -777,6 +797,12 @@ impl Editor {
             let state = self.buffers.get_mut(&buffer_id).unwrap();
             let view_state = self.split_view_states.get_mut(&split_id).unwrap();
             state.apply(&mut view_state.cursors, &event);
+
+            // For scanned large files, override the line number with the known exact value
+            // since offset_to_position may fall back to proportional estimation.
+            if let Some(line) = known_line {
+                state.primary_cursor_line_number = crate::model::buffer::LineNumber::Absolute(line);
+            }
         }
     }
 

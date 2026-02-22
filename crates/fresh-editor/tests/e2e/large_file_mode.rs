@@ -614,6 +614,11 @@ fn test_large_file_edits_beginning_middle_end() {
         harness
             .send_key(KeyCode::Char('g'), KeyModifiers::CONTROL)
             .unwrap();
+        // Dismiss the scan confirmation prompt (approximate line numbers in large file mode)
+        let _ = harness.type_text("n");
+        harness
+            .send_key(KeyCode::Enter, KeyModifiers::NONE)
+            .unwrap();
         println!("target line: {}", target);
         let _ = harness.type_text(&format!("{}", target).to_string());
         println!("{}", harness.screen_to_string());
@@ -670,4 +675,129 @@ fn test_large_file_edits_beginning_middle_end() {
             i, got, want_trimmed
         );
     }
+}
+
+/// Test that approximate line numbers show ~ prefix and that scanning removes it.
+/// Also tests the Go To Line scan confirmation prompt flow:
+/// - Before scan: Ctrl+G shows scan confirmation prompt, gutter shows ~ prefix
+/// - After answering "y": file is scanned, ~ disappears
+/// - After scan: Ctrl+G goes directly to Go To Line prompt (no re-confirmation)
+#[test]
+fn test_approximate_line_number_indicator_and_scan() {
+    use std::fs;
+    use tempfile::TempDir;
+
+    let temp_dir = TempDir::new().unwrap();
+    let file_path = temp_dir.path().join("approx_lines.txt");
+
+    // Create a file large enough to trigger large file mode (default 1MB threshold)
+    let lines = 100_000;
+    let mut content = String::new();
+    for i in 0..lines {
+        content.push_str(&format!("Line {:06} content\n", i));
+    }
+    fs::write(&file_path, &content).unwrap();
+
+    // Use the temp_dir as working directory so the status bar shows a short
+    // relative filename ("approx_lines.txt") instead of the full absolute path,
+    // which on Windows can be long enough to truncate "Ln 500" off the status bar.
+    let mut harness =
+        EditorTestHarness::with_working_dir(80, 24, temp_dir.path().to_path_buf()).unwrap();
+    harness.open_file(&file_path).unwrap();
+    harness.render().unwrap();
+
+    // === Test 1: Gutter shows ~ prefix for approximate line numbers ===
+    let screen = harness.screen_to_string();
+    // Find a gutter line with ~ prefix (e.g., "~1 │" or "~2 │")
+    let has_tilde = screen.lines().any(|line| {
+        if let Some(before_sep) = line.split('│').next() {
+            let trimmed = before_sep.trim();
+            trimmed.starts_with('~') && trimmed[1..].chars().all(|c| c.is_ascii_digit())
+        } else {
+            false
+        }
+    });
+    assert!(
+        has_tilde,
+        "Gutter should show ~ prefix for approximate line numbers.\nScreen:\n{}",
+        screen
+    );
+
+    // === Test 2: Ctrl+G shows scan confirmation prompt ===
+    harness
+        .send_key(KeyCode::Char('g'), KeyModifiers::CONTROL)
+        .unwrap();
+    let screen = harness.screen_to_string();
+    assert!(
+        screen.contains("approximate") || screen.contains("Scan file"),
+        "Ctrl+G should show scan confirmation prompt.\nScreen:\n{}",
+        screen
+    );
+
+    // === Test 3: Dismiss with "n" then navigate with approximate line numbers ===
+    let _ = harness.type_text("n");
+    harness
+        .send_key(KeyCode::Enter, KeyModifiers::NONE)
+        .unwrap();
+    // Now the regular Go To Line prompt should be open
+    let screen = harness.screen_to_string();
+    assert!(
+        screen.contains("Go to line"),
+        "After dismissing scan, Go To Line prompt should open.\nScreen:\n{}",
+        screen
+    );
+    // Press Escape to cancel
+    harness.send_key(KeyCode::Esc, KeyModifiers::NONE).unwrap();
+
+    // === Test 4: Answer "y" to scan, verify ~ disappears ===
+    harness
+        .send_key(KeyCode::Char('g'), KeyModifiers::CONTROL)
+        .unwrap();
+    let _ = harness.type_text("y");
+    harness
+        .send_key(KeyCode::Enter, KeyModifiers::NONE)
+        .unwrap();
+    // After scanning, the Go To Line prompt opens (with exact line numbers now)
+    // Cancel it
+    harness.send_key(KeyCode::Esc, KeyModifiers::NONE).unwrap();
+
+    // Verify ~ prefix is gone from gutter
+    harness.render().unwrap();
+    let screen = harness.screen_to_string();
+    let still_has_tilde = screen.lines().any(|line| {
+        if let Some(before_sep) = line.split('│').next() {
+            let trimmed = before_sep.trim();
+            trimmed.starts_with('~') && trimmed.len() > 1
+        } else {
+            false
+        }
+    });
+    assert!(
+        !still_has_tilde,
+        "After scanning, gutter should NOT show ~ prefix.\nScreen:\n{}",
+        screen
+    );
+
+    // === Test 5: After scan, Ctrl+G goes directly to Go To Line (no scan prompt) ===
+    harness
+        .send_key(KeyCode::Char('g'), KeyModifiers::CONTROL)
+        .unwrap();
+    let screen = harness.screen_to_string();
+    assert!(
+        screen.contains("Go to line"),
+        "After scan, Ctrl+G should open Go To Line directly (no scan confirmation).\nScreen:\n{}",
+        screen
+    );
+    // Navigate to a specific line
+    let _ = harness.type_text("500");
+    harness
+        .send_key(KeyCode::Enter, KeyModifiers::NONE)
+        .unwrap();
+    // Verify we jumped (status bar should show the line)
+    let screen = harness.screen_to_string();
+    assert!(
+        screen.contains("Ln 500"),
+        "Should have jumped to line 500.\nScreen:\n{}",
+        screen
+    );
 }
