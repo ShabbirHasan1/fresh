@@ -2,8 +2,9 @@
 //!
 //! Tests the markdown-source mode that auto-activates for .md files:
 //! - Auto-activation when opening a markdown file in source mode
-//! - Enter key preserves leading whitespace from the previous line
-//! - Tab key inserts spaces (4 by default)
+//! - Enter key auto-continues list items (bullets, ordered, checkboxes)
+//! - Enter on empty list item removes the marker
+//! - Tab key inserts spaces (non-list context) or indents + cycles bullet
 //! - Mode deactivates when switching to a non-markdown buffer
 
 use crate::common::fixtures::TestFixture;
@@ -123,13 +124,13 @@ fn test_markdown_source_mode_not_active_for_non_md() {
 }
 
 // ---------------------------------------------------------------------------
-// Enter key: auto-indent
+// Enter key: list continuation
 // ---------------------------------------------------------------------------
 
-/// Pressing Enter at the end of an indented line should insert a newline
-/// followed by the same leading whitespace.
+/// Pressing Enter at the end of an unordered list item should insert a newline
+/// followed by the same indent and bullet.
 #[test]
-fn test_enter_preserves_indentation() {
+fn test_enter_continues_unordered_list() {
     let (mut harness, _temp_dir) = markdown_source_harness(80, 24);
 
     let content = "- top\n  - nested\n";
@@ -141,17 +142,16 @@ fn test_enter_preserves_indentation() {
     harness.send_key(KeyCode::End, KeyModifiers::NONE).unwrap();
     harness.render().unwrap();
 
-    // Press Enter — should insert newline + 2 leading spaces
+    // Press Enter — should insert newline + "  - " (same indent + bullet)
     harness
         .send_key(KeyCode::Enter, KeyModifiers::NONE)
         .unwrap();
 
-    // Wait for plugin async handler to complete
     let ok = harness
         .wait_for_async(
             |h| {
                 h.get_buffer_content()
-                    .map_or(false, |c| c.contains("  - nested\n  "))
+                    .map_or(false, |c| c.contains("  - nested\n  - "))
             },
             5_000,
         )
@@ -159,12 +159,128 @@ fn test_enter_preserves_indentation() {
 
     let content = buf(&harness);
     assert!(
-        ok && content.contains("  - nested\n  "),
-        "Expected newline with 2-space indent after '  - nested'. Got:\n{:?}",
+        ok && content.contains("  - nested\n  - "),
+        "Expected newline with continued bullet '  - ' after '  - nested'. Got:\n{:?}",
         content,
     );
     harness.assert_no_plugin_errors();
 }
+
+/// Pressing Enter at the end of an ordered list item should insert the next number.
+#[test]
+fn test_enter_continues_ordered_list() {
+    let (mut harness, _temp_dir) = markdown_source_harness(80, 24);
+
+    let content = "1. first\n2. second\n";
+    let fixture = TestFixture::new("ordered.md", content).unwrap();
+    open_md_and_wait_for_mode(&mut harness, &fixture.path);
+
+    // Move to line 2 ("2. second"), End
+    harness.send_key(KeyCode::Down, KeyModifiers::NONE).unwrap();
+    harness.send_key(KeyCode::End, KeyModifiers::NONE).unwrap();
+    harness.render().unwrap();
+
+    // Press Enter — should insert "\n3. "
+    harness
+        .send_key(KeyCode::Enter, KeyModifiers::NONE)
+        .unwrap();
+
+    let ok = harness
+        .wait_for_async(
+            |h| {
+                h.get_buffer_content()
+                    .map_or(false, |c| c.contains("2. second\n3. "))
+            },
+            5_000,
+        )
+        .unwrap();
+
+    let content = buf(&harness);
+    assert!(
+        ok && content.contains("2. second\n3. "),
+        "Expected '3. ' after '2. second'. Got:\n{:?}",
+        content,
+    );
+    harness.assert_no_plugin_errors();
+}
+
+/// Pressing Enter at the end of a checkbox item should insert an unchecked checkbox.
+#[test]
+fn test_enter_continues_checkbox() {
+    let (mut harness, _temp_dir) = markdown_source_harness(80, 24);
+
+    let content = "- [x] done task\n";
+    let fixture = TestFixture::new("checkbox.md", content).unwrap();
+    open_md_and_wait_for_mode(&mut harness, &fixture.path);
+
+    harness.send_key(KeyCode::End, KeyModifiers::NONE).unwrap();
+    harness.render().unwrap();
+
+    // Press Enter — should insert "\n- [ ] " (unchecked)
+    harness
+        .send_key(KeyCode::Enter, KeyModifiers::NONE)
+        .unwrap();
+
+    let ok = harness
+        .wait_for_async(
+            |h| {
+                h.get_buffer_content()
+                    .map_or(false, |c| c.contains("- [x] done task\n- [ ] "))
+            },
+            5_000,
+        )
+        .unwrap();
+
+    let content = buf(&harness);
+    assert!(
+        ok && content.contains("- [x] done task\n- [ ] "),
+        "Expected unchecked checkbox continuation. Got:\n{:?}",
+        content,
+    );
+    harness.assert_no_plugin_errors();
+}
+
+/// Pressing Enter on an empty list item (just the bullet) should remove the marker.
+#[test]
+fn test_enter_clears_empty_bullet() {
+    let (mut harness, _temp_dir) = markdown_source_harness(80, 24);
+
+    let content = "- item\n- \n";
+    let fixture = TestFixture::new("empty.md", content).unwrap();
+    open_md_and_wait_for_mode(&mut harness, &fixture.path);
+
+    // Move to line 2 ("- "), End
+    harness.send_key(KeyCode::Down, KeyModifiers::NONE).unwrap();
+    harness.send_key(KeyCode::End, KeyModifiers::NONE).unwrap();
+    harness.render().unwrap();
+
+    // Press Enter — should remove "- " leaving an empty line
+    harness
+        .send_key(KeyCode::Enter, KeyModifiers::NONE)
+        .unwrap();
+
+    let ok = harness
+        .wait_for_async(
+            |h| {
+                h.get_buffer_content()
+                    .map_or(false, |c| c.contains("- item\n\n"))
+            },
+            5_000,
+        )
+        .unwrap();
+
+    let content = buf(&harness);
+    assert!(
+        ok && content.contains("- item\n\n"),
+        "Expected empty bullet to be cleared. Got:\n{:?}",
+        content,
+    );
+    harness.assert_no_plugin_errors();
+}
+
+// ---------------------------------------------------------------------------
+// Enter key: non-list (whitespace copying)
+// ---------------------------------------------------------------------------
 
 /// Pressing Enter on a line with no indentation should just insert a plain newline.
 #[test]
@@ -250,7 +366,7 @@ fn test_enter_deep_indent() {
 }
 
 // ---------------------------------------------------------------------------
-// Tab key: insert spaces
+// Tab key: insert spaces (non-list context)
 // ---------------------------------------------------------------------------
 
 /// Tab should insert 4 spaces at the cursor position.
@@ -300,7 +416,7 @@ fn test_multiple_tabs() {
     harness.send_key(KeyCode::Home, KeyModifiers::NONE).unwrap();
     harness.render().unwrap();
 
-    // Press Tab twice → 8 spaces
+    // Press Tab twice -> 8 spaces
     harness.send_key(KeyCode::Tab, KeyModifiers::NONE).unwrap();
     harness.send_key(KeyCode::Tab, KeyModifiers::NONE).unwrap();
 
@@ -318,6 +434,45 @@ fn test_multiple_tabs() {
     assert!(
         ok && content.starts_with("        x"),
         "Expected 8 spaces (two tabs) before 'x'. Got:\n{:?}",
+        content,
+    );
+    harness.assert_no_plugin_errors();
+}
+
+// ---------------------------------------------------------------------------
+// Tab key: indent + cycle bullet on blank list item
+// ---------------------------------------------------------------------------
+
+/// Tab on a blank unordered list item should indent and cycle the bullet.
+#[test]
+fn test_tab_cycles_bullet_on_blank_item() {
+    let (mut harness, _temp_dir) = markdown_source_harness(80, 24);
+
+    // Start with "* " (asterisk bullet, no content)
+    let content = "* \n";
+    let fixture = TestFixture::new("cycle.md", content).unwrap();
+    open_md_and_wait_for_mode(&mut harness, &fixture.path);
+
+    harness.send_key(KeyCode::End, KeyModifiers::NONE).unwrap();
+    harness.render().unwrap();
+
+    // Tab: * -> - (indented by 4)
+    harness.send_key(KeyCode::Tab, KeyModifiers::NONE).unwrap();
+
+    let ok = harness
+        .wait_for_async(
+            |h| {
+                h.get_buffer_content()
+                    .map_or(false, |c| c.starts_with("    - "))
+            },
+            5_000,
+        )
+        .unwrap();
+
+    let content = buf(&harness);
+    assert!(
+        ok && content.starts_with("    - "),
+        "Expected '    - ' after Tab on '* '. Got:\n{:?}",
         content,
     );
     harness.assert_no_plugin_errors();
@@ -428,21 +583,21 @@ fn test_activates_for_markdown_extension() {
 // Enter + Tab combined workflow
 // ---------------------------------------------------------------------------
 
-/// Simulate a realistic editing flow: type on an indented line, press Enter
-/// (auto-indent), then Tab to add more indentation, then type.
+/// Simulate a realistic list editing flow: type on a list item, press Enter
+/// (auto-continue bullet), then type a sub-item.
 #[test]
-fn test_enter_then_tab_workflow() {
+fn test_enter_then_type_workflow() {
     let (mut harness, _temp_dir) = markdown_source_harness(80, 24);
 
-    let content = "  - item\n";
+    let content = "- item\n";
     let fixture = TestFixture::new("workflow.md", content).unwrap();
     open_md_and_wait_for_mode(&mut harness, &fixture.path);
 
-    // Go to end of "  - item"
+    // Go to end of "- item"
     harness.send_key(KeyCode::End, KeyModifiers::NONE).unwrap();
     harness.render().unwrap();
 
-    // Enter → should auto-indent with 2 spaces
+    // Enter -> should auto-insert "- "
     harness
         .send_key(KeyCode::Enter, KeyModifiers::NONE)
         .unwrap();
@@ -450,34 +605,21 @@ fn test_enter_then_tab_workflow() {
         .wait_for_async(
             |h| {
                 h.get_buffer_content()
-                    .map_or(false, |c| c.contains("  - item\n  "))
+                    .map_or(false, |c| c.contains("- item\n- "))
             },
             5_000,
         )
         .unwrap();
-    assert!(ok, "Enter should auto-indent");
-
-    // Tab → 4 more spaces (total 6)
-    harness.send_key(KeyCode::Tab, KeyModifiers::NONE).unwrap();
-    let ok = harness
-        .wait_for_async(
-            |h| {
-                h.get_buffer_content()
-                    .map_or(false, |c| c.contains("  - item\n      "))
-            },
-            5_000,
-        )
-        .unwrap();
-    assert!(ok, "Tab should insert 4 spaces");
+    assert!(ok, "Enter should continue bullet");
 
     // Type continuation text
-    harness.type_text("- sub").unwrap();
+    harness.type_text("next").unwrap();
     harness.render().unwrap();
 
     let content = buf(&harness);
     assert!(
-        content.contains("  - item\n      - sub"),
-        "Expected Enter(auto-indent 2) + Tab(4) + text. Got:\n{:?}",
+        content.contains("- item\n- next"),
+        "Expected '- item\\n- next'. Got:\n{:?}",
         content,
     );
     harness.assert_no_plugin_errors();
