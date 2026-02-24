@@ -15,10 +15,7 @@ use std::time::Duration;
 
 /// Create a harness with the markdown_source plugin loaded.
 /// Waits for the plugin to fully initialise (mode defined + event handler registered).
-fn markdown_source_harness(
-    width: u16,
-    height: u16,
-) -> (EditorTestHarness, tempfile::TempDir) {
+fn markdown_source_harness(width: u16, height: u16) -> (EditorTestHarness, tempfile::TempDir) {
     init_tracing_from_env();
 
     let temp_dir = tempfile::TempDir::new().unwrap();
@@ -140,12 +137,8 @@ fn test_enter_preserves_indentation() {
     open_md_and_wait_for_mode(&mut harness, &fixture.path);
 
     // Move to line 2 ("  - nested"), then End to go to end of line
-    harness
-        .send_key(KeyCode::Down, KeyModifiers::NONE)
-        .unwrap();
-    harness
-        .send_key(KeyCode::End, KeyModifiers::NONE)
-        .unwrap();
+    harness.send_key(KeyCode::Down, KeyModifiers::NONE).unwrap();
+    harness.send_key(KeyCode::End, KeyModifiers::NONE).unwrap();
     harness.render().unwrap();
 
     // Press Enter — should insert newline + 2 leading spaces
@@ -183,9 +176,7 @@ fn test_enter_no_indent_on_unindented_line() {
     open_md_and_wait_for_mode(&mut harness, &fixture.path);
 
     // Cursor starts at line 1 col 1; move to end
-    harness
-        .send_key(KeyCode::End, KeyModifiers::NONE)
-        .unwrap();
+    harness.send_key(KeyCode::End, KeyModifiers::NONE).unwrap();
     harness.render().unwrap();
 
     // Press Enter
@@ -231,9 +222,7 @@ fn test_enter_deep_indent() {
     open_md_and_wait_for_mode(&mut harness, &fixture.path);
 
     // Go to end of the line
-    harness
-        .send_key(KeyCode::End, KeyModifiers::NONE)
-        .unwrap();
+    harness.send_key(KeyCode::End, KeyModifiers::NONE).unwrap();
     harness.render().unwrap();
 
     // Press Enter
@@ -274,15 +263,11 @@ fn test_tab_inserts_spaces() {
     open_md_and_wait_for_mode(&mut harness, &fixture.path);
 
     // Cursor is at the beginning of "text"; press Home to be sure
-    harness
-        .send_key(KeyCode::Home, KeyModifiers::NONE)
-        .unwrap();
+    harness.send_key(KeyCode::Home, KeyModifiers::NONE).unwrap();
     harness.render().unwrap();
 
     // Press Tab — should insert 4 spaces before "text"
-    harness
-        .send_key(KeyCode::Tab, KeyModifiers::NONE)
-        .unwrap();
+    harness.send_key(KeyCode::Tab, KeyModifiers::NONE).unwrap();
 
     let ok = harness
         .wait_for_async(
@@ -312,18 +297,12 @@ fn test_multiple_tabs() {
     let fixture = TestFixture::new("tabs.md", content).unwrap();
     open_md_and_wait_for_mode(&mut harness, &fixture.path);
 
-    harness
-        .send_key(KeyCode::Home, KeyModifiers::NONE)
-        .unwrap();
+    harness.send_key(KeyCode::Home, KeyModifiers::NONE).unwrap();
     harness.render().unwrap();
 
     // Press Tab twice → 8 spaces
-    harness
-        .send_key(KeyCode::Tab, KeyModifiers::NONE)
-        .unwrap();
-    harness
-        .send_key(KeyCode::Tab, KeyModifiers::NONE)
-        .unwrap();
+    harness.send_key(KeyCode::Tab, KeyModifiers::NONE).unwrap();
+    harness.send_key(KeyCode::Tab, KeyModifiers::NONE).unwrap();
 
     let ok = harness
         .wait_for_async(
@@ -357,9 +336,7 @@ fn test_normal_typing_works() {
     let fixture = TestFixture::new("type.md", content).unwrap();
     open_md_and_wait_for_mode(&mut harness, &fixture.path);
 
-    harness
-        .send_key(KeyCode::Home, KeyModifiers::NONE)
-        .unwrap();
+    harness.send_key(KeyCode::Home, KeyModifiers::NONE).unwrap();
     harness.render().unwrap();
 
     // Type some text
@@ -462,9 +439,7 @@ fn test_enter_then_tab_workflow() {
     open_md_and_wait_for_mode(&mut harness, &fixture.path);
 
     // Go to end of "  - item"
-    harness
-        .send_key(KeyCode::End, KeyModifiers::NONE)
-        .unwrap();
+    harness.send_key(KeyCode::End, KeyModifiers::NONE).unwrap();
     harness.render().unwrap();
 
     // Enter → should auto-indent with 2 spaces
@@ -483,9 +458,7 @@ fn test_enter_then_tab_workflow() {
     assert!(ok, "Enter should auto-indent");
 
     // Tab → 4 more spaces (total 6)
-    harness
-        .send_key(KeyCode::Tab, KeyModifiers::NONE)
-        .unwrap();
+    harness.send_key(KeyCode::Tab, KeyModifiers::NONE).unwrap();
     let ok = harness
         .wait_for_async(
             |h| {

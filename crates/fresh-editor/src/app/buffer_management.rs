@@ -39,6 +39,15 @@ impl Editor {
     /// If the file doesn't exist, creates an unsaved buffer with that filename.
     /// Saving the buffer will create the file.
     pub fn open_file(&mut self, path: &Path) -> anyhow::Result<BufferId> {
+        // Check whether the active buffer had a file path before loading.
+        // If it didn't, open_file_no_focus may replace the empty initial buffer
+        // in-place (same buffer ID, new content), and we need to notify plugins.
+        let active_had_path = self
+            .buffers
+            .get(&self.active_buffer())
+            .and_then(|s| s.buffer.file_path())
+            .is_some();
+
         let buffer_id = self.open_file_no_focus(path)?;
 
         // Check if this was an already-open buffer or a new one
@@ -61,10 +70,13 @@ impl Editor {
 
         self.set_active_buffer(buffer_id);
 
-        // If the buffer was already active (e.g., replacing the initial empty buffer
-        // in-place), set_active_buffer is a no-op. Fire buffer_activated explicitly
-        // so plugins see the newly loaded file.
-        if !is_new_buffer {
+        // If the initial empty buffer was replaced in-place with file content,
+        // set_active_buffer is a no-op (same buffer ID). Fire buffer_activated
+        // explicitly so plugins see the newly loaded file.
+        // Skip this when re-opening an already-active file (active_had_path),
+        // as nothing changed and the extra hook would cause spurious refreshes
+        // in plugins like the diagnostics panel.
+        if !is_new_buffer && !active_had_path {
             #[cfg(feature = "plugins")]
             self.update_plugin_state_snapshot();
 
