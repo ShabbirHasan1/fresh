@@ -1,0 +1,763 @@
+/// <reference path="./lib/fresh.d.ts" />
+const editor = getEditor();
+
+/**
+ * Dev Container Plugin
+ *
+ * Detects .devcontainer/devcontainer.json configurations and provides:
+ * - Status bar summary of the container environment
+ * - Info panel showing image, features, ports, env vars, lifecycle commands
+ * - Lifecycle command runner via command palette
+ * - Quick open for the devcontainer.json config file
+ */
+
+// =============================================================================
+// Types
+// =============================================================================
+
+interface DevContainerConfig {
+  name?: string;
+  image?: string;
+  build?: {
+    dockerfile?: string;
+    context?: string;
+    args?: Record<string, string>;
+    target?: string;
+    cacheFrom?: string | string[];
+  };
+  dockerComposeFile?: string | string[];
+  service?: string;
+  features?: Record<string, string | boolean | Record<string, unknown>>;
+  forwardPorts?: (number | string)[];
+  portsAttributes?: Record<string, PortAttributes>;
+  appPort?: number | string | (number | string)[];
+  containerEnv?: Record<string, string>;
+  remoteEnv?: Record<string, string>;
+  containerUser?: string;
+  remoteUser?: string;
+  mounts?: (string | MountConfig)[];
+  initializeCommand?: LifecycleCommand;
+  onCreateCommand?: LifecycleCommand;
+  updateContentCommand?: LifecycleCommand;
+  postCreateCommand?: LifecycleCommand;
+  postStartCommand?: LifecycleCommand;
+  postAttachCommand?: LifecycleCommand;
+  customizations?: Record<string, unknown>;
+  runArgs?: string[];
+  workspaceFolder?: string;
+  workspaceMount?: string;
+  shutdownAction?: string;
+  overrideCommand?: boolean;
+  init?: boolean;
+  privileged?: boolean;
+  capAdd?: string[];
+  securityOpt?: string[];
+  hostRequirements?: {
+    cpus?: number;
+    memory?: string;
+    storage?: string;
+    gpu?: boolean | string | { cores?: number; memory?: string };
+  };
+}
+
+type LifecycleCommand = string | string[] | Record<string, string | string[]>;
+
+interface PortAttributes {
+  label?: string;
+  protocol?: string;
+  onAutoForward?: string;
+  requireLocalPort?: boolean;
+  elevateIfNeeded?: boolean;
+}
+
+interface MountConfig {
+  type?: string;
+  source?: string;
+  target?: string;
+}
+
+// =============================================================================
+// JSONC Parser
+// =============================================================================
+
+/**
+ * Strip JSON with Comments (JSONC) to plain JSON.
+ * Handles single-line comments (//), multi-line comments, and trailing commas.
+ */
+function stripJsonc(text: string): string {
+  let result = "";
+  let i = 0;
+  let inString = false;
+
+  while (i < text.length) {
+    if (inString) {
+      if (text[i] === "\\" && i + 1 < text.length) {
+        result += text[i] + text[i + 1];
+        i += 2;
+        continue;
+      }
+      if (text[i] === '"') {
+        inString = false;
+      }
+      result += text[i];
+    } else if (text[i] === '"') {
+      inString = true;
+      result += text[i];
+    } else if (text[i] === "/" && i + 1 < text.length && text[i + 1] === "/") {
+      // Single-line comment: skip to end of line
+      while (i < text.length && text[i] !== "\n") {
+        i++;
+      }
+      continue;
+    } else if (text[i] === "/" && i + 1 < text.length && text[i + 1] === "*") {
+      // Multi-line comment: skip to closing */
+      i += 2;
+      while (i < text.length - 1 && !(text[i] === "*" && text[i + 1] === "/")) {
+        i++;
+      }
+      i += 2;
+      continue;
+    } else {
+      result += text[i];
+    }
+    i++;
+  }
+
+  // Remove trailing commas before } or ]
+  return result.replace(/,\s*([}\]])/g, "$1");
+}
+
+// =============================================================================
+// State
+// =============================================================================
+
+let config: DevContainerConfig | null = null;
+let configPath: string | null = null;
+let infoPanelBufferId: number | null = null;
+let infoPanelSplitId: number | null = null;
+let infoPanelOpen = false;
+let cachedContent = "";
+
+// =============================================================================
+// Colors
+// =============================================================================
+
+const colors = {
+  heading: [255, 200, 100] as [number, number, number],
+  key: [100, 200, 255] as [number, number, number],
+  value: [200, 200, 200] as [number, number, number],
+  feature: [150, 255, 150] as [number, number, number],
+  port: [255, 180, 100] as [number, number, number],
+  footer: [120, 120, 120] as [number, number, number],
+};
+
+// =============================================================================
+// Config Discovery
+// =============================================================================
+
+function findConfig(): boolean {
+  const cwd = editor.getCwd();
+
+  // Priority 1: .devcontainer/devcontainer.json
+  const primary = editor.pathJoin(cwd, ".devcontainer", "devcontainer.json");
+  const primaryContent = editor.readFile(primary);
+  if (primaryContent !== null) {
+    try {
+      config = JSON.parse(stripJsonc(primaryContent));
+      configPath = primary;
+      return true;
+    } catch {
+      editor.debug("devcontainer: failed to parse " + primary);
+    }
+  }
+
+  // Priority 2: .devcontainer.json
+  const secondary = editor.pathJoin(cwd, ".devcontainer.json");
+  const secondaryContent = editor.readFile(secondary);
+  if (secondaryContent !== null) {
+    try {
+      config = JSON.parse(stripJsonc(secondaryContent));
+      configPath = secondary;
+      return true;
+    } catch {
+      editor.debug("devcontainer: failed to parse " + secondary);
+    }
+  }
+
+  // Priority 3: .devcontainer/<subfolder>/devcontainer.json
+  const dcDir = editor.pathJoin(cwd, ".devcontainer");
+  if (editor.fileExists(dcDir)) {
+    const entries = editor.readDir(dcDir);
+    for (const entry of entries) {
+      if (entry.is_dir) {
+        const subConfig = editor.pathJoin(dcDir, entry.name, "devcontainer.json");
+        const subContent = editor.readFile(subConfig);
+        if (subContent !== null) {
+          try {
+            config = JSON.parse(stripJsonc(subContent));
+            configPath = subConfig;
+            return true;
+          } catch {
+            editor.debug("devcontainer: failed to parse " + subConfig);
+          }
+        }
+      }
+    }
+  }
+
+  return false;
+}
+
+// =============================================================================
+// Formatting Helpers
+// =============================================================================
+
+function formatLifecycleCommand(cmd: LifecycleCommand): string {
+  if (typeof cmd === "string") return cmd;
+  if (Array.isArray(cmd)) return cmd.join(" ");
+  return Object.entries(cmd)
+    .map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(" ") : v}`)
+    .join("; ");
+}
+
+function formatMount(mount: string | MountConfig): string {
+  if (typeof mount === "string") return mount;
+  const parts: string[] = [];
+  if (mount.source) parts.push(mount.source);
+  parts.push("->");
+  if (mount.target) parts.push(mount.target);
+  if (mount.type) parts.push(`(${mount.type})`);
+  return parts.join(" ");
+}
+
+function getImageSummary(): string {
+  if (!config) return "unknown";
+  if (config.image) return config.image;
+  if (config.build?.dockerfile) return "Dockerfile: " + config.build.dockerfile;
+  if (config.dockerComposeFile) return "Compose";
+  return "unknown";
+}
+
+// =============================================================================
+// Info Panel
+// =============================================================================
+
+function buildInfoEntries(): TextPropertyEntry[] {
+  if (!config) return [];
+
+  const entries: TextPropertyEntry[] = [];
+
+  // Header
+  const name = config.name ?? "unnamed";
+  entries.push({
+    text: editor.t("panel.header", { name }) + "\n",
+    properties: { type: "heading" },
+  });
+  entries.push({ text: "\n", properties: { type: "blank" } });
+
+  // Image / Build / Compose
+  if (config.image) {
+    entries.push({ text: editor.t("panel.section_image") + "\n", properties: { type: "heading" } });
+    entries.push({ text: "  " + config.image + "\n", properties: { type: "value" } });
+    entries.push({ text: "\n", properties: { type: "blank" } });
+  } else if (config.build?.dockerfile) {
+    entries.push({ text: editor.t("panel.section_build") + "\n", properties: { type: "heading" } });
+    entries.push({ text: "  dockerfile: " + config.build.dockerfile + "\n", properties: { type: "value" } });
+    if (config.build.context) {
+      entries.push({ text: "  context: " + config.build.context + "\n", properties: { type: "value" } });
+    }
+    if (config.build.target) {
+      entries.push({ text: "  target: " + config.build.target + "\n", properties: { type: "value" } });
+    }
+    entries.push({ text: "\n", properties: { type: "blank" } });
+  } else if (config.dockerComposeFile) {
+    entries.push({ text: editor.t("panel.section_compose") + "\n", properties: { type: "heading" } });
+    const files = Array.isArray(config.dockerComposeFile)
+      ? config.dockerComposeFile.join(", ")
+      : config.dockerComposeFile;
+    entries.push({ text: "  files: " + files + "\n", properties: { type: "value" } });
+    if (config.service) {
+      entries.push({ text: "  service: " + config.service + "\n", properties: { type: "value" } });
+    }
+    entries.push({ text: "\n", properties: { type: "blank" } });
+  }
+
+  // Features
+  if (config.features && Object.keys(config.features).length > 0) {
+    entries.push({ text: editor.t("panel.section_features") + "\n", properties: { type: "heading" } });
+    for (const [id, opts] of Object.entries(config.features)) {
+      entries.push({ text: "  + " + id + "\n", properties: { type: "feature", id } });
+      if (typeof opts === "object" && opts !== null) {
+        const optStr = Object.entries(opts as Record<string, unknown>)
+          .map(([k, v]) => `${k} = ${JSON.stringify(v)}`)
+          .join(", ");
+        if (optStr) {
+          entries.push({ text: "      " + optStr + "\n", properties: { type: "feature-opts" } });
+        }
+      }
+    }
+    entries.push({ text: "\n", properties: { type: "blank" } });
+  }
+
+  // Ports
+  if (config.forwardPorts && config.forwardPorts.length > 0) {
+    entries.push({ text: editor.t("panel.section_ports") + "\n", properties: { type: "heading" } });
+    for (const port of config.forwardPorts) {
+      const attrs = config.portsAttributes?.[String(port)];
+      const proto = attrs?.protocol ?? "tcp";
+      let detail = `  ${port} -> ${proto}`;
+      if (attrs?.label) detail += ` (${attrs.label})`;
+      if (attrs?.onAutoForward) detail += ` [${attrs.onAutoForward}]`;
+      entries.push({ text: detail + "\n", properties: { type: "port", port: String(port) } });
+    }
+    entries.push({ text: "\n", properties: { type: "blank" } });
+  }
+
+  // Environment
+  const allEnv: Record<string, string> = {};
+  if (config.containerEnv) Object.assign(allEnv, config.containerEnv);
+  if (config.remoteEnv) Object.assign(allEnv, config.remoteEnv);
+  const envKeys = Object.keys(allEnv);
+  if (envKeys.length > 0) {
+    entries.push({ text: editor.t("panel.section_env") + "\n", properties: { type: "heading" } });
+    for (const k of envKeys) {
+      entries.push({ text: `  ${k} = ${allEnv[k]}\n`, properties: { type: "env" } });
+    }
+    entries.push({ text: "\n", properties: { type: "blank" } });
+  }
+
+  // Mounts
+  if (config.mounts && config.mounts.length > 0) {
+    entries.push({ text: editor.t("panel.section_mounts") + "\n", properties: { type: "heading" } });
+    for (const mount of config.mounts) {
+      entries.push({ text: "  " + formatMount(mount) + "\n", properties: { type: "mount" } });
+    }
+    entries.push({ text: "\n", properties: { type: "blank" } });
+  }
+
+  // Users
+  if (config.containerUser || config.remoteUser) {
+    entries.push({ text: editor.t("panel.section_users") + "\n", properties: { type: "heading" } });
+    if (config.containerUser) {
+      entries.push({ text: "  containerUser: " + config.containerUser + "\n", properties: { type: "value" } });
+    }
+    if (config.remoteUser) {
+      entries.push({ text: "  remoteUser: " + config.remoteUser + "\n", properties: { type: "value" } });
+    }
+    entries.push({ text: "\n", properties: { type: "blank" } });
+  }
+
+  // Lifecycle Commands
+  const lifecycle: [string, LifecycleCommand | undefined][] = [
+    ["initializeCommand", config.initializeCommand],
+    ["onCreateCommand", config.onCreateCommand],
+    ["updateContentCommand", config.updateContentCommand],
+    ["postCreateCommand", config.postCreateCommand],
+    ["postStartCommand", config.postStartCommand],
+    ["postAttachCommand", config.postAttachCommand],
+  ];
+  const defined = lifecycle.filter(([, v]) => v !== undefined);
+  if (defined.length > 0) {
+    entries.push({ text: editor.t("panel.section_lifecycle") + "\n", properties: { type: "heading" } });
+    for (const [cmdName, cmd] of defined) {
+      entries.push({
+        text: `  ${cmdName}: ${formatLifecycleCommand(cmd!)}\n`,
+        properties: { type: "lifecycle", command: cmdName },
+      });
+    }
+    entries.push({ text: "\n", properties: { type: "blank" } });
+  }
+
+  // Host Requirements
+  if (config.hostRequirements) {
+    const hr = config.hostRequirements;
+    entries.push({ text: editor.t("panel.section_host_req") + "\n", properties: { type: "heading" } });
+    if (hr.cpus) entries.push({ text: `  cpus: ${hr.cpus}\n`, properties: { type: "value" } });
+    if (hr.memory) entries.push({ text: `  memory: ${hr.memory}\n`, properties: { type: "value" } });
+    if (hr.storage) entries.push({ text: `  storage: ${hr.storage}\n`, properties: { type: "value" } });
+    if (hr.gpu) entries.push({ text: `  gpu: ${JSON.stringify(hr.gpu)}\n`, properties: { type: "value" } });
+    entries.push({ text: "\n", properties: { type: "blank" } });
+  }
+
+  // Footer
+  entries.push({
+    text: editor.t("panel.footer") + "\n",
+    properties: { type: "footer" },
+  });
+
+  return entries;
+}
+
+function entriesToContent(entries: TextPropertyEntry[]): string {
+  return entries.map((e) => e.text).join("");
+}
+
+function applyInfoHighlighting(): void {
+  if (infoPanelBufferId === null) return;
+  const bufferId = infoPanelBufferId;
+
+  editor.clearNamespace(bufferId, "devcontainer");
+
+  const content = cachedContent;
+  if (!content) return;
+
+  const lines = content.split("\n");
+  let byteOffset = 0;
+
+  for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
+    const line = lines[lineIdx];
+    const lineStart = byteOffset;
+    const lineByteLen = editor.utf8ByteLength(line);
+    const lineEnd = lineStart + lineByteLen;
+
+    // Heading lines (sections)
+    if (
+      line.startsWith("Dev Container:") ||
+      line === editor.t("panel.section_image") ||
+      line === editor.t("panel.section_build") ||
+      line === editor.t("panel.section_compose") ||
+      line === editor.t("panel.section_features") ||
+      line === editor.t("panel.section_ports") ||
+      line === editor.t("panel.section_env") ||
+      line === editor.t("panel.section_mounts") ||
+      line === editor.t("panel.section_users") ||
+      line === editor.t("panel.section_lifecycle") ||
+      line === editor.t("panel.section_host_req")
+    ) {
+      editor.addOverlay(bufferId, "devcontainer", lineStart, lineEnd, {
+        fg: colors.heading,
+        bold: true,
+      });
+    }
+    // Feature lines
+    else if (line.startsWith("  + ")) {
+      editor.addOverlay(bufferId, "devcontainer", lineStart, lineEnd, {
+        fg: colors.feature,
+      });
+    }
+    // Port lines
+    else if (line.match(/^\s+\d+\s*->/)) {
+      editor.addOverlay(bufferId, "devcontainer", lineStart, lineEnd, {
+        fg: colors.port,
+      });
+    }
+    // Key = value lines (env vars)
+    else if (line.match(/^\s+\w+\s*=/)) {
+      const eqIdx = line.indexOf("=");
+      if (eqIdx > 0) {
+        const keyEnd = lineStart + editor.utf8ByteLength(line.substring(0, eqIdx));
+        editor.addOverlay(bufferId, "devcontainer", lineStart, keyEnd, {
+          fg: colors.key,
+        });
+      }
+    }
+    // Footer
+    else if (line === editor.t("panel.footer")) {
+      editor.addOverlay(bufferId, "devcontainer", lineStart, lineEnd, {
+        fg: colors.footer,
+        italic: true,
+      });
+    }
+
+    byteOffset += lineByteLen + 1; // +1 for newline
+  }
+}
+
+// =============================================================================
+// Mode Definition
+// =============================================================================
+
+editor.defineMode(
+  "devcontainer-info",
+  "normal",
+  [
+    ["r", "devcontainer_run_lifecycle"],
+    ["o", "devcontainer_open_config"],
+    ["q", "devcontainer_close_info"],
+    ["Escape", "devcontainer_close_info"],
+  ],
+  true // read-only
+);
+
+// =============================================================================
+// Commands
+// =============================================================================
+
+globalThis.devcontainer_show_info = async function (): Promise<void> {
+  if (!config) {
+    editor.setStatus(editor.t("status.no_config"));
+    return;
+  }
+
+  if (infoPanelOpen && infoPanelBufferId !== null) {
+    // Already open - refresh content
+    const entries = buildInfoEntries();
+    cachedContent = entriesToContent(entries);
+    editor.setVirtualBufferContent(infoPanelBufferId, entries);
+    applyInfoHighlighting();
+    return;
+  }
+
+  const entries = buildInfoEntries();
+  cachedContent = entriesToContent(entries);
+
+  const result = await editor.createVirtualBufferInSplit({
+    name: "*Dev Container*",
+    mode: "devcontainer-info",
+    readOnly: true,
+    showLineNumbers: false,
+    showCursors: true,
+    editingDisabled: true,
+    lineWrap: true,
+    ratio: 0.4,
+    direction: "horizontal",
+    entries: entries,
+  });
+
+  if (result !== null) {
+    infoPanelOpen = true;
+    infoPanelBufferId = result.bufferId;
+    infoPanelSplitId = result.splitId;
+    applyInfoHighlighting();
+    editor.setStatus(editor.t("status.panel_opened"));
+  }
+};
+
+globalThis.devcontainer_close_info = function (): void {
+  if (!infoPanelOpen) return;
+
+  if (infoPanelSplitId !== null) {
+    editor.closeSplit(infoPanelSplitId);
+  }
+  if (infoPanelBufferId !== null) {
+    editor.closeBuffer(infoPanelBufferId);
+  }
+
+  infoPanelOpen = false;
+  infoPanelBufferId = null;
+  infoPanelSplitId = null;
+  editor.setStatus(editor.t("status.panel_closed"));
+};
+
+globalThis.devcontainer_open_config = function (): void {
+  if (configPath) {
+    editor.openFile(configPath, null, null);
+  } else {
+    editor.setStatus(editor.t("status.no_config"));
+  }
+};
+
+globalThis.devcontainer_run_lifecycle = function (): void {
+  if (!config) {
+    editor.setStatus(editor.t("status.no_config"));
+    return;
+  }
+
+  const lifecycle: [string, LifecycleCommand | undefined][] = [
+    ["onCreateCommand", config.onCreateCommand],
+    ["updateContentCommand", config.updateContentCommand],
+    ["postCreateCommand", config.postCreateCommand],
+    ["postStartCommand", config.postStartCommand],
+    ["postAttachCommand", config.postAttachCommand],
+  ];
+
+  const defined = lifecycle.filter(([, v]) => v !== undefined);
+  if (defined.length === 0) {
+    editor.setStatus(editor.t("status.no_lifecycle"));
+    return;
+  }
+
+  const suggestions: PromptSuggestion[] = defined.map(([name, cmd]) => ({
+    text: name,
+    description: formatLifecycleCommand(cmd!),
+    value: name,
+  }));
+
+  editor.startPrompt(editor.t("prompt.run_lifecycle"), "devcontainer-lifecycle");
+  editor.setPromptSuggestions(suggestions);
+};
+
+globalThis.devcontainer_on_lifecycle_confirmed = async function (data: {
+  prompt_type: string;
+  value: string;
+}): Promise<void> {
+  if (data.prompt_type !== "devcontainer-lifecycle") return;
+
+  const cmdName = data.value;
+  if (!config || !cmdName) return;
+
+  const cmd = (config as Record<string, unknown>)[cmdName] as LifecycleCommand | undefined;
+  if (!cmd) return;
+
+  if (typeof cmd === "string") {
+    editor.setStatus(editor.t("status.running", { name: cmdName }));
+    const result = await editor.spawnProcess("sh", ["-c", cmd], editor.getCwd());
+    if (result.exit_code === 0) {
+      editor.setStatus(editor.t("status.completed", { name: cmdName }));
+    } else {
+      editor.setStatus(editor.t("status.failed", { name: cmdName, code: String(result.exit_code) }));
+    }
+  } else if (Array.isArray(cmd)) {
+    const [bin, ...args] = cmd;
+    editor.setStatus(editor.t("status.running", { name: cmdName }));
+    const result = await editor.spawnProcess(bin, args, editor.getCwd());
+    if (result.exit_code === 0) {
+      editor.setStatus(editor.t("status.completed", { name: cmdName }));
+    } else {
+      editor.setStatus(editor.t("status.failed", { name: cmdName, code: String(result.exit_code) }));
+    }
+  } else {
+    // Object form: run each named sub-command sequentially
+    for (const [label, subcmd] of Object.entries(cmd)) {
+      editor.setStatus(editor.t("status.running_sub", { name: cmdName, label }));
+      let bin: string;
+      let args: string[];
+      if (Array.isArray(subcmd)) {
+        [bin, ...args] = subcmd;
+      } else {
+        bin = "sh";
+        args = ["-c", subcmd as string];
+      }
+      const result = await editor.spawnProcess(bin, args, editor.getCwd());
+      if (result.exit_code !== 0) {
+        editor.setStatus(editor.t("status.failed_sub", { name: cmdName, label, code: String(result.exit_code) }));
+        return;
+      }
+    }
+    editor.setStatus(editor.t("status.completed", { name: cmdName }));
+  }
+};
+
+globalThis.devcontainer_show_features = function (): void {
+  if (!config || !config.features || Object.keys(config.features).length === 0) {
+    editor.setStatus(editor.t("status.no_features"));
+    return;
+  }
+
+  const suggestions: PromptSuggestion[] = Object.entries(config.features).map(([id, opts]) => {
+    let desc = "";
+    if (typeof opts === "object" && opts !== null) {
+      desc = Object.entries(opts as Record<string, unknown>)
+        .map(([k, v]) => `${k}=${JSON.stringify(v)}`)
+        .join(", ");
+    } else if (typeof opts === "string") {
+      desc = opts;
+    }
+    return { text: id, description: desc || "(default options)" };
+  });
+
+  editor.startPrompt(editor.t("prompt.features"), "devcontainer-features");
+  editor.setPromptSuggestions(suggestions);
+};
+
+globalThis.devcontainer_show_ports = function (): void {
+  if (!config || !config.forwardPorts || config.forwardPorts.length === 0) {
+    editor.setStatus(editor.t("status.no_ports"));
+    return;
+  }
+
+  const suggestions: PromptSuggestion[] = config.forwardPorts.map((port) => {
+    const attrs = config!.portsAttributes?.[String(port)];
+    const proto = attrs?.protocol ?? "tcp";
+    let desc = proto;
+    if (attrs?.label) desc += ` - ${attrs.label}`;
+    if (attrs?.onAutoForward) desc += ` (${attrs.onAutoForward})`;
+    return { text: String(port), description: desc };
+  });
+
+  editor.startPrompt(editor.t("prompt.ports"), "devcontainer-ports");
+  editor.setPromptSuggestions(suggestions);
+};
+
+globalThis.devcontainer_rebuild = async function (): Promise<void> {
+  const result = await editor.spawnProcess("which", ["devcontainer"]);
+  if (result.exit_code !== 0) {
+    editor.setStatus(editor.t("status.cli_not_found"));
+    return;
+  }
+  editor.setStatus(editor.t("status.rebuilding"));
+  const rebuild = await editor.spawnProcess(
+    "devcontainer",
+    ["rebuild", "--workspace-folder", editor.getCwd()],
+  );
+  if (rebuild.exit_code === 0) {
+    editor.setStatus(editor.t("status.rebuild_done"));
+  } else {
+    editor.setStatus(editor.t("status.rebuild_failed", { error: rebuild.stderr }));
+  }
+};
+
+// =============================================================================
+// Event Handlers
+// =============================================================================
+
+editor.on("prompt_confirmed", "devcontainer_on_lifecycle_confirmed");
+
+// =============================================================================
+// Command Registration
+// =============================================================================
+
+function registerCommands(): void {
+  editor.registerCommand(
+    "%cmd.show_info",
+    "%cmd.show_info_desc",
+    "devcontainer_show_info",
+    null,
+  );
+  editor.registerCommand(
+    "%cmd.open_config",
+    "%cmd.open_config_desc",
+    "devcontainer_open_config",
+    null,
+  );
+  editor.registerCommand(
+    "%cmd.run_lifecycle",
+    "%cmd.run_lifecycle_desc",
+    "devcontainer_run_lifecycle",
+    null,
+  );
+  editor.registerCommand(
+    "%cmd.show_features",
+    "%cmd.show_features_desc",
+    "devcontainer_show_features",
+    null,
+  );
+  editor.registerCommand(
+    "%cmd.show_ports",
+    "%cmd.show_ports_desc",
+    "devcontainer_show_ports",
+    null,
+  );
+  editor.registerCommand(
+    "%cmd.rebuild",
+    "%cmd.rebuild_desc",
+    "devcontainer_rebuild",
+    null,
+  );
+}
+
+// =============================================================================
+// Initialization
+// =============================================================================
+
+if (findConfig()) {
+  registerCommands();
+
+  const name = config!.name ?? "unnamed";
+  const image = getImageSummary();
+  const featureCount = config!.features ? Object.keys(config!.features).length : 0;
+  const portCount = config!.forwardPorts?.length ?? 0;
+
+  editor.setStatus(
+    editor.t("status.detected", {
+      name,
+      image,
+      features: String(featureCount),
+      ports: String(portCount),
+    }),
+  );
+
+  editor.debug("Dev Container plugin initialized: " + name);
+} else {
+  editor.debug("Dev Container plugin: no devcontainer.json found");
+}
