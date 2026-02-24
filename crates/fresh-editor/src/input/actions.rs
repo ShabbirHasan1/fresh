@@ -693,7 +693,9 @@ fn insert_char_events(
         }
 
         // Try skip-over logic for closing brackets/quotes
-        if auto_indent && matches!(ch, ')' | ']' | '}' | '"' | '\'' | '`') {
+        // Single quotes are excluded in markdown (apostrophes, not paired quotes)
+        let skip_single_quote = ch == '\'' && matches!(state.language.as_str(), "markdown" | "mdx");
+        if auto_indent && matches!(ch, ')' | ']' | '}' | '"' | '\'' | '`') && !skip_single_quote {
             if let Some(next_byte) = data.char_after {
                 if next_byte == ch as u8 {
                     // Try skip-over with dedent for closing delimiters
