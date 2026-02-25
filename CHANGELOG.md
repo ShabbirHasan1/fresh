@@ -1,6 +1,6 @@
 # Release Notes
 
-## 0.2.6
+## 0.2.7
 
 ### Features
 
@@ -55,6 +55,7 @@
 
 ### Internal
 
+* Update flake.nix to rust 1.92.0
 * Split GUI backend into separate `fresh-gui` crate.
 * Unified language detection with `DetectedLanguage` struct and single `apply_language()` mutation point.
 * CI now runs clippy with `--all-features` to lint GUI code.
