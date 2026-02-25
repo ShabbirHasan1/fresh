@@ -138,6 +138,24 @@ let infoPanelSplitId: number | null = null;
 let infoPanelOpen = false;
 let cachedContent = "";
 
+// Focus state for info panel buttons (Tab navigation like pkg.ts)
+type InfoFocusTarget = { type: "button"; index: number };
+
+interface InfoButton {
+  id: string;
+  label: string;
+  command: string;
+}
+
+const infoButtons: InfoButton[] = [
+  { id: "run", label: "Run Lifecycle", command: "devcontainer_run_lifecycle" },
+  { id: "open", label: "Open Config", command: "devcontainer_open_config" },
+  { id: "rebuild", label: "Rebuild", command: "devcontainer_rebuild" },
+  { id: "close", label: "Close", command: "devcontainer_close_info" },
+];
+
+let infoFocus: InfoFocusTarget = { type: "button", index: 0 };
+
 // =============================================================================
 // Colors
 // =============================================================================
@@ -149,6 +167,9 @@ const colors = {
   feature: [150, 255, 150] as [number, number, number],
   port: [255, 180, 100] as [number, number, number],
   footer: [120, 120, 120] as [number, number, number],
+  button: [180, 180, 190] as [number, number, number],
+  buttonFocused: [255, 255, 255] as [number, number, number],
+  buttonFocusedBg: [60, 110, 180] as [number, number, number],
 };
 
 // =============================================================================
@@ -379,7 +400,30 @@ function buildInfoEntries(): TextPropertyEntry[] {
     entries.push({ text: "\n", properties: { type: "blank" } });
   }
 
-  // Footer
+  // Separator before buttons
+  entries.push({
+    text: "─".repeat(40) + "\n",
+    properties: { type: "separator" },
+  });
+
+  // Action buttons row (Tab-navigable, like pkg.ts)
+  entries.push({ text: " ", properties: { type: "spacer" } });
+  for (let i = 0; i < infoButtons.length; i++) {
+    const btn = infoButtons[i];
+    const focused = infoFocus.index === i;
+    const leftBracket = focused ? "[" : " ";
+    const rightBracket = focused ? "]" : " ";
+    entries.push({
+      text: `${leftBracket} ${btn.label} ${rightBracket}`,
+      properties: { type: "button", focused, btnIndex: i },
+    });
+    if (i < infoButtons.length - 1) {
+      entries.push({ text: " ", properties: { type: "spacer" } });
+    }
+  }
+  entries.push({ text: "\n", properties: { type: "newline" } });
+
+  // Help line
   entries.push({
     text: editor.t("panel.footer") + "\n",
     properties: { type: "footer" },
@@ -451,7 +495,13 @@ function applyInfoHighlighting(): void {
         });
       }
     }
-    // Footer
+    // Separator
+    else if (line.match(/^─+$/)) {
+      editor.addOverlay(bufferId, "devcontainer", lineStart, lineEnd, {
+        fg: colors.footer,
+      });
+    }
+    // Footer help line
     else if (line === editor.t("panel.footer")) {
       editor.addOverlay(bufferId, "devcontainer", lineStart, lineEnd, {
         fg: colors.footer,
@@ -461,6 +511,49 @@ function applyInfoHighlighting(): void {
 
     byteOffset += lineByteLen + 1; // +1 for newline
   }
+
+  // Apply button highlighting using entry-based scanning
+  // We need to walk entries to find button text positions in the content
+  applyButtonHighlighting();
+}
+
+function applyButtonHighlighting(): void {
+  if (infoPanelBufferId === null) return;
+  const bufferId = infoPanelBufferId;
+
+  // Re-scan entries to find button positions
+  const entries = buildInfoEntries();
+  let byteOffset = 0;
+
+  for (const entry of entries) {
+    const props = entry.properties as Record<string, unknown>;
+    const len = editor.utf8ByteLength(entry.text);
+
+    if (props.type === "button") {
+      const focused = props.focused as boolean;
+      if (focused) {
+        editor.addOverlay(bufferId, "devcontainer", byteOffset, byteOffset + len, {
+          fg: colors.buttonFocused,
+          bg: colors.buttonFocusedBg,
+          bold: true,
+        });
+      } else {
+        editor.addOverlay(bufferId, "devcontainer", byteOffset, byteOffset + len, {
+          fg: colors.button,
+        });
+      }
+    }
+
+    byteOffset += len;
+  }
+}
+
+function updateInfoPanel(): void {
+  if (infoPanelBufferId === null) return;
+  const entries = buildInfoEntries();
+  cachedContent = entriesToContent(entries);
+  editor.setVirtualBufferContent(infoPanelBufferId, entries);
+  applyInfoHighlighting();
 }
 
 // =============================================================================
@@ -471,13 +564,41 @@ editor.defineMode(
   "devcontainer-info",
   "normal",
   [
-    ["r", "devcontainer_run_lifecycle"],
-    ["o", "devcontainer_open_config"],
+    ["Tab", "devcontainer_next_button"],
+    ["S-Tab", "devcontainer_prev_button"],
+    ["Return", "devcontainer_activate_button"],
+    ["M-r", "devcontainer_run_lifecycle"],
+    ["M-o", "devcontainer_open_config"],
+    ["M-b", "devcontainer_rebuild"],
     ["q", "devcontainer_close_info"],
     ["Escape", "devcontainer_close_info"],
   ],
   true // read-only
 );
+
+// =============================================================================
+// Info Panel Button Navigation
+// =============================================================================
+
+globalThis.devcontainer_next_button = function (): void {
+  if (!infoPanelOpen) return;
+  infoFocus = { type: "button", index: (infoFocus.index + 1) % infoButtons.length };
+  updateInfoPanel();
+};
+
+globalThis.devcontainer_prev_button = function (): void {
+  if (!infoPanelOpen) return;
+  infoFocus = { type: "button", index: (infoFocus.index - 1 + infoButtons.length) % infoButtons.length };
+  updateInfoPanel();
+};
+
+globalThis.devcontainer_activate_button = function (): void {
+  if (!infoPanelOpen) return;
+  const btn = infoButtons[infoFocus.index];
+  if (btn && globalThis[btn.command]) {
+    globalThis[btn.command]();
+  }
+};
 
 // =============================================================================
 // Commands
@@ -491,13 +612,11 @@ globalThis.devcontainer_show_info = async function (): Promise<void> {
 
   if (infoPanelOpen && infoPanelBufferId !== null) {
     // Already open - refresh content
-    const entries = buildInfoEntries();
-    cachedContent = entriesToContent(entries);
-    editor.setVirtualBufferContent(infoPanelBufferId, entries);
-    applyInfoHighlighting();
+    updateInfoPanel();
     return;
   }
 
+  infoFocus = { type: "button", index: 0 };
   const entries = buildInfoEntries();
   cachedContent = entriesToContent(entries);
 
@@ -726,16 +845,13 @@ globalThis.devcontainer_rebuild = async function (): Promise<void> {
     showCliNotFoundPopup();
     return;
   }
+
+  // Open a terminal to stream the rebuild output live
+  const cwd = editor.getCwd();
+  const term = await editor.createTerminal({ direction: "horizontal", ratio: 0.4, focus: true });
+  const rebuildCmd = `devcontainer up --remove-existing-container --workspace-folder ${JSON.stringify(cwd)}; echo ""; echo "--- Rebuild finished (exit: $?) ---"\n`;
+  editor.sendTerminalInput(term.terminalId, rebuildCmd);
   editor.setStatus(editor.t("status.rebuilding"));
-  const rebuild = await editor.spawnProcess(
-    "devcontainer",
-    ["up", "--remove-existing-container", "--workspace-folder", editor.getCwd()],
-  );
-  if (rebuild.exit_code === 0) {
-    editor.setStatus(editor.t("status.rebuild_done"));
-  } else {
-    editor.setStatus(editor.t("status.rebuild_failed", { error: rebuild.stderr }));
-  }
 };
 
 globalThis.devcontainer_open_terminal = async function (): Promise<void> {

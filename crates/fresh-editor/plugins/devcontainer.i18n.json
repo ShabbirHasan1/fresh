@@ -59,7 +59,7 @@
     "panel.section_users": "Users",
     "panel.section_lifecycle": "Lifecycle Commands",
     "panel.section_host_req": "Host Requirements",
-    "panel.footer": "r: run lifecycle | o: open config | q: close"
+    "panel.footer": "Tab: cycle buttons  Enter: activate  Alt+r: run  Alt+o: open  Alt+b: rebuild  q: close"
   },
   "cs": {
     "cmd.show_info": "Dev Container: Zobrazit info",
@@ -121,7 +121,7 @@
     "panel.section_users": "Uzivatele",
     "panel.section_lifecycle": "Lifecycle prikazy",
     "panel.section_host_req": "Pozadavky na hostitele",
-    "panel.footer": "r: spustit lifecycle | o: otevrit konfiguraci | q: zavrit"
+    "panel.footer": "Tab: prepnout  Enter: aktivovat  Alt+r: lifecycle  Alt+o: otevrit  Alt+b: sestavit  q: zavrit"
   },
   "de": {
     "cmd.show_info": "Dev Container: Info anzeigen",
@@ -183,7 +183,7 @@
     "panel.section_users": "Benutzer",
     "panel.section_lifecycle": "Lifecycle-Befehle",
     "panel.section_host_req": "Hostanforderungen",
-    "panel.footer": "r: Lifecycle ausfuehren | o: Konfiguration oeffnen | q: Schliessen"
+    "panel.footer": "Tab: Wechseln  Enter: Aktivieren  Alt+r: Lifecycle  Alt+o: Oeffnen  Alt+b: Erstellen  q: Schliessen"
   },
   "es": {
     "cmd.show_info": "Dev Container: Mostrar Info",
@@ -245,7 +245,7 @@
     "panel.section_users": "Usuarios",
     "panel.section_lifecycle": "Comandos Lifecycle",
     "panel.section_host_req": "Requisitos del Host",
-    "panel.footer": "r: ejecutar lifecycle | o: abrir config | q: cerrar"
+    "panel.footer": "Tab: ciclar  Enter: activar  Alt+r: lifecycle  Alt+o: abrir  Alt+b: reconstruir  q: cerrar"
   },
   "fr": {
     "cmd.show_info": "Dev Container: Afficher les infos",
@@ -307,7 +307,7 @@
     "panel.section_users": "Utilisateurs",
     "panel.section_lifecycle": "Commandes Lifecycle",
     "panel.section_host_req": "Exigences de l'hote",
-    "panel.footer": "r: executer lifecycle | o: ouvrir config | q: fermer"
+    "panel.footer": "Tab: cycler  Enter: activer  Alt+r: lifecycle  Alt+o: ouvrir  Alt+b: reconstruire  q: fermer"
   },
   "ja": {
     "cmd.show_info": "Dev Container: 情報を表示",
@@ -369,7 +369,7 @@
     "panel.section_users": "ユーザー",
     "panel.section_lifecycle": "ライフサイクルコマンド",
     "panel.section_host_req": "ホスト要件",
-    "panel.footer": "r: ライフサイクル実行 | o: 設定を開く | q: 閉じる"
+    "panel.footer": "Tab: 切替  Enter: 実行  Alt+r: ライフサイクル  Alt+o: 設定  Alt+b: リビルド  q: 閉じる"
   },
   "ko": {
     "cmd.show_info": "Dev Container: 정보 표시",
@@ -431,7 +431,7 @@
     "panel.section_users": "사용자",
     "panel.section_lifecycle": "라이프사이클 명령",
     "panel.section_host_req": "호스트 요구사항",
-    "panel.footer": "r: 라이프사이클 실행 | o: 설정 열기 | q: 닫기"
+    "panel.footer": "Tab: 전환  Enter: 실행  Alt+r: 라이프사이클  Alt+o: 설정  Alt+b: 재빌드  q: 닫기"
   },
   "zh-CN": {
     "cmd.show_info": "Dev Container: 显示信息",
@@ -493,6 +493,6 @@
     "panel.section_users": "用户",
     "panel.section_lifecycle": "生命周期命令",
     "panel.section_host_req": "主机要求",
-    "panel.footer": "r: 运行生命周期 | o: 打开配置 | q: 关闭"
+    "panel.footer": "Tab: 切换  Enter: 执行  Alt+r: 生命周期  Alt+o: 打开  Alt+b: 重建  q: 关闭"
   }
 }
