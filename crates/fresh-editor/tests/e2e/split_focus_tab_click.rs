@@ -71,9 +71,7 @@ fn test_split_focus_via_tab_click_cursor_position() {
     harness.assert_screen_contains("Hello");
 
     // Step 6: Move cursor to end and type a known sequence
-    harness
-        .send_key(KeyCode::End, KeyModifiers::NONE)
-        .unwrap();
+    harness.send_key(KeyCode::End, KeyModifiers::NONE).unwrap();
     harness.type_text("ABCDEF").unwrap();
 
     // Verify: the characters should appear in order after "Hello"

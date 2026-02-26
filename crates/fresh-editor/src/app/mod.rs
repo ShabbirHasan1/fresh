@@ -2096,6 +2096,12 @@ impl Editor {
                 self.key_context = crate::input::keybindings::KeyContext::Normal;
             }
 
+            // Switch the view state to the target buffer so that Deref
+            // (cursors, viewport, …) resolves to the correct BufferViewState.
+            if let Some(view_state) = self.split_view_states.get_mut(&split_id) {
+                view_state.switch_buffer(buffer_id);
+            }
+
             // Handle buffer change side effects
             if previous_buffer != buffer_id {
                 self.position_history.commit_pending_movement();
