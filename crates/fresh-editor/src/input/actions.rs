@@ -400,8 +400,8 @@ fn convert_block_selection_to_cursors(
 }
 
 /// Get the matching close character for auto-pairing.
-pub fn get_auto_close_char(ch: char, auto_indent: bool, language: &str) -> Option<char> {
-    if !auto_indent {
+pub fn get_auto_close_char(ch: char, auto_close: bool, language: &str) -> Option<char> {
+    if !auto_close {
         return None;
     }
     // Disable auto-closing quotes in plain text files
@@ -693,9 +693,10 @@ fn insert_char_events(
     ch: char,
     tab_size: usize,
     auto_indent: bool,
+    auto_close: bool,
 ) {
     let is_closing_delimiter = matches!(ch, '}' | ')' | ']');
-    let auto_close_char = get_auto_close_char(ch, auto_indent, &state.language);
+    let auto_close_char = get_auto_close_char(ch, auto_close, &state.language);
     let cursor_data = collect_insert_cursor_data(state, cursors);
 
     for data in cursor_data {
@@ -711,7 +712,7 @@ fn insert_char_events(
         // Try skip-over logic for closing brackets/quotes
         // Single quotes are excluded in markdown (apostrophes, not paired quotes)
         let skip_single_quote = ch == '\'' && matches!(state.language.as_str(), "markdown" | "mdx");
-        if auto_indent && matches!(ch, ')' | ']' | '}' | '"' | '\'' | '`') && !skip_single_quote {
+        if auto_close && matches!(ch, ')' | ']' | '}' | '"' | '\'' | '`') && !skip_single_quote {
             if let Some(next_byte) = data.char_after {
                 if next_byte == ch as u8 {
                     // Try skip-over with dedent for closing delimiters
@@ -832,6 +833,7 @@ fn transform_case<F>(
 /// * `action` - The action to convert
 /// * `tab_size` - Number of spaces per tab
 /// * `auto_indent` - Whether auto-indent is enabled
+/// * `auto_close` - Whether auto-close brackets/quotes is enabled
 /// * `estimated_line_length` - Estimated bytes per line for large files
 /// * `viewport_height` - Height of the viewport in lines (for PageUp/PageDown)
 ///
@@ -844,6 +846,7 @@ pub fn action_to_events(
     action: Action,
     tab_size: usize,
     auto_indent: bool,
+    auto_close: bool,
     estimated_line_length: usize,
     viewport_height: u16,
 ) -> Option<Vec<Event>> {
@@ -867,7 +870,15 @@ pub fn action_to_events(
     match action {
         // Character input - insert at each cursor
         Action::InsertChar(ch) => {
-            insert_char_events(state, cursors, &mut events, ch, tab_size, auto_indent);
+            insert_char_events(
+                state,
+                cursors,
+                &mut events,
+                ch,
+                tab_size,
+                auto_indent,
+                auto_close,
+            );
         }
 
         Action::InsertNewline => {
@@ -2150,9 +2161,9 @@ pub fn action_to_events(
                         let delete_from = state.buffer.prev_char_boundary(cursor.position);
                         let delete_from = adjust_position_for_crlf_left(&state.buffer, delete_from);
 
-                        // Check for auto-pair deletion when auto_indent is enabled
+                        // Check for auto-pair deletion when auto_close is enabled
                         // Note: Auto-pairs are ASCII-only, so we can safely check single bytes
-                        if auto_indent && cursor.position < state.buffer.len() {
+                        if auto_close && cursor.position < state.buffer.len() {
                             let char_before = state
                                 .buffer
                                 .slice_bytes(delete_from..cursor.position)
@@ -2947,6 +2958,7 @@ mod tests {
             Action::DeleteBackward,
             4,
             false,
+            false,
             80,
             24,
         )
@@ -2998,8 +3010,17 @@ mod tests {
         assert_eq!(cursors.primary().position, 0);
 
         // Move down - should go to position 6 (start of Line2)
-        let events =
-            action_to_events(&mut state, &mut cursors, Action::MoveDown, 4, false, 80, 24).unwrap();
+        let events = action_to_events(
+            &mut state,
+            &mut cursors,
+            Action::MoveDown,
+            4,
+            false,
+            false,
+            80,
+            24,
+        )
+        .unwrap();
         assert_eq!(events.len(), 1);
 
         if let Event::MoveCursor { new_position, .. } = &events[0] {
@@ -3012,8 +3033,17 @@ mod tests {
         assert_eq!(cursors.primary().position, 6);
 
         // Move down again - should go to position 12 (start of Line3)
-        let events =
-            action_to_events(&mut state, &mut cursors, Action::MoveDown, 4, false, 80, 24).unwrap();
+        let events = action_to_events(
+            &mut state,
+            &mut cursors,
+            Action::MoveDown,
+            4,
+            false,
+            false,
+            80,
+            24,
+        )
+        .unwrap();
         assert_eq!(events.len(), 1);
 
         if let Event::MoveCursor { new_position, .. } = &events[0] {
@@ -3061,6 +3091,7 @@ mod tests {
             &mut cursors,
             Action::MoveLineUp,
             4,
+            false,
             false,
             80,
             24,
@@ -3113,6 +3144,7 @@ mod tests {
             Action::MoveLineDown,
             4,
             false,
+            false,
             80,
             24,
         )
@@ -3164,6 +3196,7 @@ mod tests {
             Action::MoveLineUp,
             4,
             false,
+            false,
             80,
             24,
         )
@@ -3211,6 +3244,7 @@ mod tests {
             &mut cursors,
             Action::MoveLineDown,
             4,
+            false,
             false,
             80,
             24,
@@ -3268,6 +3302,7 @@ mod tests {
             &mut cursors,
             Action::MoveLineUp,
             4,
+            false,
             false,
             80,
             24,
@@ -3328,6 +3363,7 @@ mod tests {
             &mut cursors,
             Action::MoveLineUp,
             4,
+            false,
             false,
             80,
             24,
@@ -3395,6 +3431,7 @@ mod tests {
             Action::MoveLineDown,
             4,
             false,
+            false,
             80,
             24,
         )
@@ -3451,8 +3488,17 @@ mod tests {
         // Should go to end of Line2 (position 11, which is the newline, BUT we want column 5 which is position 11)
         // Wait, Line2 has content "Line2" (5 chars), so column 5 is position 6+5=11 (the newline)
         // This is technically correct but weird - we're on the newline
-        let events =
-            action_to_events(&mut state, &mut cursors, Action::MoveUp, 4, false, 80, 24).unwrap();
+        let events = action_to_events(
+            &mut state,
+            &mut cursors,
+            Action::MoveUp,
+            4,
+            false,
+            false,
+            80,
+            24,
+        )
+        .unwrap();
         assert_eq!(events.len(), 1);
 
         if let Event::MoveCursor { new_position, .. } = &events[0] {
@@ -3473,8 +3519,17 @@ mod tests {
         // Current line is Line2 (starts at 6), column is 11-6=5
         // Previous line is Line1 (starts at 0), content "Line1" has length 5
         // So we go to position 0 + min(5, 5) = 5 (the newline after Line1)
-        let events =
-            action_to_events(&mut state, &mut cursors, Action::MoveUp, 4, false, 80, 24).unwrap();
+        let events = action_to_events(
+            &mut state,
+            &mut cursors,
+            Action::MoveUp,
+            4,
+            false,
+            false,
+            80,
+            24,
+        )
+        .unwrap();
         assert_eq!(events.len(), 1);
 
         if let Event::MoveCursor { new_position, .. } = &events[0] {
@@ -3524,8 +3579,17 @@ mod tests {
         assert_eq!(cursors.primary().position, 3);
 
         // Move down - should go to position 9 (column 3 of second line, which is end of "123")
-        let events =
-            action_to_events(&mut state, &mut cursors, Action::MoveDown, 4, false, 80, 24).unwrap();
+        let events = action_to_events(
+            &mut state,
+            &mut cursors,
+            Action::MoveDown,
+            4,
+            false,
+            false,
+            80,
+            24,
+        )
+        .unwrap();
         assert_eq!(events.len(), 1);
 
         if let Event::MoveCursor {
@@ -3549,8 +3613,17 @@ mod tests {
         state.apply(&mut cursors, &events[0]);
 
         // Move down again - should go to position 13 (column 3 of third line)
-        let events =
-            action_to_events(&mut state, &mut cursors, Action::MoveDown, 4, false, 80, 24).unwrap();
+        let events = action_to_events(
+            &mut state,
+            &mut cursors,
+            Action::MoveDown,
+            4,
+            false,
+            false,
+            80,
+            24,
+        )
+        .unwrap();
         assert_eq!(events.len(), 1);
 
         if let Event::MoveCursor {
@@ -3603,8 +3676,17 @@ mod tests {
         assert_eq!(cursors.primary().position, 13);
 
         // Move up - should go to position 9 (column 3 of second line, which is end of "123")
-        let events =
-            action_to_events(&mut state, &mut cursors, Action::MoveUp, 4, false, 80, 24).unwrap();
+        let events = action_to_events(
+            &mut state,
+            &mut cursors,
+            Action::MoveUp,
+            4,
+            false,
+            false,
+            80,
+            24,
+        )
+        .unwrap();
         assert_eq!(events.len(), 1);
 
         if let Event::MoveCursor {
@@ -3628,8 +3710,17 @@ mod tests {
         state.apply(&mut cursors, &events[0]);
 
         // Move up again - should go to position 3 (column 3 of first line)
-        let events =
-            action_to_events(&mut state, &mut cursors, Action::MoveUp, 4, false, 80, 24).unwrap();
+        let events = action_to_events(
+            &mut state,
+            &mut cursors,
+            Action::MoveUp,
+            4,
+            false,
+            false,
+            80,
+            24,
+        )
+        .unwrap();
         assert_eq!(events.len(), 1);
 
         if let Event::MoveCursor {
@@ -3680,8 +3771,17 @@ mod tests {
         );
 
         // Move down - should go to position 6 (start of second line)
-        let events =
-            action_to_events(&mut state, &mut cursors, Action::MoveDown, 4, false, 80, 24).unwrap();
+        let events = action_to_events(
+            &mut state,
+            &mut cursors,
+            Action::MoveDown,
+            4,
+            false,
+            false,
+            80,
+            24,
+        )
+        .unwrap();
         assert_eq!(events.len(), 1);
 
         if let Event::MoveCursor { new_position, .. } = &events[0] {
@@ -3726,8 +3826,17 @@ mod tests {
         );
 
         // Move up - should go to position 0 (start of first line)
-        let events =
-            action_to_events(&mut state, &mut cursors, Action::MoveUp, 4, false, 80, 24).unwrap();
+        let events = action_to_events(
+            &mut state,
+            &mut cursors,
+            Action::MoveUp,
+            4,
+            false,
+            false,
+            80,
+            24,
+        )
+        .unwrap();
         assert_eq!(events.len(), 1);
 
         if let Event::MoveCursor { new_position, .. } = &events[0] {
@@ -3775,8 +3884,17 @@ mod tests {
         );
 
         // Move down - should go to position 6 (empty line)
-        let events =
-            action_to_events(&mut state, &mut cursors, Action::MoveDown, 4, false, 80, 24).unwrap();
+        let events = action_to_events(
+            &mut state,
+            &mut cursors,
+            Action::MoveDown,
+            4,
+            false,
+            false,
+            80,
+            24,
+        )
+        .unwrap();
         if let Event::MoveCursor { new_position, .. } = &events[0] {
             assert_eq!(*new_position, 6, "Cursor should move to empty line");
         }
@@ -3784,8 +3902,17 @@ mod tests {
         state.apply(&mut cursors, &events[0]);
 
         // Move down again - should go to position 7 (start of Line3)
-        let events =
-            action_to_events(&mut state, &mut cursors, Action::MoveDown, 4, false, 80, 24).unwrap();
+        let events = action_to_events(
+            &mut state,
+            &mut cursors,
+            Action::MoveDown,
+            4,
+            false,
+            false,
+            80,
+            24,
+        )
+        .unwrap();
         if let Event::MoveCursor { new_position, .. } = &events[0] {
             assert_eq!(*new_position, 7, "Cursor should move to Line3");
         }
@@ -3826,8 +3953,17 @@ mod tests {
         );
 
         // Try to move up (no previous line exists)
-        let events =
-            action_to_events(&mut state, &mut cursors, Action::MoveUp, 4, false, 80, 24).unwrap();
+        let events = action_to_events(
+            &mut state,
+            &mut cursors,
+            Action::MoveUp,
+            4,
+            false,
+            false,
+            80,
+            24,
+        )
+        .unwrap();
         assert_eq!(
             events.len(),
             0,
@@ -3835,8 +3971,17 @@ mod tests {
         );
 
         // Try to move down (no next line exists)
-        let events =
-            action_to_events(&mut state, &mut cursors, Action::MoveDown, 4, false, 80, 24).unwrap();
+        let events = action_to_events(
+            &mut state,
+            &mut cursors,
+            Action::MoveDown,
+            4,
+            false,
+            false,
+            80,
+            24,
+        )
+        .unwrap();
         assert_eq!(
             events.len(),
             0,
@@ -3964,6 +4109,7 @@ mod tests {
             Action::MoveLineEnd,
             4,
             false,
+            false,
             80,
             24,
         )
@@ -4023,6 +4169,7 @@ mod tests {
             &mut cursors,
             Action::MoveLineStart,
             4,
+            false,
             false,
             80,
             24,
@@ -4095,8 +4242,17 @@ mod tests {
         );
 
         // Try to move up - this should work even if chunks aren't loaded
-        let events =
-            action_to_events(&mut state, &mut cursors, Action::MoveUp, 4, false, 80, 24).unwrap();
+        let events = action_to_events(
+            &mut state,
+            &mut cursors,
+            Action::MoveUp,
+            4,
+            false,
+            false,
+            80,
+            24,
+        )
+        .unwrap();
         println!("MoveUp events: {:?}", events);
 
         assert!(
@@ -4168,8 +4324,17 @@ mod tests {
         );
 
         // Move down to second line
-        let events =
-            action_to_events(&mut state, &mut cursors, Action::MoveDown, 4, false, 80, 24).unwrap();
+        let events = action_to_events(
+            &mut state,
+            &mut cursors,
+            Action::MoveDown,
+            4,
+            false,
+            false,
+            80,
+            24,
+        )
+        .unwrap();
         println!("MoveDown events: {:?}", events);
 
         if events.is_empty() {
@@ -4219,8 +4384,17 @@ mod tests {
         assert_eq!(cursors.primary().position, 20); // End of text
 
         // Move up to first line
-        let events =
-            action_to_events(&mut state, &mut cursors, Action::MoveUp, 4, false, 80, 24).unwrap();
+        let events = action_to_events(
+            &mut state,
+            &mut cursors,
+            Action::MoveUp,
+            4,
+            false,
+            false,
+            80,
+            24,
+        )
+        .unwrap();
         for event in events {
             state.apply(&mut cursors, &event);
         }
@@ -4232,6 +4406,7 @@ mod tests {
             &mut cursors,
             Action::MoveLineEnd,
             4,
+            false,
             false,
             80,
             24,
@@ -4247,8 +4422,17 @@ mod tests {
         );
 
         // Move down to second line
-        let events =
-            action_to_events(&mut state, &mut cursors, Action::MoveDown, 4, false, 80, 24).unwrap();
+        let events = action_to_events(
+            &mut state,
+            &mut cursors,
+            Action::MoveDown,
+            4,
+            false,
+            false,
+            80,
+            24,
+        )
+        .unwrap();
         for event in events {
             state.apply(&mut cursors, &event);
         }
@@ -4260,6 +4444,7 @@ mod tests {
             &mut cursors,
             Action::MoveLineStart,
             4,
+            false,
             false,
             80,
             24,
@@ -4281,6 +4466,7 @@ mod tests {
             &mut cursors,
             Action::DeleteBackward,
             4,
+            false,
             false,
             80,
             24,
@@ -4328,6 +4514,7 @@ mod tests {
             Action::InsertChar('('),
             4,
             true,
+            true,
             80,
             24,
         )
@@ -4367,6 +4554,7 @@ mod tests {
             Action::InsertChar('{'),
             4,
             true,
+            true,
             80,
             24,
         )
@@ -4401,6 +4589,7 @@ mod tests {
             Action::InsertChar('['),
             4,
             true,
+            true,
             80,
             24,
         )
@@ -4432,6 +4621,7 @@ mod tests {
             Action::InsertChar('"'),
             4,
             true,
+            true,
             80,
             24,
         )
@@ -4461,6 +4651,7 @@ mod tests {
             &mut cursors,
             Action::InsertChar('('),
             4,
+            false,
             false,
             80,
             24,
@@ -4516,6 +4707,7 @@ mod tests {
             &mut cursors,
             Action::InsertChar('('),
             4,
+            true,
             true,
             80,
             24,
@@ -4595,6 +4787,7 @@ mod tests {
             Action::InsertChar('('),
             4,
             true,
+            true,
             80,
             24,
         )
@@ -4660,20 +4853,6 @@ mod tests {
             Action::InsertChar('f'),
             4,
             true,
-            80,
-            24,
-        )
-        .unwrap();
-        for event in events {
-            state.apply(&mut cursors, &event);
-        }
-
-        // Type 'o'
-        let events = action_to_events(
-            &mut state,
-            &mut cursors,
-            Action::InsertChar('o'),
-            4,
             true,
             80,
             24,
@@ -4689,6 +4868,23 @@ mod tests {
             &mut cursors,
             Action::InsertChar('o'),
             4,
+            true,
+            true,
+            80,
+            24,
+        )
+        .unwrap();
+        for event in events {
+            state.apply(&mut cursors, &event);
+        }
+
+        // Type 'o'
+        let events = action_to_events(
+            &mut state,
+            &mut cursors,
+            Action::InsertChar('o'),
+            4,
+            true,
             true,
             80,
             24,
@@ -4711,6 +4907,7 @@ mod tests {
             &mut cursors,
             Action::InsertChar('('),
             4,
+            true,
             true,
             80,
             24,
@@ -4745,6 +4942,7 @@ mod tests {
             &mut cursors,
             Action::InsertChar(')'),
             4,
+            true,
             true,
             80,
             24,
@@ -4826,6 +5024,7 @@ mod tests {
                 Action::InsertChar(ch),
                 4,
                 true,
+                true,
                 80,
                 24,
             )
@@ -4848,6 +5047,7 @@ mod tests {
             &mut cursors,
             Action::InsertChar('('),
             4,
+            true,
             true,
             80,
             24,
@@ -4883,6 +5083,7 @@ mod tests {
             &mut cursors,
             Action::InsertChar(')'),
             4,
+            true,
             true,
             80,
             24,
@@ -4944,6 +5145,7 @@ mod tests {
             Action::DeleteBackward,
             4,
             true,
+            true,
             80,
             24,
         )
@@ -4998,6 +5200,7 @@ mod tests {
             Action::DeleteBackward,
             4,
             true,
+            true,
             80,
             24,
         )
@@ -5051,6 +5254,7 @@ mod tests {
             Action::DeleteBackward,
             4,
             true,
+            true,
             80,
             24,
         )
@@ -5103,6 +5307,7 @@ mod tests {
             &mut cursors,
             Action::DeleteBackward,
             4,
+            false,
             false,
             80,
             24,
@@ -5158,6 +5363,7 @@ mod tests {
             Action::DeleteBackward,
             4,
             true,
+            true,
             80,
             24,
         )
@@ -5211,6 +5417,7 @@ mod tests {
             &mut cursors,
             Action::DeleteBackward,
             4,
+            true,
             true,
             80,
             24,
