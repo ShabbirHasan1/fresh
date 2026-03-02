@@ -2041,11 +2041,14 @@ fn test_entry_dialog_delete_textlist_item() {
     harness.assert_screen_contains("Edit Value");
 
     // Navigate to Extensions section which has existing items
-    // Fields in order: Key, Auto Indent, Comment Prefix, Extensions (3 downs)
-    for _ in 0..3 {
+    loop {
+        harness.render().unwrap();
+        let screen = harness.screen_to_string();
+        if screen.contains(">  Extensions") || screen.contains(">● Extensions") {
+            break;
+        }
         harness.send_key(KeyCode::Down, KeyModifiers::NONE).unwrap();
     }
-    harness.render().unwrap();
 
     // The Extensions section should have items and "[x]" delete buttons
     harness.assert_screen_contains("[x]");
@@ -3469,11 +3472,14 @@ fn test_usability_entry_dialog_button_focus_indicator() {
     harness.render().unwrap();
 
     // Navigate down past all items to reach the buttons
-    // Languages have many properties, navigate past all of them
-    for _ in 0..30 {
+    loop {
+        harness.render().unwrap();
+        let screen = harness.screen_to_string();
+        if screen.contains("> [ Save ]") || screen.contains(">[ Save ]") {
+            break;
+        }
         harness.send_key(KeyCode::Down, KeyModifiers::NONE).unwrap();
     }
-    harness.render().unwrap();
 
     // The entry dialog buttons should show ">" focus indicator
     let screen = harness.screen_to_string();

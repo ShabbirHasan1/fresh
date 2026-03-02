@@ -46,10 +46,14 @@ fn test_settings_paste() {
     harness.assert_screen_contains("bash");
 
     // Navigate down to Comment Prefix field (Key is read-only for existing entries)
-    // Order: Key -> Auto Indent -> Comment Prefix
-    harness.send_key(KeyCode::Down, KeyModifiers::NONE).unwrap(); // Auto Indent
-    harness.send_key(KeyCode::Down, KeyModifiers::NONE).unwrap(); // Comment Prefix
-    harness.render().unwrap();
+    loop {
+        harness.render().unwrap();
+        let screen = harness.screen_to_string();
+        if screen.contains(">  Comment Prefix") || screen.contains(">● Comment Prefix") {
+            break;
+        }
+        harness.send_key(KeyCode::Down, KeyModifiers::NONE).unwrap();
+    }
 
     // Enter to start editing the "Comment Prefix" field
     harness
