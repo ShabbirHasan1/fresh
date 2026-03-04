@@ -500,3 +500,99 @@ fn test_transient_popup_mouse_drag_and_copy() {
         );
     }
 }
+
+/// Test that selecting text in a popup with wrapped lines copies the correct text.
+///
+/// Bug: selection coordinates are in wrapped-line space (visual position), but
+/// `get_selected_text()` extracts from unwrapped content lines, so the copied
+/// text is from the wrong line when wrapping is active.
+#[test]
+fn test_popup_copy_with_wrapped_lines() {
+    // Use a narrow terminal to force wrapping
+    let mut harness = EditorTestHarness::new(80, 30).unwrap();
+
+    // Create a text popup narrow enough to force wrapping.
+    // "AAAA BBBB CCCC DDDD" is 19 chars — at width 22 (inner 20) it won't wrap.
+    // But a second long line will wrap, pushing visual lines out of sync.
+    {
+        let editor = harness.editor_mut();
+        let theme = editor.theme().clone();
+
+        let popup = Popup::text(
+            vec![
+                // Line 0: 40 chars — will wrap into 2 visual lines at width ~20
+                "First line is long enough to wrap around".to_string(),
+                // Line 1: short — this is what we'll select
+                "TARGET".to_string(),
+            ],
+            &theme,
+        )
+        .with_position(PopupPosition::Fixed { x: 5, y: 3 })
+        .with_width(22) // inner width ~20 (borders take 2)
+        .with_max_height(10);
+
+        editor.active_state_mut().popups.show(popup);
+        editor.set_clipboard_for_test("".to_string());
+    }
+
+    harness.render().unwrap();
+
+    let screen = harness.screen_to_string();
+    eprintln!("Screen:\n{}", screen);
+
+    // With width 22 (inner 20), line 0 wraps into ~3 visual lines:
+    //   visual line 0: "First line is long"
+    //   visual line 1: "enough to wrap"
+    //   visual line 2: "around"
+    //   visual line 3: "TARGET"               (original line 1)
+    //
+    // Find "TARGET" on screen to get its visual row.
+    // Use char_indices to find the character column (not byte offset,
+    // since border chars like │ are multi-byte).
+    let target_row = screen
+        .lines()
+        .enumerate()
+        .find(|(_, line)| line.contains("TARGET"))
+        .map(|(row, _)| row as u16)
+        .expect("Should find TARGET on screen");
+
+    // Find the character column (not byte offset — border chars are multi-byte)
+    let target_line = screen.lines().nth(target_row as usize).unwrap();
+    let byte_offset = target_line.find("TARGET").unwrap();
+    let char_col = target_line[..byte_offset].chars().count() as u16;
+
+    eprintln!("TARGET at char_col={}, row={}", char_col, target_row);
+
+    // Select "TARGET" via mouse drag
+    harness
+        .mouse_drag(char_col, target_row, char_col + 6, target_row)
+        .unwrap();
+    harness.render().unwrap();
+
+    // Verify selection exists
+    let popup = harness.editor().active_state().popups.top().unwrap();
+    assert!(popup.has_selection(), "Should have selection");
+    eprintln!("Selection: {:?}", popup.text_selection);
+
+    let selected_text = popup.get_selected_text();
+    eprintln!("get_selected_text: {:?}", selected_text);
+
+    // Press Ctrl+C to copy
+    harness
+        .send_key(KeyCode::Char('c'), KeyModifiers::CONTROL)
+        .unwrap();
+
+    let clipboard = harness.editor_mut().clipboard_content_for_test();
+    eprintln!("Clipboard: {:?}", clipboard);
+
+    // The bug: get_selected_text uses unwrapped line indices, so instead of
+    // "TARGET" (visual line 2 = unwrapped line 1), it extracts from unwrapped
+    // line 2 which doesn't exist, or gets the wrong text.
+    assert_eq!(
+        clipboard.trim(),
+        "TARGET",
+        "Copied text should be 'TARGET' (the visually selected text), \
+         but got {:?} due to wrapped/unwrapped line index mismatch",
+        clipboard,
+    );
+}

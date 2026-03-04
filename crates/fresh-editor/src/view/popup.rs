@@ -499,12 +499,60 @@ impl Popup {
         }
     }
 
-    /// Get plain text lines from popup content
-    fn get_text_lines(&self) -> Vec<String> {
-        match &self.content {
-            PopupContent::Text(lines) => lines.clone(),
+    /// Compute the effective content wrap width, replicating the logic
+    /// from `render_with_hover` so line indices match visual positions.
+    fn content_wrap_width(&self) -> usize {
+        let border_width: u16 = if self.bordered { 2 } else { 0 };
+        let inner_width = self.width.saturating_sub(border_width);
+        let scrollbar_reserved: u16 = 2;
+        let conservative_width = inner_width.saturating_sub(scrollbar_reserved) as usize;
+
+        if conservative_width == 0 {
+            return 0;
+        }
+
+        let visible_height = self.max_height.saturating_sub(border_width) as usize;
+        let line_count = match &self.content {
+            PopupContent::Text(lines) => wrap_text_lines(lines, conservative_width).len(),
             PopupContent::Markdown(styled_lines) => {
-                styled_lines.iter().map(|sl| sl.plain_text()).collect()
+                wrap_styled_lines(styled_lines, conservative_width).len()
+            }
+            _ => self.item_count(),
+        };
+
+        let needs_scrollbar = line_count > visible_height && inner_width > scrollbar_reserved;
+
+        if needs_scrollbar {
+            conservative_width
+        } else {
+            inner_width as usize
+        }
+    }
+
+    /// Get plain text lines from popup content, wrapped to match rendering.
+    ///
+    /// Selection coordinates are in wrapped-line space (visual positions),
+    /// so this must wrap lines identically to how `render_with_hover` does.
+    fn get_text_lines(&self) -> Vec<String> {
+        let wrap_width = self.content_wrap_width();
+
+        match &self.content {
+            PopupContent::Text(lines) => {
+                if wrap_width > 0 {
+                    wrap_text_lines(lines, wrap_width)
+                } else {
+                    lines.clone()
+                }
+            }
+            PopupContent::Markdown(styled_lines) => {
+                if wrap_width > 0 {
+                    wrap_styled_lines(styled_lines, wrap_width)
+                        .iter()
+                        .map(|sl| sl.plain_text())
+                        .collect()
+                } else {
+                    styled_lines.iter().map(|sl| sl.plain_text()).collect()
+                }
             }
             PopupContent::List { items, .. } => items.iter().map(|i| i.text.clone()).collect(),
             PopupContent::Custom(lines) => lines.clone(),
@@ -1331,7 +1379,7 @@ mod tests {
         let popup_below = popup.clone().with_position(PopupPosition::BelowCursor);
         let area = popup_below.calculate_area(terminal_area, Some((20, 10)));
         assert_eq!(area.x, 20);
-        assert_eq!(area.y, 12); // Two rows below cursor (allows space for cursor line)
+        assert_eq!(area.y, 11); // One row below cursor
     }
 
     #[test]
