@@ -331,6 +331,7 @@ impl Editor {
             view_state.add_buffer(buffer_id);
             // Initialize per-buffer view state for the new buffer with config defaults
             let buf_state = view_state.ensure_buffer_state(buffer_id);
+            buf_state.show_line_numbers = self.config.editor.line_numbers;
             buf_state.viewport.line_wrap_enabled = self.config.editor.line_wrap;
             buf_state.rulers = self.config.editor.rulers.clone();
         }
@@ -525,6 +526,7 @@ impl Editor {
         if let Some(view_state) = self.split_view_states.get_mut(&target_split) {
             view_state.add_buffer(buffer_id);
             let buf_state = view_state.ensure_buffer_state(buffer_id);
+            buf_state.show_line_numbers = self.config.editor.line_numbers;
             buf_state.viewport.line_wrap_enabled = self.config.editor.line_wrap;
             buf_state.rulers = self.config.editor.rulers.clone();
         }
@@ -657,6 +659,7 @@ impl Editor {
         if let Some(view_state) = self.split_view_states.get_mut(&target_split) {
             view_state.add_buffer(buffer_id);
             let buf_state = view_state.ensure_buffer_state(buffer_id);
+            buf_state.show_line_numbers = self.config.editor.line_numbers;
             buf_state.viewport.line_wrap_enabled = self.config.editor.line_wrap;
             buf_state.rulers = self.config.editor.rulers.clone();
         }

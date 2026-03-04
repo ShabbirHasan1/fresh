@@ -71,6 +71,45 @@ fn test_initial_buffer_respects_line_numbers_config() {
     harness.assert_screen_contains("Hello");
 }
 
+/// Test that opening a second file respects line_numbers=false config.
+/// Reproduces issue #1181: Line Numbers still showing even though disabled
+/// in settings when opening a new file. The bug occurs because
+/// BufferViewState::new() hardcodes show_line_numbers=true, and opening
+/// a new file creates a fresh BufferViewState without applying the config.
+#[test]
+fn test_opened_file_respects_line_numbers_disabled_config() {
+    let temp_dir = TempDir::new().unwrap();
+    let file1 = temp_dir.path().join("file1.txt");
+    let file2 = temp_dir.path().join("file2.txt");
+    std::fs::write(&file1, "File 1 line 1\nFile 1 line 2\n").unwrap();
+    std::fs::write(&file2, "File 2 line 1\nFile 2 line 2\n").unwrap();
+
+    // Create config with line_numbers disabled
+    let mut config = fresh::config::Config::default();
+    config.editor.line_numbers = false;
+
+    let mut harness = EditorTestHarness::with_config(80, 24, config).unwrap();
+
+    // Open first file (replaces initial empty buffer in-place)
+    harness.open_file(&file1).unwrap();
+    harness.render().unwrap();
+    harness.assert_screen_not_contains(" │ ");
+
+    // Open second file — this creates a NEW BufferViewState
+    harness.open_file(&file2).unwrap();
+    harness.render().unwrap();
+
+    let screen = harness.screen_to_string();
+    println!("Screen (line_numbers=false, second file):\n{screen}");
+
+    // Line numbers should NOT be shown because config has line_numbers=false
+    harness.assert_screen_not_contains(" │ ");
+
+    // Content of second file should be visible
+    harness.assert_screen_contains("File 2 line 1");
+    harness.assert_screen_contains("File 2 line 2");
+}
+
 /// Test that line numbers adjust width for large files
 #[test]
 fn test_margin_large_file_line_numbers() {
