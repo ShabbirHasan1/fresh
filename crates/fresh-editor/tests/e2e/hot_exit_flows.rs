@@ -376,7 +376,6 @@ fn test_flow_b_hot_exit_recovery_with_cli_files() {
 /// Currently fails because recovery storage is global, not session-scoped (#1233).
 /// Will pass after implementing session-scoped recovery (Phase 2 of the plan).
 #[test]
-#[ignore = "requires session-scoped recovery storage (#1233)"]
 fn test_flow_c_session_scoped_recovery_isolation() {
     let temp_dir = TempDir::new().unwrap();
     let project_dir = temp_dir.path().join("project");
@@ -408,6 +407,9 @@ fn test_flow_c_session_scoped_recovery_isolation() {
         .unwrap();
 
         harness.editor_mut().set_session_mode(true);
+        harness
+            .editor_mut()
+            .set_session_name(Some("session_a".into()));
         harness.open_file(&file_a).unwrap();
         harness.render().unwrap();
 
@@ -435,6 +437,9 @@ fn test_flow_c_session_scoped_recovery_isolation() {
         .unwrap();
 
         harness.editor_mut().set_session_mode(true);
+        harness
+            .editor_mut()
+            .set_session_name(Some("session_b".into()));
         harness.open_file(&file_b).unwrap();
         harness.render().unwrap();
 
@@ -461,6 +466,10 @@ fn test_flow_c_session_scoped_recovery_isolation() {
         )
         .unwrap();
 
+        harness.editor_mut().set_session_mode(true);
+        harness
+            .editor_mut()
+            .set_session_name(Some("session_a".into()));
         let restored = harness.startup(true, &[]).unwrap();
         assert!(restored, "Session A workspace should be restored");
         harness.render().unwrap();
@@ -486,6 +495,10 @@ fn test_flow_c_session_scoped_recovery_isolation() {
         )
         .unwrap();
 
+        harness.editor_mut().set_session_mode(true);
+        harness
+            .editor_mut()
+            .set_session_name(Some("session_b".into()));
         let restored = harness.startup(true, &[]).unwrap();
         assert!(restored, "Session B workspace should be restored");
         harness.render().unwrap();
@@ -759,7 +772,6 @@ fn test_flow_e_active_tab_preserved_across_restart() {
 /// silently overwriting external edits. Will pass after implementing mtime
 /// check with user warning (Phase 4, Task 4.2 of the plan).
 #[test]
-#[ignore = "requires mtime mismatch detection (Phase 4, Task 4.2)"]
 fn test_flow_f_mtime_mismatch_skips_recovery() {
     let temp_dir = TempDir::new().unwrap();
     let project_dir = temp_dir.path().join("project");
@@ -799,8 +811,8 @@ fn test_flow_f_mtime_mismatch_skips_recovery() {
     }
 
     // Modify the file on disk AFTER shutdown (simulate external edit)
-    // Sleep briefly to ensure mtime is different
-    std::thread::sleep(std::time::Duration::from_millis(50));
+    // Sleep >1s to ensure mtime (stored as whole seconds) changes
+    std::thread::sleep(std::time::Duration::from_millis(1100));
     std::fs::write(&file1, "externally modified on disk").unwrap();
 
     // Session 2: restore — the unsaved edit should NOT be applied

@@ -398,6 +398,14 @@ impl RecoveryService {
         }
 
         // New buffer or small file - chunk contains full content
+        // For file-backed small files, check if the original was modified on disk
+        if entry.metadata.original_path.is_some() && entry.original_file_modified() {
+            return Ok(RecoveryResult::OriginalFileModified {
+                id: entry.id.clone(),
+                original_path: entry.metadata.original_path.clone().unwrap(),
+            });
+        }
+
         // Load the chunk data directly
         let chunked_data = self
             .storage

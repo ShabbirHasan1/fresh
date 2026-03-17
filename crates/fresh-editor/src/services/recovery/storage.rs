@@ -2020,4 +2020,133 @@ mod tests {
             }
         }
     }
+
+    // ========================================================================
+    // Migration tests (Task 5.2)
+    // ========================================================================
+
+    #[test]
+    fn test_migrate_flat_layout_to_standalone_scope() {
+        let temp_dir = TempDir::new().unwrap();
+        let base_dir = temp_dir.path().join("recovery");
+        fs::create_dir_all(&base_dir).unwrap();
+
+        // Create old flat-layout files: session.lock, meta, and chunk
+        fs::write(base_dir.join("session.lock"), b"{}").unwrap();
+        fs::write(base_dir.join("abc123.meta.json"), b"{\"fake\": true}").unwrap();
+        fs::write(base_dir.join("abc123.chunk.0"), b"chunk data").unwrap();
+
+        let scope = RecoveryScope::Standalone {
+            working_dir: PathBuf::from("/home/user/project"),
+        };
+
+        RecoveryStorage::migrate_flat_layout(&base_dir, &scope).unwrap();
+
+        // Old files should be moved to default/{cwd_hash}/
+        assert!(!base_dir.join("session.lock").exists());
+        assert!(!base_dir.join("abc123.meta.json").exists());
+        assert!(!base_dir.join("abc123.chunk.0").exists());
+
+        // default/ directory should exist with the scoped subdirectory
+        let hash = crate::workspace::encode_path_for_filename(Path::new("/home/user/project"));
+        let scoped_dir = base_dir.join("default").join(&hash);
+        assert!(scoped_dir.exists());
+        assert!(scoped_dir.join("session.lock").exists());
+        assert!(scoped_dir.join("abc123.meta.json").exists());
+        assert!(scoped_dir.join("abc123.chunk.0").exists());
+
+        // Verify content was preserved
+        assert_eq!(
+            fs::read(scoped_dir.join("abc123.chunk.0")).unwrap(),
+            b"chunk data"
+        );
+    }
+
+    #[test]
+    fn test_migrate_flat_layout_to_session_scope() {
+        let temp_dir = TempDir::new().unwrap();
+        let base_dir = temp_dir.path().join("recovery");
+        fs::create_dir_all(&base_dir).unwrap();
+
+        // Create old flat-layout files
+        fs::write(base_dir.join("session.lock"), b"{}").unwrap();
+        fs::write(base_dir.join("buf1.meta.json"), b"{}").unwrap();
+
+        let scope = RecoveryScope::Session {
+            name: "my-session".into(),
+        };
+
+        RecoveryStorage::migrate_flat_layout(&base_dir, &scope).unwrap();
+
+        // Files should be moved to sessions/my-session/
+        let scoped_dir = base_dir.join("sessions").join("my-session");
+        assert!(scoped_dir.join("session.lock").exists());
+        assert!(scoped_dir.join("buf1.meta.json").exists());
+    }
+
+    #[test]
+    fn test_migrate_skips_when_no_flat_files() {
+        let temp_dir = TempDir::new().unwrap();
+        let base_dir = temp_dir.path().join("recovery");
+        fs::create_dir_all(&base_dir).unwrap();
+
+        // No session.lock = nothing to migrate
+        let scope = RecoveryScope::Standalone {
+            working_dir: PathBuf::from("/tmp"),
+        };
+
+        RecoveryStorage::migrate_flat_layout(&base_dir, &scope).unwrap();
+
+        // default/ should NOT have been created
+        assert!(!base_dir.join("default").exists());
+    }
+
+    #[test]
+    fn test_migrate_skips_when_already_migrated() {
+        let temp_dir = TempDir::new().unwrap();
+        let base_dir = temp_dir.path().join("recovery");
+        fs::create_dir_all(&base_dir).unwrap();
+
+        // Old flat files exist
+        fs::write(base_dir.join("session.lock"), b"{}").unwrap();
+        fs::write(base_dir.join("old.meta.json"), b"{}").unwrap();
+
+        // But new layout dirs also exist (partial migration)
+        fs::create_dir_all(base_dir.join("default")).unwrap();
+
+        let scope = RecoveryScope::Standalone {
+            working_dir: PathBuf::from("/tmp"),
+        };
+
+        RecoveryStorage::migrate_flat_layout(&base_dir, &scope).unwrap();
+
+        // Old files should still be in place (not moved again)
+        assert!(base_dir.join("session.lock").exists());
+        assert!(base_dir.join("old.meta.json").exists());
+    }
+
+    #[test]
+    fn test_with_scope_creates_correct_directory() {
+        let temp_dir = TempDir::new().unwrap();
+        let base_dir = temp_dir.path().join("recovery");
+        fs::create_dir_all(&base_dir).unwrap();
+
+        // Standalone scope
+        let scope = RecoveryScope::Standalone {
+            working_dir: PathBuf::from("/home/user/project"),
+        };
+        let storage = RecoveryStorage::with_scope(&base_dir, &scope);
+        let hash = crate::workspace::encode_path_for_filename(Path::new("/home/user/project"));
+        assert_eq!(storage.recovery_dir, base_dir.join("default").join(&hash));
+
+        // Session scope
+        let scope = RecoveryScope::Session {
+            name: "test-session".into(),
+        };
+        let storage = RecoveryStorage::with_scope(&base_dir, &scope);
+        assert_eq!(
+            storage.recovery_dir,
+            base_dir.join("sessions").join("test-session")
+        );
+    }
 }
