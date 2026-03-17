@@ -549,7 +549,21 @@ impl Editor {
                             );
                         }
                     }
-                    Ok(_) => {} // OriginalFileModified, Corrupted - skip
+                    Ok(crate::services::recovery::RecoveryResult::OriginalFileModified {
+                        original_path,
+                        ..
+                    }) => {
+                        let name = original_path
+                            .file_name()
+                            .unwrap_or_default()
+                            .to_string_lossy();
+                        tracing::warn!("{} changed on disk; unsaved changes not restored", name);
+                        self.set_status_message(format!(
+                            "{} changed on disk; unsaved changes not restored",
+                            name
+                        ));
+                    }
+                    Ok(_) => {} // Corrupted, NotFound - skip
                     Err(e) => {
                         tracing::debug!(
                             "Failed to load hot exit recovery for {:?}: {}",
@@ -779,7 +793,26 @@ impl Editor {
                                     );
                                 }
                             }
-                            Ok(_) => {} // OriginalFileModified, Corrupted - skip
+                            Ok(
+                                crate::services::recovery::RecoveryResult::OriginalFileModified {
+                                    original_path,
+                                    ..
+                                },
+                            ) => {
+                                let name = original_path
+                                    .file_name()
+                                    .unwrap_or_default()
+                                    .to_string_lossy();
+                                tracing::warn!(
+                                    "{} changed on disk; unsaved changes not restored",
+                                    name
+                                );
+                                self.set_status_message(format!(
+                                    "{} changed on disk; unsaved changes not restored",
+                                    name
+                                ));
+                            }
+                            Ok(_) => {} // Corrupted, NotFound - skip
                             Err(e) => {
                                 tracing::debug!(
                                     "Failed to load hot exit recovery for {:?}: {}",
@@ -936,6 +969,32 @@ impl Editor {
             self.buffers.remove(&id);
             self.event_logs.remove(&id);
             self.buffer_metadata.remove(&id);
+        }
+
+        // Count restored buffers (excluding hidden/virtual)
+        let restored_count = self
+            .buffers
+            .keys()
+            .filter(|id| {
+                self.buffer_metadata
+                    .get(id)
+                    .map_or(false, |m| !m.hidden_from_tabs && !m.is_virtual())
+            })
+            .count();
+        if restored_count > 0 {
+            let session_label = self
+                .session_name
+                .as_ref()
+                .map(|n| format!("session '{}'", n));
+            let msg = if let Some(label) = session_label {
+                format!("Restored {} ({} buffer(s))", label, restored_count)
+            } else {
+                format!(
+                    "Restored {} buffer(s) from previous session",
+                    restored_count
+                )
+            };
+            self.set_status_message(msg);
         }
 
         tracing::debug!(

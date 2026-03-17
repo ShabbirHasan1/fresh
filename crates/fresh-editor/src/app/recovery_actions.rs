@@ -170,10 +170,16 @@ impl Editor {
                         id,
                         original_path.display()
                     );
-                    // Delete the recovery file since it's no longer valid
-                    if let Err(e) = self.recovery_service.discard_recovery(&entry) {
-                        tracing::warn!("Failed to discard stale recovery file: {}", e);
-                    }
+                    // Keep the recovery file so the user can manually inspect it.
+                    // Show a warning so the user knows unsaved changes exist.
+                    let name = original_path
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy();
+                    self.set_status_message(format!(
+                        "{} changed on disk; unsaved changes not restored",
+                        name
+                    ));
                 }
                 Ok(RecoveryResult::Corrupted { id, reason }) => {
                     tracing::warn!("Recovery file {} corrupted: {}", id, reason);
