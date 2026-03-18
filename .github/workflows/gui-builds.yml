@@ -10,6 +10,12 @@ on:
         description: 'Version to build'
         required: true
         type: string
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to build (e.g., 0.2.14)'
+        required: true
+        type: string
 
 jobs:
   build-gui:
