@@ -21,15 +21,23 @@ async function quote_selection() : void {
   const bufText = await 
       editor.getBufferText(bufferId, startSelection, endSelection);
 
-  const success1 = editor.insertText(bufferId, startSelection, "'");
-  if (!success1) {
-    editor.setStatus("Failed to insert start quote");
+  // Important! Insertions must be done on byte boundaries. But the text
+  // may be UTF-8 character and may be multiple bytes.
+  // Assumption: a proper selection will be on UTF-8 character boundaries
+  // Therefore: 
+  //   a. instert the end quote first to avoid moving the entire string 
+  //      to the right
+  //   b. insert the start quote second which can now push the string
+  //      to the right without any problems.
+  let success = editor.insertText(bufferId, endSelection, "'");
+  if (!success) {
+    editor.setStatus("Failed to insert end quote");
     return;
   }
 
-  const success2 = editor.insertText(bufferId, endSelection+1, "'");
-  if (!success2) {
-    editor.setStatus("Failed to insert end quote");
+  success = editor.insertText(bufferId, startSelection, "'");
+  if (!success) {
+    editor.setStatus("Failed to insert start quote");
     return
   }
   const statusMessage = `Quoted: ${bufText}`;
