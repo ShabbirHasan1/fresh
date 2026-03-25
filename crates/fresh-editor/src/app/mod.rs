@@ -1024,7 +1024,7 @@ impl Editor {
     ) -> AnyhowResult<Self> {
         let grammar_registry =
             grammar_registry.unwrap_or_else(crate::primitives::grammar::GrammarRegistry::empty);
-        Self::with_options(
+        let mut editor = Self::with_options(
             config,
             width,
             height,
@@ -1035,7 +1035,11 @@ impl Editor {
             time_source,
             color_capability,
             grammar_registry,
-        )
+        )?;
+        // Tests typically have no async_bridge, so the deferred grammar build
+        // would just drain pending_grammars and early-return. Skip it entirely.
+        editor.needs_full_grammar_build = false;
+        Ok(editor)
     }
 
     /// Create a new editor with custom options
@@ -1588,7 +1592,7 @@ impl Editor {
     /// plugin grammars registered during init are included in a single build.
     fn start_background_grammar_build(
         &mut self,
-        additional: Vec<(String, std::path::PathBuf, Vec<String>)>,
+        additional: Vec<crate::primitives::grammar::GrammarSpec>,
         callback_ids: Vec<fresh_core::api::JsCallbackId>,
     ) {
         let Some(bridge) = &self.async_bridge else {
