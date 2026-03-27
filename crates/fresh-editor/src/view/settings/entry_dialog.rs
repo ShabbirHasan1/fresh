@@ -309,9 +309,11 @@ impl EntryDialogState {
         }
     }
 
-    /// Move focus to next editable item (simple sequential navigation).
+    /// Move focus to next editable item, navigating within composite controls first.
     ///
-    /// Skips read-only items. When at the last editable item, wraps to buttons.
+    /// For composite controls (Map, ObjectArray, TextList), Down first navigates
+    /// through their internal entries and [+] Add new row before moving to the
+    /// next dialog item. When at the last editable item, wraps to buttons.
     /// When on the last button, wraps back to the first editable item.
     pub fn focus_next(&mut self) {
         if self.editing_text {
@@ -327,25 +329,35 @@ impl EntryDialogState {
                     self.focus_on_buttons = false;
                     self.selected_item = self.first_editable_index;
                     self.sub_focus = None;
+                    self.init_composite_focus(true);
                 }
             }
-        } else if self.selected_item + 1 < self.items.len() {
-            self.selected_item += 1;
-            self.sub_focus = None;
         } else {
-            // Past last item, go to buttons
-            self.focus_on_buttons = true;
-            self.focused_button = 0;
+            // Try navigating within a composite control first
+            let handled = self.try_composite_focus_next();
+            if !handled {
+                // Composite is at its exit boundary (or not a composite) — advance to next item
+                if self.selected_item + 1 < self.items.len() {
+                    self.selected_item += 1;
+                    self.sub_focus = None;
+                    self.init_composite_focus(true);
+                } else {
+                    // Past last item, go to buttons
+                    self.focus_on_buttons = true;
+                    self.focused_button = 0;
+                }
+            }
         }
 
         self.update_focus_states();
         self.ensure_selected_visible(self.viewport_height);
     }
 
-    /// Move focus to previous editable item (simple sequential navigation).
+    /// Move focus to previous editable item, navigating within composite controls first.
     ///
-    /// Skips read-only items. When at the first editable item, wraps to buttons.
-    /// When on the first button, wraps back to the last editable item.
+    /// For composite controls, Up first navigates backwards through their internal
+    /// entries before moving to the previous dialog item. When at the first editable
+    /// item, wraps to buttons. When on the first button, wraps back to the last item.
     pub fn focus_prev(&mut self) {
         if self.editing_text {
             return;
@@ -360,19 +372,176 @@ impl EntryDialogState {
                     self.focus_on_buttons = false;
                     self.selected_item = self.items.len().saturating_sub(1);
                     self.sub_focus = None;
+                    self.init_composite_focus(false);
                 }
             }
-        } else if self.selected_item > self.first_editable_index {
-            self.selected_item -= 1;
-            self.sub_focus = None;
         } else {
-            // Before first editable item, go to buttons
-            self.focus_on_buttons = true;
-            self.focused_button = self.button_count().saturating_sub(1);
+            // Try navigating within a composite control first
+            let handled = self.try_composite_focus_prev();
+            if !handled {
+                // Composite is at its entry boundary (or not a composite) — go to previous item
+                if self.selected_item > self.first_editable_index {
+                    self.selected_item -= 1;
+                    self.sub_focus = None;
+                    self.init_composite_focus(false);
+                } else {
+                    // Before first editable item, go to buttons
+                    self.focus_on_buttons = true;
+                    self.focused_button = self.button_count().saturating_sub(1);
+                }
+            }
         }
 
         self.update_focus_states();
         self.ensure_selected_visible(self.viewport_height);
+    }
+
+    /// Try to navigate forward within the current composite control.
+    /// Returns true if the navigation was handled internally, false if at the exit boundary.
+    fn try_composite_focus_next(&mut self) -> bool {
+        let item = match self.items.get(self.selected_item) {
+            Some(item) => item,
+            None => return false,
+        };
+        match &item.control {
+            SettingControl::Map(state) => {
+                // Map returns bool: true = handled internally, false = at boundary
+                let at_boundary = match state.focused_entry {
+                    None => true, // On add-new → exit
+                    _ => false,
+                };
+                if at_boundary {
+                    return false;
+                }
+                if let Some(item) = self.items.get_mut(self.selected_item) {
+                    if let SettingControl::Map(state) = &mut item.control {
+                        return state.focus_next();
+                    }
+                }
+                false
+            }
+            SettingControl::ObjectArray(state) => {
+                // ObjectArray: None = on add-new → exit
+                if state.focused_index.is_none() {
+                    return false;
+                }
+                if let Some(item) = self.items.get_mut(self.selected_item) {
+                    if let SettingControl::ObjectArray(state) = &mut item.control {
+                        state.focus_next();
+                        return true;
+                    }
+                }
+                false
+            }
+            SettingControl::TextList(state) => {
+                // TextList: None = on add-new → exit
+                if state.focused_item.is_none() {
+                    return false;
+                }
+                if let Some(item) = self.items.get_mut(self.selected_item) {
+                    if let SettingControl::TextList(state) = &mut item.control {
+                        state.focus_next();
+                        return true;
+                    }
+                }
+                false
+            }
+            _ => false,
+        }
+    }
+
+    /// Try to navigate backward within the current composite control.
+    /// Returns true if the navigation was handled internally, false if at the entry boundary.
+    fn try_composite_focus_prev(&mut self) -> bool {
+        let item = match self.items.get(self.selected_item) {
+            Some(item) => item,
+            None => return false,
+        };
+        match &item.control {
+            SettingControl::Map(state) => {
+                // Map: Some(0) = at first entry → exit
+                let at_boundary = matches!(state.focused_entry, Some(0))
+                    || (state.focused_entry.is_none() && state.entries.is_empty());
+                if at_boundary {
+                    return false;
+                }
+                if let Some(item) = self.items.get_mut(self.selected_item) {
+                    if let SettingControl::Map(state) = &mut item.control {
+                        return state.focus_prev();
+                    }
+                }
+                false
+            }
+            SettingControl::ObjectArray(state) => {
+                // ObjectArray: Some(0) = at first entry → exit
+                if matches!(state.focused_index, Some(0))
+                    || (state.focused_index.is_none() && state.bindings.is_empty())
+                {
+                    return false;
+                }
+                if let Some(item) = self.items.get_mut(self.selected_item) {
+                    if let SettingControl::ObjectArray(state) = &mut item.control {
+                        state.focus_prev();
+                        return true;
+                    }
+                }
+                false
+            }
+            SettingControl::TextList(state) => {
+                // TextList: Some(0) = at first item → exit
+                if matches!(state.focused_item, Some(0))
+                    || (state.focused_item.is_none() && state.items.is_empty())
+                {
+                    return false;
+                }
+                if let Some(item) = self.items.get_mut(self.selected_item) {
+                    if let SettingControl::TextList(state) = &mut item.control {
+                        state.focus_prev();
+                        return true;
+                    }
+                }
+                false
+            }
+            _ => false,
+        }
+    }
+
+    /// Initialize a composite control's focus when entering it.
+    /// `from_above`: true = entering from the item above (start at first entry),
+    ///               false = entering from below (start at add-new / last entry).
+    fn init_composite_focus(&mut self, from_above: bool) {
+        if let Some(item) = self.items.get_mut(self.selected_item) {
+            match &mut item.control {
+                SettingControl::Map(state) => {
+                    state.init_focus(from_above);
+                }
+                SettingControl::ObjectArray(state) => {
+                    if from_above {
+                        state.focused_index = if state.bindings.is_empty() {
+                            None
+                        } else {
+                            Some(0)
+                        };
+                    } else {
+                        // Coming from below: start at add-new
+                        state.focused_index = None;
+                    }
+                }
+                SettingControl::TextList(state) => {
+                    if from_above {
+                        state.focused_item = if state.items.is_empty() {
+                            None
+                        } else {
+                            Some(0)
+                        };
+                    } else {
+                        // Coming from below: start at add-new
+                        state.focused_item = None;
+                    }
+                }
+                _ => {}
+            }
+        }
     }
 
     /// Toggle focus between items region and buttons region.
@@ -400,15 +569,9 @@ impl EntryDialogState {
         self.ensure_selected_visible(self.viewport_height);
     }
 
-    /// Initialize ObjectArray focus to first entry (when arriving from above)
+    /// Initialize composite control focus for the selected item (when dialog opens)
     fn init_object_array_focus(&mut self) {
-        if let Some(item) = self.items.get_mut(self.selected_item) {
-            if let SettingControl::ObjectArray(state) = &mut item.control {
-                if !state.bindings.is_empty() {
-                    state.focused_index = Some(0);
-                }
-            }
-        }
+        self.init_composite_focus(true);
     }
 
     /// Update focus states for all items
