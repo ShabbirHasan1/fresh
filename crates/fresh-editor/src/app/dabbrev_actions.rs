@@ -204,4 +204,79 @@ impl Editor {
     pub(crate) fn reset_dabbrev_state(&mut self) {
         self.dabbrev_state = None;
     }
+
+    /// Run the `CompletionService` (buffer-words + dabbrev providers) and
+    /// return results as `PopupListItemData` items suitable for the
+    /// completion popup. The items use icon `"w"` to visually distinguish
+    /// them from LSP results.
+    ///
+    /// Returns an empty vec if the prefix is empty or no candidates match.
+    pub(crate) fn get_buffer_completion_popup_items(
+        &mut self,
+    ) -> Vec<crate::model::event::PopupListItemData> {
+        use crate::model::event::PopupListItemData;
+        use crate::primitives::word_navigation::find_completion_word_start;
+
+        let cursor_pos = self.active_cursors().primary().position;
+        let word_start = find_completion_word_start(&self.active_state().buffer, cursor_pos);
+
+        if word_start >= cursor_pos {
+            return Vec::new();
+        }
+
+        let prefix = self
+            .active_state_mut()
+            .get_text_range(word_start, cursor_pos);
+        if prefix.is_empty() {
+            return Vec::new();
+        }
+
+        let buffer_len = self.active_state().buffer.len();
+        let is_large = self.active_state().buffer.is_large_file();
+        let scan_range = CompletionContext::compute_scan_range(cursor_pos, buffer_len, is_large);
+        let buffer_window = self.active_state().buffer.slice_bytes(scan_range.clone());
+        let word_chars_extra = self.active_state().buffer_settings.word_characters.clone();
+
+        let active_buf_id = self.active_buffer();
+        let other_buffers = self.collect_other_buffer_slices(active_buf_id);
+
+        // Get viewport bounds for proximity scoring.
+        let split_id = self.split_manager.active_split();
+        let viewport_top_byte = self
+            .split_view_states
+            .get(&split_id)
+            .map(|sv| sv.viewport.top_byte)
+            .unwrap_or(0);
+        // Estimate bottom by adding a generous window.
+        let viewport_bottom_byte = (viewport_top_byte + 8192).min(buffer_len);
+
+        let prefix_has_upper = prefix.chars().any(|c| c.is_uppercase());
+
+        let ctx = CompletionContext {
+            prefix,
+            cursor_byte: cursor_pos,
+            word_start_byte: word_start,
+            buffer_len,
+            is_large_file: is_large,
+            scan_range,
+            viewport_top_byte,
+            viewport_bottom_byte,
+            language_id: None,
+            word_chars_extra,
+            prefix_has_uppercase: prefix_has_upper,
+            other_buffers,
+        };
+
+        let candidates = self.completion_service.request(&ctx, &buffer_window);
+
+        candidates
+            .into_iter()
+            .map(|c| PopupListItemData {
+                text: c.label.clone(),
+                detail: c.detail.clone(),
+                icon: Some("w".to_string()),
+                data: c.insert_text.or(Some(c.label)),
+            })
+            .collect()
+    }
 }

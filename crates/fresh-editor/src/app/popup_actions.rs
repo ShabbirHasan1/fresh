@@ -323,14 +323,8 @@ impl Editor {
     /// Re-filter the completion popup based on current prefix.
     /// If no items match, dismiss the popup.
     fn refilter_completion_popup(&mut self) {
-        // Get stored completion items
-        let items = match &self.completion_items {
-            Some(items) if !items.is_empty() => items.clone(),
-            _ => {
-                self.hide_popup();
-                return;
-            }
-        };
+        // Get stored LSP completion items (may be empty if no LSP).
+        let lsp_items = self.completion_items.clone().unwrap_or_default();
 
         // Get current prefix
         let (word_start, cursor_pos) = {
@@ -348,11 +342,11 @@ impl Editor {
             String::new()
         };
 
-        // Filter items
-        let filtered_items: Vec<&lsp_types::CompletionItem> = if prefix.is_empty() {
-            items.iter().collect()
+        // Filter LSP items
+        let filtered_lsp: Vec<&lsp_types::CompletionItem> = if prefix.is_empty() {
+            lsp_items.iter().collect()
         } else {
-            items
+            lsp_items
                 .iter()
                 .filter(|item| {
                     item.label.to_lowercase().starts_with(&prefix)
@@ -365,8 +359,21 @@ impl Editor {
                 .collect()
         };
 
-        // If no items match, dismiss popup
-        if filtered_items.is_empty() {
+        // Build combined items: LSP first, then buffer-word results.
+        let mut all_popup_items = lsp_items_to_popup_items(&filtered_lsp);
+        let buffer_word_items = self.get_buffer_completion_popup_items();
+        let lsp_labels: std::collections::HashSet<String> = all_popup_items
+            .iter()
+            .map(|i| i.text.to_lowercase())
+            .collect();
+        all_popup_items.extend(
+            buffer_word_items
+                .into_iter()
+                .filter(|item| !lsp_labels.contains(&item.text.to_lowercase())),
+        );
+
+        // If no items match from either source, dismiss popup.
+        if all_popup_items.is_empty() {
             self.hide_popup();
             self.completion_items = None;
             return;
@@ -382,10 +389,10 @@ impl Editor {
 
         // Try to preserve selection
         let selected = current_selection
-            .and_then(|sel| filtered_items.iter().position(|item| item.label == sel))
+            .and_then(|sel| all_popup_items.iter().position(|item| item.text == sel))
             .unwrap_or(0);
 
-        let popup_data = build_completion_popup(&filtered_items, selected);
+        let popup_data = build_completion_popup_from_items(all_popup_items, selected);
 
         // Close old popup and show new one
         self.hide_popup();
@@ -408,11 +415,39 @@ pub(crate) fn build_completion_popup(
     items: &[&lsp_types::CompletionItem],
     selected: usize,
 ) -> crate::model::event::PopupData {
-    use crate::model::event::{
-        PopupContentData, PopupKindHint, PopupListItemData, PopupPositionData,
-    };
+    let lsp_items = lsp_items_to_popup_items(items);
+    build_completion_popup_from_items(lsp_items, selected)
+}
 
-    let list_items: Vec<PopupListItemData> = items
+/// Build a completion popup from a combined list of already-converted items.
+///
+/// Used when merging LSP results + buffer-word results into a single popup.
+pub(crate) fn build_completion_popup_from_items(
+    items: Vec<crate::model::event::PopupListItemData>,
+    selected: usize,
+) -> crate::model::event::PopupData {
+    use crate::model::event::{PopupContentData, PopupKindHint, PopupPositionData};
+
+    crate::model::event::PopupData {
+        kind: PopupKindHint::Completion,
+        title: None,
+        description: None,
+        transient: false,
+        content: PopupContentData::List { items, selected },
+        position: PopupPositionData::BelowCursor,
+        width: 50,
+        max_height: 15,
+        bordered: true,
+    }
+}
+
+/// Convert LSP `CompletionItem`s to `PopupListItemData`s.
+pub(crate) fn lsp_items_to_popup_items(
+    items: &[&lsp_types::CompletionItem],
+) -> Vec<crate::model::event::PopupListItemData> {
+    use crate::model::event::PopupListItemData;
+
+    items
         .iter()
         .map(|item| {
             let icon = match item.kind {
@@ -436,20 +471,5 @@ pub(crate) fn build_completion_popup(
                     .or_else(|| Some(item.label.clone())),
             }
         })
-        .collect();
-
-    crate::model::event::PopupData {
-        kind: PopupKindHint::Completion,
-        title: None,
-        description: None,
-        transient: false,
-        content: PopupContentData::List {
-            items: list_items,
-            selected,
-        },
-        position: PopupPositionData::BelowCursor,
-        width: 50,
-        max_height: 15,
-        bordered: true,
-    }
+        .collect()
 }

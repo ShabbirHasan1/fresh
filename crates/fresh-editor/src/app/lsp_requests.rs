@@ -143,7 +143,23 @@ impl Editor {
             return Ok(());
         }
 
-        let popup_data = crate::app::popup_actions::build_completion_popup(&all_filtered, 0);
+        // Build LSP popup items, then append buffer-word items below.
+        let mut all_popup_items =
+            crate::app::popup_actions::lsp_items_to_popup_items(&all_filtered);
+        let buffer_word_items = self.get_buffer_completion_popup_items();
+        // Deduplicate: skip buffer-word items whose label already appears in LSP results.
+        let lsp_labels: std::collections::HashSet<String> = all_popup_items
+            .iter()
+            .map(|i| i.text.to_lowercase())
+            .collect();
+        all_popup_items.extend(
+            buffer_word_items
+                .into_iter()
+                .filter(|item| !lsp_labels.contains(&item.text.to_lowercase())),
+        );
+
+        let popup_data =
+            crate::app::popup_actions::build_completion_popup_from_items(all_popup_items, 0);
 
         {
             let buffer_id = self.active_buffer();
@@ -560,7 +576,27 @@ impl Editor {
         if !sent_ids.is_empty() {
             self.pending_completion_requests.extend(sent_ids);
             self.lsp_status = "LSP: completion...".to_string();
+        } else {
+            // No LSP servers available — show buffer-word completions as popup.
+            self.show_buffer_word_completion_popup();
         }
+    }
+
+    /// Show a completion popup with buffer-word results only (no LSP).
+    ///
+    /// Called when no LSP servers are available for the current buffer.
+    fn show_buffer_word_completion_popup(&mut self) {
+        let items = self.get_buffer_completion_popup_items();
+        if items.is_empty() {
+            return;
+        }
+
+        let popup_data = crate::app::popup_actions::build_completion_popup_from_items(items, 0);
+
+        let buffer_id = self.active_buffer();
+        let state = self.buffers.get_mut(&buffer_id).unwrap();
+        let popup_obj = crate::state::convert_popup_data_to_popup(&popup_data);
+        state.popups.show_or_replace(popup_obj);
     }
 
     /// Check if the inserted character should trigger completion

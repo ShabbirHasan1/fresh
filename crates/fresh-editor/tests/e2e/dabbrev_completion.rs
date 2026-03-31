@@ -202,3 +202,113 @@ fn test_dabbrev_no_prefix_noop() {
     let content = harness.get_buffer_content().unwrap();
     assert_eq!(content, "hello world\n");
 }
+
+// =============================================================================
+// Popup-based buffer-word completion (no LSP)
+// =============================================================================
+
+/// Create a harness with both Alt+/ for dabbrev and Ctrl+Space for popup completion.
+fn popup_completion_harness(width: u16, height: u16) -> EditorTestHarness {
+    let mut config = Config::default();
+    // Bind Ctrl+Space to trigger completion (lsp_completion action,
+    // which falls back to buffer-word popup when no LSP is available).
+    config.keybindings.push(fresh::config::Keybinding {
+        key: " ".to_string(),
+        modifiers: vec!["ctrl".to_string()],
+        keys: vec![],
+        action: "lsp_completion".to_string(),
+        args: std::collections::HashMap::new(),
+        when: None,
+    });
+    EditorTestHarness::create(width, height, HarnessOptions::new().with_config(config)).unwrap()
+}
+
+/// Trigger Ctrl+Space to request completion.
+fn send_ctrl_space(harness: &mut EditorTestHarness) {
+    harness
+        .send_key(KeyCode::Char(' '), KeyModifiers::CONTROL)
+        .unwrap();
+    harness.render().unwrap();
+}
+
+/// When no LSP is active, Ctrl+Space should show a popup with buffer-word results.
+#[test]
+fn test_popup_buffer_words_without_lsp() {
+    let mut harness = popup_completion_harness(80, 24);
+
+    harness.type_text("calculate_difference\n").unwrap();
+    harness.type_text("calculate_sum\n").unwrap();
+    harness.type_text("calc").unwrap();
+    harness.render().unwrap();
+
+    // Trigger completion — no LSP, should fall back to buffer words.
+    send_ctrl_space(&mut harness);
+
+    // Popup should be visible.
+    assert!(
+        harness.editor().active_state().popups.is_visible(),
+        "Completion popup should be visible without LSP"
+    );
+
+    // Verify the screen shows buffer-word candidates.
+    let screen = harness.screen_to_string();
+    assert!(
+        screen.contains("calculate_sum") || screen.contains("calculate_difference"),
+        "Popup should show buffer-word completions, screen:\n{}",
+        screen
+    );
+}
+
+/// Accepting a buffer-word popup item replaces the prefix.
+#[test]
+fn test_popup_buffer_word_accept() {
+    let mut harness = popup_completion_harness(80, 24);
+
+    harness.type_text("alpha_one\nalpha_two\nalph").unwrap();
+    harness.render().unwrap();
+
+    // Trigger completion popup.
+    send_ctrl_space(&mut harness);
+    assert!(harness.editor().active_state().popups.is_visible());
+
+    // Accept the first item with Enter.
+    harness
+        .send_key(KeyCode::Enter, KeyModifiers::NONE)
+        .unwrap();
+    harness.render().unwrap();
+
+    // Popup should close.
+    assert!(!harness.editor().active_state().popups.is_visible());
+
+    // Buffer should have the accepted word.
+    let content = harness.get_buffer_content().unwrap();
+    assert!(
+        content.ends_with("alpha_two") || content.ends_with("alpha_one"),
+        "Accepted completion should replace prefix, got: {}",
+        content
+    );
+}
+
+/// Escape closes the buffer-word popup without changing the buffer.
+#[test]
+fn test_popup_buffer_word_dismiss() {
+    let mut harness = popup_completion_harness(80, 24);
+
+    harness.type_text("beta_one\nbeta_two\nbet").unwrap();
+    harness.render().unwrap();
+
+    send_ctrl_space(&mut harness);
+    assert!(harness.editor().active_state().popups.is_visible());
+
+    // Press Escape to dismiss.
+    harness.send_key(KeyCode::Esc, KeyModifiers::NONE).unwrap();
+    harness.render().unwrap();
+
+    assert!(!harness.editor().active_state().popups.is_visible());
+    let content = harness.get_buffer_content().unwrap();
+    assert!(
+        content.ends_with("bet"),
+        "Buffer should be unchanged after dismiss, got: {}",
+        content
+    );
+}
