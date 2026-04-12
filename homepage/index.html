@@ -3,9 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Fresh - The Terminal Text Editor</title>
-    <meta name="description" content="Fresh is a fast, modern terminal text editor with intuitive keybindings, syntax highlighting, and instant startup.">
+    <title>Fresh - The Terminal IDE</title>
+    <meta name="description" content="Fresh is a terminal IDE. One static binary, instant startup, broad LSP coverage, magit-style diff review, project-wide search, huge-file editing, SSH remote editing, and TypeScript plugins.">
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext x='12' y='70' font-family='monospace' font-size='60' font-weight='bold' fill='%23222'%3E%3E_%3C/text%3E%3C/svg%3E">
+    <link rel="stylesheet" href="public/vendor/asciinema-player/asciinema-player.css">
     <style>
         :root {
             --bg-dark: #0a0a0a;
@@ -32,11 +33,20 @@
             scroll-behavior: smooth;
         }
 
+        /* Three-size typography system:
+             H1 display — clamp(2.5rem, 6vw, 4rem)   ≈ 40–64 px
+             H2 / hero claim — 1.875rem               = 30 px
+             Everything else — 1rem                   = 16 px
+
+           Almost no other font-size declarations in this file; most
+           elements inherit the body 1rem. Weight, case and color
+           carry hierarchy within tier 3 (e.g. uppercase card labels).
+        */
         body {
             background-color: var(--bg-dark);
             color: var(--text-light);
             font-family: var(--font-mono);
-            font-size: 15px;
+            font-size: 1rem;
             line-height: 1.6;
             overflow-x: hidden;
         }
@@ -74,7 +84,6 @@
         }
 
         .nav-logo {
-            font-size: 1.25rem;
             font-weight: 700;
             color: var(--accent-green);
             display: flex;
@@ -85,7 +94,6 @@
         .nav-logo span {
             color: var(--text-muted);
             font-weight: 400;
-            font-size: 0.85rem;
         }
 
         .nav-links {
@@ -96,7 +104,6 @@
 
         .nav-links a {
             color: var(--text-muted);
-            font-size: 0.9rem;
         }
 
         .nav-links a:hover {
@@ -112,7 +119,6 @@
             padding: 8px 16px;
             border-radius: 6px;
             color: var(--text-light);
-            font-size: 0.85rem;
         }
 
         .btn-github:hover {
@@ -184,7 +190,6 @@
             padding: 12px 16px;
             border-radius: 6px;
             color: var(--text-light);
-            font-size: 0.9rem;
             transition: background 0.2s;
         }
 
@@ -210,7 +215,8 @@
         }
 
         .hero h1 {
-            font-size: clamp(2.5rem, 8vw, 5rem);
+            /* Tier 1: display. Only used by the "Fresh" title. */
+            font-size: clamp(2.5rem, 6vw, 4rem);
             font-weight: 700;
             color: var(--accent-green);
             margin-bottom: 16px;
@@ -247,6 +253,218 @@
             content: '>';
             color: var(--accent-green);
             font-weight: bold;
+        }
+
+        /* Loud hero claim — tier 2 heading. */
+        .hero-claim {
+            font-size: 1.875rem;
+            color: var(--text-light);
+            font-weight: 600;
+            margin: 0 auto 8px;
+            max-width: 780px;
+            line-height: 1.35;
+            letter-spacing: -0.01em;
+        }
+
+        .hero-claim-sub {
+            display: inline-block;
+            margin-top: 6px;
+            color: var(--text-muted);
+            font-size: 0.85em;
+            font-weight: 400;
+        }
+
+        /* Hero feature list — flat inline items separated by a
+           middle-dot. Reads quieter than rounded pills, fits the
+           dev-tool aesthetic. */
+        .feature-pills {
+            list-style: none;
+            display: block;
+            padding: 0;
+            margin: 32px auto 48px;
+            max-width: 900px;
+            color: var(--text-muted);
+            line-height: 1.8;
+            text-align: center;
+        }
+
+        .feature-pills li {
+            display: inline;
+            white-space: nowrap;
+            transition: color 0.15s ease;
+        }
+
+        .feature-pills li:hover {
+            color: var(--text-light);
+        }
+
+        /* Dot separator between adjacent list items. Wraps with the
+           following item so we never get an orphan dot starting a line. */
+        .feature-pills li + li::before {
+            content: ' · ';
+            color: var(--border-color);
+            margin: 0 6px;
+            white-space: normal;
+        }
+
+        /* The trailing "and more!" link is an inviting affordance to
+           the full feature list at the bottom of the page. */
+        .feature-pills .feature-pill-more a {
+            color: var(--accent-green);
+            text-decoration: underline;
+            text-decoration-color: rgba(16, 185, 129, 0.35);
+            text-underline-offset: 3px;
+            transition: text-decoration-color 0.15s ease;
+        }
+
+        .feature-pills .feature-pill-more a:hover {
+            text-decoration-color: var(--accent-green);
+        }
+
+        /* Show the first six benefit-led items plus the trailing
+           "and more!" link. The rest stay in the DOM (for screen
+           readers and SEO) but are not rendered. */
+        .feature-pills li:nth-child(n+7):not(.feature-pill-more) {
+            display: none;
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            .rotator-track {
+                transition: none !important;
+            }
+            .rotator-item {
+                transition: none !important;
+            }
+        }
+
+        /* Single install pill with OS tabs */
+        .install-single {
+            width: 100%;
+            max-width: 720px;
+            margin: 0 auto;
+        }
+
+        .install-tabs {
+            display: flex;
+            gap: 4px;
+            margin-bottom: 8px;
+        }
+
+        .install-tab {
+            background: transparent;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            color: var(--text-muted);
+            font-family: inherit;
+            padding: 6px 14px;
+            cursor: pointer;
+            transition: border-color 0.15s, color 0.15s, background 0.15s;
+        }
+
+        .install-tab:hover {
+            color: var(--text-light);
+            border-color: #333;
+        }
+
+        .install-tab.active {
+            color: var(--accent-green);
+            border-color: var(--accent-green);
+            background: rgba(16, 185, 129, 0.08);
+        }
+
+        .install-pill {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 8px 12px;
+            cursor: pointer;
+            transition: border-color 0.15s;
+            position: relative;
+        }
+
+        .install-pill:hover {
+            border-color: #333;
+        }
+
+        .install-pill.primary {
+            border-color: var(--border-color);
+        }
+
+        .install-pill code {
+            flex: 1;
+            color: var(--accent-green);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            padding: 4px 4px 4px 8px;
+        }
+
+        .install-pill .copied-popup {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: var(--accent-green);
+            color: var(--bg-dark);
+            padding: 4px 12px;
+            border-radius: 4px;
+            font-weight: 600;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.15s;
+            z-index: 5;
+        }
+
+        .install-pill .copied-popup.show {
+            opacity: 1;
+        }
+
+        /* Install pill + "More installation methods" sit on one row so
+           the curl command and the alternate-install link stay visually
+           connected. The pill can shrink, the link stays at its natural
+           width; on narrow screens the link wraps below. */
+        .install-row {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .install-row .install-pill {
+            /* flex-basis: 260px is the preferred width — below that the
+               row wraps and the "More options…" link drops to a new
+               line rather than squeezing the command into unreadable
+               ellipsis. min-width: 0 is still needed so text-overflow
+               on the code can kick in when the pill is narrower than
+               its intrinsic content width (long curl URL). */
+            flex: 1 1 260px;
+            min-width: 0;
+            max-width: 520px;
+        }
+
+        .install-row-label {
+            color: var(--text-light);
+            font-weight: 600;
+            white-space: nowrap;
+            flex-shrink: 0;
+        }
+
+        .install-more-link {
+            color: var(--accent-green);
+            white-space: nowrap;
+            text-decoration: underline;
+            text-decoration-color: rgba(16, 185, 129, 0.35);
+            text-underline-offset: 3px;
+            flex-shrink: 0;
+        }
+
+        .install-more-link:hover {
+            color: var(--text-light);
+            text-decoration-color: var(--accent-green);
         }
 
         /* Download Buttons */
@@ -414,6 +632,29 @@
             cursor: zoom-in;
         }
 
+        /* Asciinema-player host — fills the hero window frame. */
+        .asciinema-host {
+            width: 100%;
+            background: var(--bg-darker);
+            display: block;
+        }
+        .asciinema-host .ap-wrapper,
+        .asciinema-host .ap-player {
+            background: var(--bg-darker) !important;
+            border: none !important;
+        }
+        .asciinema-host .ap-term {
+            padding: 8px !important;
+        }
+        /* Keep the player muted — no control bar chrome in the hero. */
+        .asciinema-host .ap-control-bar {
+            display: none !important;
+        }
+        .asciinema-host img {
+            width: 100%;
+            display: block;
+        }
+
         .screenshot-glow {
             position: absolute;
             inset: 0;
@@ -483,7 +724,7 @@
         }
 
         .feature-content h2 {
-            font-size: 1.75rem;
+            font-size: 1.875rem;
             color: var(--text-light);
             margin-bottom: 16px;
             display: flex;
@@ -501,8 +742,7 @@
 
         .feature-content p {
             color: var(--text-muted);
-            font-size: 1rem;
-            line-height: 1.8;
+            line-height: 1.75;
             margin-bottom: 20px;
         }
 
@@ -512,16 +752,24 @@
 
         .feature-list li {
             color: var(--text-muted);
-            padding: 8px 0;
-            display: flex;
-            align-items: center;
-            gap: 10px;
+            padding: 8px 0 8px 22px;
+            position: relative;
+            line-height: 1.65;
         }
 
+        /* The "> " marker is absolutely positioned so that inline
+           children of the <li> (text, <code> spans, punctuation) can
+           flow naturally. When display: flex was here, every inline
+           child became a flex item and text wrapped one-word-per-line
+           at the container boundary. */
         .feature-list li::before {
             content: '>';
             color: var(--accent-green);
             font-weight: bold;
+            position: absolute;
+            left: 0;
+            top: 8px;
+            line-height: 1.65;
         }
 
         .feature-visual {
@@ -579,7 +827,6 @@
 
         .feature-code {
             padding: 24px;
-            font-size: 0.85rem;
             line-height: 1.7;
         }
 
@@ -609,9 +856,15 @@
 
         .install-section h2 {
             text-align: center;
-            font-size: 2rem;
+            font-size: 1.875rem;
             margin-bottom: 48px;
             color: var(--text-light);
+        }
+
+        .install-even-more {
+            font-weight: 400;
+            text-decoration: underline;
+            text-underline-offset: 4px;
         }
 
         .install-grid {
@@ -634,7 +887,6 @@
 
         .install-card h3 {
             color: var(--text-light);
-            font-size: 1rem;
             margin-bottom: 12px;
             display: flex;
             align-items: center;
@@ -661,7 +913,6 @@
             flex: 1;
             padding: 8px 12px;
             color: var(--accent-green);
-            font-size: 0.85rem;
             overflow-x: auto;
             white-space: nowrap;
         }
@@ -698,12 +949,56 @@
 
         .install-card-note {
             color: var(--text-muted);
-            font-size: 0.8rem;
             margin-top: 12px;
         }
 
         .install-card-note a {
             color: var(--accent-green);
+        }
+
+        /* Full feature list — dense, comma-separated vibe,
+           no cards, no boxes. */
+        .feature-list-section {
+            padding: 60px 24px;
+            max-width: 1100px;
+            margin: 0 auto;
+        }
+
+        .feature-list-section h2 {
+            text-align: center;
+            font-size: 1.875rem;
+            margin-bottom: 48px;
+            color: var(--text-light);
+        }
+
+        .full-feature-list {
+            list-style: none;
+            padding: 0;
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 8px 20px;
+            color: var(--text-muted);
+            line-height: 1.7;
+        }
+
+        .full-feature-list li {
+            position: relative;
+            padding-left: 16px;
+        }
+
+        .full-feature-list li::before {
+            content: '>';
+            color: var(--accent-green);
+            font-weight: 700;
+            position: absolute;
+            left: 0;
+            top: 0;
+        }
+
+        .full-feature-list code {
+            color: var(--accent-green);
+            white-space: nowrap;
         }
 
         /* All Features Grid */
@@ -715,7 +1010,7 @@
 
         .all-features h2 {
             text-align: center;
-            font-size: 2rem;
+            font-size: 1.875rem;
             margin-bottom: 48px;
         }
 
@@ -734,7 +1029,6 @@
 
         .feature-card h3 {
             color: var(--accent-green);
-            font-size: 0.9rem;
             margin-bottom: 12px;
             text-transform: uppercase;
             letter-spacing: 0.05em;
@@ -742,8 +1036,7 @@
 
         .feature-card p {
             color: var(--text-muted);
-            font-size: 0.9rem;
-            line-height: 1.6;
+            line-height: 1.65;
         }
 
         /* Footer */
@@ -762,12 +1055,10 @@
 
         .footer-links a {
             color: var(--text-muted);
-            font-size: 0.9rem;
         }
 
         .footer-credit {
             color: var(--text-muted);
-            font-size: 0.85rem;
         }
 
         /* Testimonials */
@@ -779,7 +1070,7 @@
 
         .testimonials h2 {
             text-align: center;
-            font-size: 2rem;
+            font-size: 1.875rem;
             margin-bottom: 48px;
             color: var(--text-light);
         }
@@ -799,7 +1090,6 @@
 
         .testimonial-quote {
             color: var(--text-light);
-            font-size: 1rem;
             line-height: 1.7;
             font-style: italic;
         }
@@ -807,7 +1097,6 @@
         .testimonial-quote::before {
             content: '"';
             color: var(--accent-green);
-            font-size: 1.5rem;
             font-style: normal;
             margin-right: 4px;
         }
@@ -815,7 +1104,6 @@
         .testimonial-quote::after {
             content: '"';
             color: var(--accent-green);
-            font-size: 1.5rem;
             font-style: normal;
             margin-left: 4px;
         }
@@ -861,10 +1149,6 @@
                 gap: 16px 24px;
             }
 
-            .footer-links a {
-                font-size: 0.85rem;
-            }
-
             .feature-section {
                 grid-template-columns: 1fr;
                 gap: 40px;
@@ -880,67 +1164,10 @@
                 justify-content: flex-start;
             }
 
-            .hero h1 {
-                font-size: 2rem;
-                margin-bottom: 8px;
-            }
-
-            .hero-tagline {
-                font-size: 0.9rem;
-                margin-bottom: 16px;
-            }
-
-            .hero-features {
-                flex-direction: column;
-                gap: 8px;
-                margin-bottom: 20px;
-            }
-
-            .hero-feature {
-                font-size: 0.85rem;
-            }
-
             .hero-content {
                 margin-bottom: 16px;
                 width: 100%;
                 max-width: 100%;
-            }
-
-            .btn-download {
-                padding: 10px 20px;
-                font-size: 0.9rem;
-            }
-
-            .quick-install-row {
-                flex-direction: column;
-                gap: 8px;
-                width: 100%;
-                align-items: center;
-            }
-
-            .desktop-only {
-                display: none;
-            }
-
-            .mobile-only {
-                display: inline;
-            }
-
-            .quick-install-label,
-            .quick-install-cmd.copyable code,
-            .install-more-link {
-                font-size: 1rem;
-            }
-
-            .quick-install-cmd.copyable {
-                width: 100%;
-                max-width: 100%;
-                box-sizing: border-box;
-            }
-
-            .quick-install-cmd.copyable code {
-                overflow-x: auto !important;
-                text-overflow: ellipsis;
             }
 
             .download-section {
@@ -948,9 +1175,22 @@
                 max-width: 100%;
             }
 
-            .quick-install {
-                width: 100%;
+            .install-single {
                 max-width: 100%;
+            }
+
+            .install-tabs {
+                justify-content: center;
+            }
+
+            .hero-claim {
+                padding: 0 8px;
+            }
+
+            .feature-pills {
+                margin: 20px auto 24px;
+                padding: 0 8px;
+                gap: 6px;
             }
         }
 
@@ -1022,28 +1262,43 @@
     <section class="hero">
         <div class="hero-content">
             <h1>Fresh</h1>
-            <p class="hero-tagline">A terminal text editor you can just use.</p>
+            <p class="hero-claim">A powerful terminal text editor and IDE.</p>
 
-            <div class="hero-features">
-                <span class="hero-feature">Open source</span>
-                <span class="hero-feature">Easy to learn</span>
-                <span class="hero-feature">Blazing fast</span>
-                <span class="hero-feature">IDE features</span>
-                <span class="hero-feature">Built-in terminal</span>
-            </div>
+            <ul class="feature-pills">
+                <li>Intuitive keys &amp; mouse</li>
+                <li>Fast &amp; light</li>
+                <li>Huge files</li>
+                <li>Themes</li>
+                <li>TypeScript plugins</li>
+                <li>Open source</li>
+                <li>Multi-cursor</li>
+                <li>Keyboard macros</li>
+                <li>LSP</li>
+                <li>Magit-style git review</li>
+                <li>Fuzzy file finder</li>
+                <li>Project-wide grep</li>
+                <li>SSH remote editing</li>
+                <li>Vim mode</li>
+                <li class="feature-pill-more"><a href="#full-features">and more!</a></li>
+            </ul>
 
             <div class="download-section">
-                <div class="quick-install">
-                    <div class="quick-install-row">
-                        <span class="quick-install-label"><span class="desktop-only">Install:</span><span class="mobile-only">Run on desktop:</span></span>
-                        <div class="copyable quick-install-cmd" onclick="copyQuickInstall()">
-                            <code id="install-cmd-display">curl .../install.sh | sh</code>
-                            <button class="copy-btn" onclick="event.stopPropagation(); copyQuickInstall()">
-                                <img src="public/copy-icon.svg" alt="Copy">
+                <div class="install-single">
+                    <div class="install-tabs" role="tablist">
+                        <button type="button" class="install-tab active" data-os="linux" onclick="selectInstallOS('linux')">Linux</button>
+                        <button type="button" class="install-tab" data-os="mac" onclick="selectInstallOS('mac')">macOS</button>
+                        <button type="button" class="install-tab" data-os="windows" onclick="selectInstallOS('windows')">Windows</button>
+                    </div>
+                    <div class="install-row">
+                        <span class="install-row-label">Install:</span>
+                        <div class="install-pill primary" id="install-pill" onclick="copyInstallPill(this)">
+                            <code id="install-cmd">curl https://raw.githubusercontent.com/sinelaw/fresh/refs/heads/master/scripts/install.sh | sh</code>
+                            <button class="copy-btn" onclick="event.stopPropagation(); copyInstallPill(document.getElementById('install-pill'))" aria-label="Copy install command">
+                                <img src="public/copy-icon.svg" alt="">
                             </button>
-                            <span class="copied-popup" id="copied-popup">Copied!</span>
+                            <span class="copied-popup">Copied</span>
                         </div>
-                        <a href="#install" class="install-more-link">More options →</a>
+                        <a href="#install" class="install-more-link">More options…</a>
                     </div>
                 </div>
             </div>
@@ -1056,7 +1311,9 @@
                         <span></span><span></span><span></span>
                     </div>
                 </div>
-                <a href="public/assets/hero.png" target="_blank"><img src="public/assets/hero.png" alt="Fresh terminal text editor showing file explorer, syntax-highlighted code, and integrated terminal"></a>
+                <div id="demo-player" class="asciinema-host">
+                    <a href="public/assets/hero.png" target="_blank"><img src="public/assets/hero.png" alt="Fresh editor showing file explorer, syntax-highlighted code, and integrated terminal" id="demo-fallback"></a>
+                </div>
                 <div class="screenshot-glow"></div>
             </div>
         </div>
@@ -1066,108 +1323,69 @@
     <section class="features" id="features">
         <div class="feature-section">
             <div class="feature-content">
-                <h2>Intuitive by Design</h2>
-                <p>Fresh is built for discovery. Unlike traditional terminal editors, Fresh uses familiar keybindings that work the way you expect. Full mouse support, menus, and a graphical settings editor make it easy to get started.</p>
+                <h2>Fast &amp; light</h2>
+                <p>Instant startup. Text appears as you type. Small memory footprint. Stays responsive on multi-GB files and remote editing over SSH.</p>
                 <ul class="feature-list">
-                    <li>Standard keybindings (Ctrl+S, Ctrl+Z, Ctrl+F)</li>
-                    <li>Full mouse support with selections</li>
-                    <li>Menu bar and command palette</li>
-                    <li>Graphical settings UI (no config files needed)</li>
+                    <li>Instant startup, low-latency input</li>
+                    <li>Low memory footprint</li>
+                    <li>Multi-GB files open without blocking the UI</li>
+                    <li>SSH remote editing transfers only the diff — small edits to huge remote files stay snappy</li>
+                    <li>Project-wide search &amp; replace, even across unsaved buffers</li>
                 </ul>
             </div>
             <div class="feature-visual">
                 <div class="feature-visual-dots">
                     <span></span><span></span><span></span>
                 </div>
-                <a href="public/assets/palette.png" target="_blank"><img src="public/assets/palette.png" alt="Command palette showing available commands"></a>
+                <a href="public/assets/multicursor.png" target="_blank"><img src="public/assets/multicursor.png" alt="Multi-cursor editing in a large file"></a>
             </div>
         </div>
 
         <div class="feature-section">
             <div class="feature-content">
-                <h2>Zero-Latency Performance</h2>
-                <p>Fresh is engineered for speed. Text appears instantly as you type. Open and edit multi-gigabyte files without breaking a sweat.</p>
+                <h2>Git review &amp; diff</h2>
+                <p>Split-panel review with staged / unstaged / untracked files on the left and the selected diff on the right. Stage, unstage or discard individual hunks; leave line comments and session notes; export to Markdown. Side-by-side diff view for file comparisons.</p>
                 <ul class="feature-list">
-                    <li>Low input latency</li>
-                    <li>Handles files up to 10GB+</li>
-                    <li>Memory-efficient architecture</li>
-                    <li>Instant startup time</li>
+                    <li>Hunk-level stage / unstage / discard</li>
+                    <li>Side-by-side diff view</li>
+                    <li>Line comments and session notes</li>
+                    <li>Git gutter, git log viewer, git grep</li>
                 </ul>
             </div>
             <div class="feature-visual">
                 <div class="feature-visual-dots">
                     <span></span><span></span><span></span>
                 </div>
-                <a href="public/assets/multicursor.png" target="_blank"><img src="public/assets/multicursor.png" alt="Multi-cursor editing in action"></a>
+                <a href="public/assets/gitlog.png" target="_blank"><img src="public/assets/gitlog.png" alt="Git log view in Fresh"></a>
             </div>
         </div>
 
         <div class="feature-section">
             <div class="feature-content">
                 <h2>Language Server Protocol</h2>
-                <p>LSP support brings IDE-like features to the terminal. Get go to definition, real-time diagnostics, hover documentation, and more.</p>
+                <p>Run multiple LSP servers per language (for example pylsp + pyright) with feature routing and merged completions. Per-project workspace roots detected from configurable markers like <code style="color: var(--accent-green);">Cargo.toml</code> or <code style="color: var(--accent-green);">package.json</code>.</p>
                 <ul class="feature-list">
-                    <li>Go to definition / references</li>
-                    <li>Inline diagnostics and quick fixes</li>
-                    <li>Hover documentation</li>
-                    <li>Semantic highlighting</li>
-                    <li>Format on save with default formatters</li>
+                    <li>Configs shipped for Python, TypeScript, Rust, Go, Java, C/C++, Ruby, PHP, Bash, Vue, Svelte, Terraform, Haskell, OCaml, Elixir and many more</li>
+                    <li>Goto, references and hover in library paths (<code style="color: var(--accent-green);">node_modules</code>, <code style="color: var(--accent-green);">site-packages</code>, <code style="color: var(--accent-green);">.cargo</code>)</li>
+                    <li>Code actions with workspace edits</li>
                 </ul>
             </div>
             <div class="feature-visual">
                 <div class="feature-visual-dots">
                     <span></span><span></span><span></span>
                 </div>
-                <a href="public/assets/fresh-lsp-hover.png" target="_blank"><img src="public/assets/fresh-lsp-hover.png" alt="LSP hover showing function documentation"></a>
+                <a href="public/assets/fresh-lsp-hover.png" target="_blank"><img src="public/assets/fresh-lsp-hover.png" alt="LSP hover documentation"></a>
             </div>
         </div>
 
         <div class="feature-section">
             <div class="feature-content">
-                <h2>TypeScript Extensibility</h2>
-                <p>Extend Fresh easily using modern tools. Plugins are written in TypeScript and run in a sandboxed QuickJS environment with OXC for fast TypeScript compilation, providing a lightweight and secure plugin system.</p>
+                <h2>Detachable sessions</h2>
+                <p>Start a named session, detach and reattach across terminal disconnects. The <code style="color: var(--accent-green);">--wait</code> flag blocks until the buffer is closed, which lets Fresh serve as <code style="color: var(--accent-green);">git core.editor</code> or <code style="color: var(--accent-green);">$EDITOR</code>. Hot Exit persists every buffer across restarts and crashes.</p>
                 <ul class="feature-list">
-                    <li>Manipulate buffers, splits, and text</li>
-                    <li>Spawn processes and access filesystem</li>
-                    <li>Create virtual buffers and overlays</li>
-                    <li>Define custom keybinding modes</li>
-                </ul>
-            </div>
-            <div class="feature-visual">
-                <div class="feature-visual-dots">
-                    <span></span><span></span><span></span>
-                </div>
-                <a href="public/assets/gitlog.png" target="_blank"><img src="public/assets/gitlog.png" alt="Git log plugin showing commit history"></a>
-            </div>
-        </div>
-
-        <div class="feature-section">
-            <div class="feature-content">
-                <h2>Themes & Internationalization</h2>
-                <p>Make Fresh yours with customizable themes and interface translations. Choose from built-in themes or create your own with the visual theme editor. The interface is available in 11+ languages.</p>
-                <ul class="feature-list">
-                    <li>High contrast default, plus dark, light, and more</li>
-                    <li>Built-in theme editor for customization</li>
-                    <li>11+ languages including CJK support</li>
-                    <li>Plugin translations supported</li>
-                </ul>
-            </div>
-            <div class="feature-visual">
-                <div class="feature-visual-dots">
-                    <span></span><span></span><span></span>
-                </div>
-                <a href="public/assets/fresh-i18nlight.png" target="_blank"><img src="public/assets/fresh-i18nlight.png" alt="Fresh with Japanese interface and light theme"></a>
-            </div>
-        </div>
-
-        <div class="feature-section">
-            <div class="feature-content">
-                <h2>Session Persistence</h2>
-                <p>Detach and reattach to sessions that survive terminal disconnections and restarts. Open files in a running session from other apps like file managers or scripts.</p>
-                <ul class="feature-list">
-                    <li>Detach and reattach with <code style="color: var(--accent-green);">fresh -a</code></li>
-                    <li>Manage sessions from the CLI</li>
-                    <li>Open files in a running session from other apps</li>
+                    <li>Named and directory-based sessions (<code style="color: var(--accent-green);">fresh -a myproject</code>)</li>
+                    <li><code style="color: var(--accent-green);">--wait</code> for commit messages, rebases and scripted flows</li>
+                    <li>Hot Exit with crash recovery, including unnamed scratch buffers</li>
                 </ul>
             </div>
             <div class="feature-visual">
@@ -1175,15 +1393,96 @@
                     <span></span><span></span><span></span>
                 </div>
                 <div class="feature-code">
-                    <span class="code-line"><span class="code-comment"># Start a named session</span></span>
+                    <span class="code-line"><span class="code-comment"># Use Fresh as your git editor</span></span>
+                    <span class="code-line"><span class="code-function">git</span> <span class="code-string">config --global core.editor "fresh --wait"</span></span>
+                    <span class="code-line"></span>
+                    <span class="code-line"><span class="code-comment"># Attach a persistent session</span></span>
                     <span class="code-line"><span class="code-function">fresh</span> <span class="code-string">-a myproject</span></span>
                     <span class="code-line"></span>
-                    <span class="code-line"><span class="code-comment"># List active sessions</span></span>
-                    <span class="code-line"><span class="code-function">fresh</span> <span class="code-string">--cmd session list</span></span>
-                    <span class="code-line"></span>
-                    <span class="code-line"><span class="code-comment"># Open a file in a running session</span></span>
-                    <span class="code-line"><span class="code-function">fresh</span> <span class="code-string">--cmd session open-file myproject src/main.rs</span></span>
+                    <span class="code-line"><span class="code-comment"># Open a file in the running session</span></span>
+                    <span class="code-line"><span class="code-function">fresh</span> <span class="code-string">--cmd session open-file myproject src/main.rs:42</span></span>
                 </div>
+            </div>
+        </div>
+
+        <div class="feature-section">
+            <div class="feature-content">
+                <h2>SSH remote editing</h2>
+                <p>Open files on an SSH host with <code style="color: var(--accent-green);">fresh user@host:path</code>. Connections reconnect in the background if they drop. Saves to large files transfer only the patch, not the whole file.</p>
+                <ul class="feature-list">
+                    <li>Password and key authentication, sudo save</li>
+                    <li>Remote file finder (Ctrl+P) and remote grep</li>
+                    <li>Background reconnect with disconnected-state indicator</li>
+                </ul>
+            </div>
+            <div class="feature-visual">
+                <div class="feature-visual-dots">
+                    <span></span><span></span><span></span>
+                </div>
+                <div class="feature-code">
+                    <span class="code-line"><span class="code-comment"># Open /etc/nginx/nginx.conf on prod</span></span>
+                    <span class="code-line"><span class="code-function">fresh</span> <span class="code-string">deploy@prod:/etc/nginx/nginx.conf</span></span>
+                    <span class="code-line"></span>
+                    <span class="code-line"><span class="code-comment"># Ctrl+P fuzzy-finds remote files</span></span>
+                    <span class="code-line"><span class="code-comment"># Save over SSH with sudo</span></span>
+                    <span class="code-line"><span class="code-comment"># Auto-reconnects on drops</span></span>
+                </div>
+            </div>
+        </div>
+
+        <div class="feature-section">
+            <div class="feature-content">
+                <h2>TypeScript plugins</h2>
+                <p>Plugins are compiled with OXC and run in an embedded QuickJS VM, sandboxed and shipped inside the same binary. No <code style="color: var(--accent-green);">node_modules</code> on disk. Packages are installed from the official registry; language packs bundle a grammar, settings and LSP config together.</p>
+                <ul class="feature-list">
+                    <li>Plugin API for buffers, splits, cursors, processes, virtual buffers and overlays</li>
+                    <li>Custom keybinding modes and embedded terminals</li>
+                    <li>Package scaffolding with <code style="color: var(--accent-green);">--init</code></li>
+                </ul>
+            </div>
+            <div class="feature-visual">
+                <div class="feature-visual-dots">
+                    <span></span><span></span><span></span>
+                </div>
+                <a href="public/assets/palette.png" target="_blank"><img src="public/assets/palette.png" alt="Command palette"></a>
+            </div>
+        </div>
+
+        <div class="feature-section">
+            <div class="feature-content">
+                <h2>Themes, status bar &amp; i18n</h2>
+                <p>Both sides of the status bar are configurable via a visual picker, with reorderable elements including a <code style="color: var(--accent-green);">{clock}</code>, git branch and LSP status. Themes are edited live. The interface is translated into several languages including Japanese, Korean, Chinese and Vietnamese.</p>
+                <ul class="feature-list">
+                    <li>Live theme editor with "Inspect Theme at Cursor"</li>
+                    <li>Built-in themes: high-contrast, Gruvbox, Dracula, Nord, Solarized, Tokyo Night and more</li>
+                    <li>Vertical rulers, whitespace indicators, rainbow brackets, per-language wrap</li>
+                    <li>Nerd-font icons and CJK-safe rendering</li>
+                </ul>
+            </div>
+            <div class="feature-visual">
+                <div class="feature-visual-dots">
+                    <span></span><span></span><span></span>
+                </div>
+                <a href="public/assets/fresh-i18nlight.png" target="_blank"><img src="public/assets/fresh-i18nlight.png" alt="Fresh with Japanese UI and light theme"></a>
+            </div>
+        </div>
+
+        <div class="feature-section">
+            <div class="feature-content">
+                <h2>Keyboard &amp; editing</h2>
+                <p>Command palette with prefix routing (<code style="color: var(--accent-green);">&gt;</code> commands, <code style="color: var(--accent-green);">#</code> buffers, <code style="color: var(--accent-green);">:</code> lines). Keybinding editor with conflict detection and per-context bindings. Full mouse support.</p>
+                <ul class="feature-list">
+                    <li>Vim mode with operators, motions, text objects and colon commands</li>
+                    <li>Multi-cursor, block selection, surround, smart home and smart backspace</li>
+                    <li>Keyboard macros and regex find &amp; replace with capture groups</li>
+                    <li>Integrated terminal with session-persistent scrollback</li>
+                </ul>
+            </div>
+            <div class="feature-visual">
+                <div class="feature-visual-dots">
+                    <span></span><span></span><span></span>
+                </div>
+                <a href="public/assets/hero.png" target="_blank"><img src="public/assets/hero.png" alt="Fresh editor with file explorer and integrated terminal"></a>
             </div>
         </div>
     </section>
@@ -1191,62 +1490,24 @@
     <!-- Installation Section -->
     <section class="install-section" id="install">
         <div class="install-container">
-            <h2>Installation <a href="https://github.com/sinelaw/fresh?tab=readme-ov-file#installation" target="_blank" style="font-size: 0.6em; font-weight: 400; text-decoration: underline; text-underline-offset: 4px;">even more options →</a></h2>
+            <h2>Installation <a href="https://github.com/sinelaw/fresh?tab=readme-ov-file#installation" target="_blank" class="install-even-more">even more options →</a></h2>
             <div class="install-grid">
+                <div class="install-card">
+                    <h3>Linux / macOS (quick install)</h3>
+                    <div class="copyable">
+                        <code id="cmd-curl">curl https://raw.githubusercontent.com/sinelaw/fresh/refs/heads/master/scripts/install.sh | sh</code>
+                        <button class="copy-btn" onclick="copyCode('cmd-curl', this)">
+                            <img src="public/copy-icon.svg" alt="Copy">
+                        </button>
+                    </div>
+                    <p class="install-card-note">One-line install. No toolchain required.</p>
+                </div>
+
                 <div class="install-card">
                     <h3>macOS (Homebrew)</h3>
                     <div class="copyable">
-                        <code id="cmd-brew">brew tap sinelaw/fresh && brew install fresh-editor</code>
+                        <code id="cmd-brew">brew install sinelaw/fresh/fresh-editor</code>
                         <button class="copy-btn" onclick="copyCode('cmd-brew', this)">
-                            <img src="public/copy-icon.svg" alt="Copy">
-                        </button>
-                    </div>
-                </div>
-
-                <div class="install-card">
-                    <h3>Arch Linux (AUR)</h3>
-                    <div class="copyable">
-                        <code id="cmd-aur">yay -S fresh-editor</code>
-                        <button class="copy-btn" onclick="copyCode('cmd-aur', this)">
-                            <img src="public/copy-icon.svg" alt="Copy">
-                        </button>
-                    </div>
-                    <p class="install-card-note">
-                        <a href="https://aur.archlinux.org/packages/fresh-editor" target="_blank">View on AUR</a>
-                    </p>
-                </div>
-
-                <div class="install-card">
-                    <h3>npm</h3>
-                    <div class="copyable">
-                        <code id="cmd-npm">npm install -g @fresh-editor/fresh-editor</code>
-                        <button class="copy-btn" onclick="copyCode('cmd-npm', this)">
-                            <img src="public/copy-icon.svg" alt="Copy">
-                        </button>
-                    </div>
-                    <p class="install-card-note">
-                        Or try it: <code style="color: var(--accent-green); font-size: 0.85rem;">npx @fresh-editor/fresh-editor</code>
-                    </p>
-                </div>
-
-                <div class="install-card">
-                    <h3>Cargo</h3>
-                    <div class="copyable">
-                        <code id="cmd-cargo">cargo install --locked fresh-editor</code>
-                        <button class="copy-btn" onclick="copyCode('cmd-cargo', this)">
-                            <img src="public/copy-icon.svg" alt="Copy">
-                        </button>
-                    </div>
-                </div>
-
-                <div class="install-card">
-                    <h3>Debian / Ubuntu</h3>
-                    <p class="install-card-note">
-                        <a href="https://github.com/sinelaw/fresh/releases" target="_blank">Download .deb from releases</a>
-                    </p>
-                    <div class="copyable">
-                        <code id="cmd-deb">sudo dpkg -i fresh-editor_*.deb</code>
-                        <button class="copy-btn" onclick="copyCode('cmd-deb', this)">
                             <img src="public/copy-icon.svg" alt="Copy">
                         </button>
                     </div>
@@ -1263,82 +1524,125 @@
                 </div>
 
                 <div class="install-card">
+                    <h3>Debian / Ubuntu</h3>
+                    <p class="install-card-note" style="margin-top: 0;">
+                        <a href="https://github.com/sinelaw/fresh/releases" target="_blank">Grab the <code style="color: var(--accent-green);">.deb</code> from Releases</a>, then:
+                    </p>
+                    <div class="copyable">
+                        <code id="cmd-deb">sudo dpkg -i fresh-editor_*.deb</code>
+                        <button class="copy-btn" onclick="copyCode('cmd-deb', this)">
+                            <img src="public/copy-icon.svg" alt="Copy">
+                        </button>
+                    </div>
+                </div>
+
+                <div class="install-card">
+                    <h3>Arch Linux (AUR)</h3>
+                    <div class="copyable">
+                        <code id="cmd-aur">yay -S fresh-editor</code>
+                        <button class="copy-btn" onclick="copyCode('cmd-aur', this)">
+                            <img src="public/copy-icon.svg" alt="Copy">
+                        </button>
+                    </div>
+                    <p class="install-card-note">
+                        <a href="https://aur.archlinux.org/packages/fresh-editor" target="_blank">View on AUR</a> — aarch64 supported.
+                    </p>
+                </div>
+
+                <div class="install-card">
+                    <h3>npm / npx (no install)</h3>
+                    <div class="copyable">
+                        <code id="cmd-npx">npx @fresh-editor/fresh-editor</code>
+                        <button class="copy-btn" onclick="copyCode('cmd-npx', this)">
+                            <img src="public/copy-icon.svg" alt="Copy">
+                        </button>
+                    </div>
+                    <p class="install-card-note">
+                        Or global: <code style="color: var(--accent-green);">npm install -g @fresh-editor/fresh-editor</code>
+                    </p>
+                </div>
+
+                <div class="install-card">
                     <h3>Pre-built Binaries</h3>
                     <p class="install-card-note" style="margin-top: 0;">
-                        Download pre-built binaries for Linux, macOS, and Windows from
-                        <a href="https://github.com/sinelaw/fresh/releases" target="_blank">GitHub Releases</a>
+                        Linux, macOS, Windows, FreeBSD binaries on
+                        <a href="https://github.com/sinelaw/fresh/releases" target="_blank">GitHub Releases</a>. Drop anywhere on <code style="color: var(--accent-green);">$PATH</code>.
                     </p>
+                </div>
+
+                <div class="install-card">
+                    <h3>From source (Cargo)</h3>
+                    <div class="copyable">
+                        <code id="cmd-cargo">cargo install --locked fresh-editor</code>
+                        <button class="copy-btn" onclick="copyCode('cmd-cargo', this)">
+                            <img src="public/copy-icon.svg" alt="Copy">
+                        </button>
+                    </div>
+                    <p class="install-card-note">If you already have a Rust toolchain.</p>
                 </div>
             </div>
         </div>
     </section>
 
-    <!-- All Features -->
-    <section class="all-features">
-        <h2>Everything You Need</h2>
-        <div class="features-grid">
-            <div class="feature-card">
-                <h3>File Management</h3>
-                <p>Open, save, new, close files. Built-in file explorer with git status indicators, tabs, auto-revert, fuzzy file finder, and text encoding support (UTF-16, Latin-1, and more).</p>
-            </div>
-            <div class="feature-card">
-                <h3>Editing</h3>
-                <p>Undo/redo, multi-cursor editing, block selection, smart indentation, comment toggling, and system clipboard support.</p>
-            </div>
-            <div class="feature-card">
-                <h3>Search & Replace</h3>
-                <p>Incremental search, find in selection, query replace with regex support, and live grep with ripgrep integration.</p>
-            </div>
-            <div class="feature-card">
-                <h3>Navigation</h3>
-                <p>Go to line, bracket matching, word movement, position history, bookmarks, and error navigation.</p>
-            </div>
-            <div class="feature-card">
-                <h3>Views & Layout</h3>
-                <p>Split panes, line numbers, word wrap, custom backgrounds, built-in markdown preview, and side-by-side diff view.</p>
-            </div>
-            <div class="feature-card">
-                <h3>Integrated Terminal</h3>
-                <p>Full terminal emulator with keyboard capture mode, scrollback history, and session persistence across restarts.</p>
-            </div>
-            <div class="feature-card">
-                <h3>Vi Mode</h3>
-                <p>Vim-style modal editing with normal/insert/visual modes, operators, motions, text objects, and colon commands.</p>
-            </div>
-            <div class="feature-card">
-                <h3>Themes & i18n</h3>
-                <p>Built-in theme editor for customization, multiple built-in themes, and interface translations in 11+ languages.</p>
-            </div>
-            <div class="feature-card">
-                <h3>Session & Recovery</h3>
-                <p>Auto-saves open files, splits, and cursor positions. Recovers unsaved changes from crashes automatically.</p>
-            </div>
-            <div class="feature-card">
-                <h3>Git Integration</h3>
-                <p>Git gutter showing added/modified/deleted lines, git log viewer, git grep search, and file status indicators.</p>
-            </div>
-            <div class="feature-card">
-                <h3>Settings UI</h3>
-                <p>Graphical settings editor and keybinding editor with search, conflict detection, and mouse support. No config file editing required.</p>
-            </div>
-            <div class="feature-card">
-                <h3>Package Manager</h3>
-                <p>Browse, install, and uninstall plugins, themes, and language packs from the official registry. Scaffold new packages with --init.</p>
-            </div>
-            <div class="feature-card">
-                <h3>Remote Editing</h3>
-                <p>Edit files on remote machines via SSH. Supports password/key auth, sudo save, and file explorer integration.</p>
-            </div>
-            <div class="feature-card">
-                <h3>Productivity</h3>
-                <p>Command palette, menu bar, keyboard macros, diagnostics panel, and copy with syntax highlighting.</p>
-            </div>
-        </div>
+    <!-- Full feature list -->
+    <section class="feature-list-section" id="full-features">
+        <h2>Full feature list</h2>
+        <ul class="full-feature-list">
+            <li>Multi-GB file support</li>
+            <li>Intuitive out of the box</li>
+            <li>No config file fiddling required</li>
+            <li>Standard keybindings (Ctrl+S, Ctrl+Z, Ctrl+F)</li>
+            <li>Full mouse support</li>
+            <li>Menu bar and command palette</li>
+            <li>Fuzzy file finder (Ctrl+P)</li>
+            <li>Project-wide grep (live, via ripgrep)</li>
+            <li>Project-wide search &amp; replace</li>
+            <li>File explorer with git status</li>
+            <li>Tabs and split panes</li>
+            <li>Side-by-side diff view</li>
+            <li>Markdown preview (compose mode)</li>
+            <li>Multi-cursor &amp; block selection</li>
+            <li>Keyboard macros</li>
+            <li>Regex find &amp; replace with capture groups</li>
+            <li>Auto-close brackets &amp; quotes (per-language)</li>
+            <li>Smart home, smart backspace dedent, surround</li>
+            <li>Auto-indent &amp; auto-dedent (tree-sitter)</li>
+            <li>Code folding (LSP + indent-based)</li>
+            <li>Magit-style git diff review</li>
+            <li>Git gutter, git log viewer, git grep</li>
+            <li>LSP configs shipped for many languages</li>
+            <li>Multi-LSP per language</li>
+            <li>Goto / hover / references in library paths</li>
+            <li>Code actions with workspace edits</li>
+            <li>Format-on-save</li>
+            <li>SSH remote editing</li>
+            <li>Detachable sessions (<code>fresh -a</code>)</li>
+            <li><code>--wait</code> for <code>git core.editor</code> / <code>$EDITOR</code></li>
+            <li>Hot Exit with crash recovery</li>
+            <li>Integrated terminal (mouse forwarding, scrollback)</li>
+            <li>Vim mode</li>
+            <li>TypeScript plugins (QuickJS + OXC)</li>
+            <li>Package manager for plugins, themes, languages</li>
+            <li>Scaffold new packages with <code>--init</code></li>
+            <li>Live-preview theme editor</li>
+            <li>Built-in themes: Gruvbox, Dracula, Nord, Tokyo Night…</li>
+            <li>Vertical rulers, whitespace indicators</li>
+            <li>Customizable status bar with <code>{clock}</code> element</li>
+            <li>Internationalization (Japanese, Korean, Chinese, Vietnamese…)</li>
+            <li>Many text encodings (UTF-16, GBK, Shift-JIS, Latin-1…)</li>
+            <li>Read-only mode for library &amp; toolchain paths</li>
+            <li>Settings UI with deep search</li>
+            <li>Keybinding editor with conflict detection</li>
+            <li>Single static binary, no runtime</li>
+            <li>Packaging: Homebrew, AUR, winget, apt, Flatpak, AppImage, cargo</li>
+            <li>Linux, macOS, Windows, FreeBSD</li>
+            <li>Open source (GPL-2.0)</li>
+        </ul>
     </section>
 
     <!-- Testimonials -->
     <section class="testimonials">
-        <h2>What People Are Saying</h2>
+        <h2>User feedback</h2>
         <div class="testimonials-grid">
             <div class="testimonial">
                 <p class="testimonial-quote">Out of the box this is the best new TUI editor I've tried, probably ever.</p>
@@ -1393,19 +1697,10 @@
             });
         }
 
-        const installCommands = {
-            linux: {
-                display: 'curl .../install.sh | sh',
-                full: 'curl https://raw.githubusercontent.com/sinelaw/fresh/refs/heads/master/scripts/install.sh | sh'
-            },
-            mac: {
-                display: 'brew install sinelaw/fresh/fresh-editor',
-                full: 'brew install sinelaw/fresh/fresh-editor'
-            },
-            windows: {
-                display: 'winget install fresh-editor',
-                full: 'winget install fresh-editor'
-            }
+        const INSTALL_COMMANDS = {
+            linux: 'curl https://raw.githubusercontent.com/sinelaw/fresh/refs/heads/master/scripts/install.sh | sh',
+            mac: 'brew install sinelaw/fresh/fresh-editor',
+            windows: 'winget install fresh-editor'
         };
 
         function detectOS() {
@@ -1416,27 +1711,32 @@
             return 'linux';
         }
 
-        const detectedOS = detectOS();
-
-        function updateInstallCommand() {
-            const cmd = installCommands[detectedOS];
-            const display = document.getElementById('install-cmd-display');
-            if (display && cmd) {
-                display.textContent = cmd.display;
-            }
-        }
-
-        function copyQuickInstall() {
-            const cmd = installCommands[detectedOS];
-            navigator.clipboard.writeText(cmd.full).then(() => {
-                const popup = document.getElementById('copied-popup');
-                popup.classList.add('show');
-                setTimeout(() => popup.classList.remove('show'), 1500);
+        function selectInstallOS(os) {
+            const cmd = INSTALL_COMMANDS[os];
+            if (!cmd) return;
+            const code = document.getElementById('install-cmd');
+            if (code) code.textContent = cmd;
+            document.querySelectorAll('.install-tab').forEach(t => {
+                t.classList.toggle('active', t.dataset.os === os);
             });
         }
 
-        // Update command on page load
-        updateInstallCommand();
+        // Preselect the visitor's OS. Linux is the static default
+        // (curl | sh is a no-prereq one-liner), so the page renders
+        // correctly before JS runs.
+        selectInstallOS(detectOS());
+
+        function copyInstallPill(el) {
+            const code = el.querySelector('code');
+            const popup = el.querySelector('.copied-popup');
+            if (!code) return;
+            navigator.clipboard.writeText(code.textContent).then(() => {
+                if (popup) {
+                    popup.classList.add('show');
+                    setTimeout(() => popup.classList.remove('show'), 1500);
+                }
+            });
+        }
 
         // Smooth scroll for anchor links
         document.querySelectorAll('a[href^="#"]').forEach(anchor => {
@@ -1466,6 +1766,35 @@
                 // Hide version badge if fetch fails (e.g., CORS, rate limiting)
                 document.getElementById('version-badge').style.display = 'none';
             });
+    </script>
+
+    <!-- Asciinema player: recorded demo of Fresh. Loads async; keeps the
+         static hero PNG if the bundle or cast fail to load. -->
+    <script src="public/vendor/asciinema-player/asciinema-player.min.js"></script>
+    <script>
+        (function () {
+            if (typeof AsciinemaPlayer === 'undefined') return;
+            const host = document.getElementById('demo-player');
+            if (!host) return;
+            const fallback = document.getElementById('demo-fallback');
+            try {
+                host.textContent = '';
+                AsciinemaPlayer.create('public/fresh-demo.cast', host, {
+                    autoPlay: true,
+                    loop: true,
+                    preload: true,
+                    idleTimeLimit: 1.5,
+                    speed: 1.25,
+                    cols: 110,
+                    rows: 30,
+                    controls: false,
+                    fit: 'width',
+                    theme: 'asciinema'
+                });
+            } catch (err) {
+                if (fallback) host.appendChild(fallback);
+            }
+        })();
     </script>
 
     <!-- Cloudflare Web Analytics (sinelaw.github.io/fresh) -->
