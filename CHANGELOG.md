@@ -1,10 +1,22 @@
 # Release Notes
 
-## Unreleased
+## 0.2.24
 
 ### Improvements
 
-* **Preview Tabs in File Explorer**: Single-clicking a file in the explorer now opens it in an ephemeral "preview" tab that is replaced by the next single-click instead of accumulating tabs (#1403). The preview tab is rendered in italic with a translated `(preview)` suffix. It is promoted to a permanent tab automatically when the user edits the buffer, double-clicks or presses Enter on the file in the explorer, clicks the tab itself, or performs a layout action (split, move tab, close split, focus a different pane). At most one preview tab exists editor-wide, and it's anchored to the split it was opened in — moving focus to another pane commits the previous preview. Enabled by default; disable via `"file_explorer": {"preview_tabs": false}` if you prefer the old behavior.
+* **Preview Tabs in File Explorer**: Single-clicking a file in the explorer now opens it in an ephemeral "preview" tab that is replaced by the next single-click instead of accumulating tabs (#1403). Preview tabs are promoted to a permanent tab when the user edits the buffer, double-clicks or presses Enter on the file in the explorer, clicks the tab itself, or performs a layout action (split, move tab, close split, focus a different pane). At most one preview tab exists editor-wide, and it's anchored to the split it was opened in — moving focus to another pane commits the previous preview. **Config:** enabled by default; disable via Settings UI (File Explorer -> Preview Tabs or use search).
+
+* **LSP Status Bar Indicator**: Redesigned to a stable-width `LSP (on/off/error)` status indicator with a spinner while a server is starting or working — no more status bar noise as progress messages arrive. Configured-but-dormant servers are now visible as `LSP (off)` so you can see at a glance that an LSP is available to start. Clicking opens a popup with per-server status and live progress under the server name.
+
+* **Diagnostics in Hover Popup**: When the cursor sits on a symbol that also carries an error, warning, or hint, the hover popup prepends the overlapping diagnostic (severity and source like `rustc`/`clippy`/`clangd`) above the hover body.
+
+* **C++ Header Detection**: Added heuristics to assign an `.h` files the C++ rather than C language. You can change it manually by clicking on the language in the status bar.
+
+* **Review Diff**: Clicking a file in the files panel now selects it (previously clicks were ignored), and keyboard navigation auto-scrolls the files panel to keep the selected entry visible.
+
+### Bug Fixes
+
+* Fixed LSP workspace diagnostic refresh and inlay-hint refresh occasionally pulling from buffers of the wrong language (e.g. asking the Rust server about `package.json`, producing `file not found` errors).
 
 ## 0.2.23
 
