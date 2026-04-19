@@ -940,9 +940,7 @@ pub enum PluginCommand {
     /// reset the next time the caller (or anyone else) invokes
     /// `applyTheme`, because that replaces the whole `Theme` from the
     /// registry.
-    OverrideThemeColors {
-        overrides: HashMap<String, [u8; 3]>,
-    },
+    OverrideThemeColors { overrides: HashMap<String, [u8; 3]> },
 
     /// Reload configuration from file
     /// After a plugin saves config changes, it should call this to reload the config

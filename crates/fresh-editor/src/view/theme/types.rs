@@ -1717,7 +1717,10 @@ mod tests {
             ("garbage_no_dot".to_string(), Color::Rgb(9, 9, 9)),
         ]);
         assert_eq!(applied, 2, "only the two valid keys should be applied");
-        assert_eq!(theme.resolve_theme_key("editor.bg"), Some(Color::Rgb(10, 20, 30)));
+        assert_eq!(
+            theme.resolve_theme_key("editor.bg"),
+            Some(Color::Rgb(10, 20, 30))
+        );
         assert_eq!(
             theme.resolve_theme_key("ui.status_bar_fg"),
             Some(Color::Rgb(1, 2, 3))

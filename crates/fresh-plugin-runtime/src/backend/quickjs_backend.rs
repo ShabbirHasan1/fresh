@@ -1999,9 +1999,8 @@ impl JsEditorApi {
         // sequence value" and fails). Round-trip through serde_json::Value
         // instead — same pattern as `set_setting` — and hand-roll the
         // triple validation.
-        let json: serde_json::Value = rquickjs_serde::from_value(overrides).map_err(|e| {
-            rquickjs::Error::new_from_js_message("deserialize", "", &e.to_string())
-        })?;
+        let json: serde_json::Value = rquickjs_serde::from_value(overrides)
+            .map_err(|e| rquickjs::Error::new_from_js_message("deserialize", "", &e.to_string()))?;
         let Some(obj) = json.as_object() else {
             return Err(rquickjs::Error::new_from_js_message(
                 "type",
