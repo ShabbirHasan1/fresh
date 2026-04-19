@@ -1272,13 +1272,6 @@ static COMMAND_DEFS: &[CommandDef] = &[
         custom_contexts: &[],
     },
     CommandDef {
-        name_key: "cmd.init_revert",
-        desc_key: "cmd.init_revert_desc",
-        action: || Action::InitRevert,
-        contexts: &[Normal],
-        custom_contexts: &[],
-    },
-    CommandDef {
         name_key: "cmd.init_edit",
         desc_key: "cmd.init_edit_desc",
         action: || Action::InitEdit,

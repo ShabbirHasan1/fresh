@@ -477,8 +477,6 @@
   "cmd.load_plugin_from_buffer_desc": "現在のバッファをプラグインとして読み込む",
   "cmd.init_reload": "init: init.ts を再読み込み",
   "cmd.init_reload_desc": "プラグインパイプライン経由で ~/.config/fresh/init.ts を再読み込みする",
-  "cmd.init_revert": "init: init.ts を元に戻す",
-  "cmd.init_revert_desc": "init.ts をアンロードして、次の再読み込みまでその効果を消す",
   "cmd.init_edit": "init: init.ts を編集",
   "cmd.init_edit_desc": "~/.config/fresh/init.ts を開く（存在しない場合はテンプレートから作成）",
   "cmd.init_check": "init: init.ts を確認",

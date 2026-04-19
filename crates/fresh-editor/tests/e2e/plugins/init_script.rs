@@ -409,46 +409,6 @@ fn init_check_action_reports_an_error_on_a_broken_file() {
 }
 
 #[test]
-fn init_revert_unloads_plugin_but_settings_persist() {
-    // Revert unloads the init.ts plugin (commands, handlers, events gone)
-    // but setSetting writes persist — fire-and-forget, consistent with
-    // the Neovim/VS Code/Emacs model.
-    use fresh::input::keybindings::Action;
-
-    let (mut harness, _tmp, config_dir) = harness_with_scratch_config_dir();
-    let original_tab_size = harness.editor().config_for_tests().editor.tab_size as u64;
-    let overridden = if original_tab_size == 7 { 3 } else { 7 };
-
-    write_init_ts(
-        &config_dir,
-        &format!(
-            r#"
-            const editor = getEditor();
-            editor.setSetting("editor.tab_size", {overridden});
-            "#
-        ),
-    );
-    harness.editor_mut().load_init_script(true);
-    harness.editor_mut().process_async_messages();
-    assert_eq!(
-        harness.editor().config_for_tests().editor.tab_size as u64,
-        overridden
-    );
-
-    // Revert — plugin is unloaded, but setting writes are fire-and-forget.
-    harness
-        .editor_mut()
-        .dispatch_action_for_tests(Action::InitRevert);
-    harness.editor_mut().process_async_messages();
-
-    assert_eq!(
-        harness.editor().config_for_tests().editor.tab_size as u64,
-        overridden,
-        "fire-and-forget: setSetting writes survive init: Revert"
-    );
-}
-
-#[test]
 fn init_ts_is_loaded_as_a_plugin_named_init_ts() {
     let (mut harness, _tmp, config_dir) = harness_with_scratch_config_dir();
 

@@ -477,8 +477,6 @@
   "cmd.load_plugin_from_buffer_desc": "Tải buffer hiện tại như một plugin",
   "cmd.init_reload": "init: Tải lại init.ts",
   "cmd.init_reload_desc": "Tải lại ~/.config/fresh/init.ts qua pipeline plugin",
-  "cmd.init_revert": "init: Hoàn tác init.ts",
-  "cmd.init_revert_desc": "Gỡ tải init.ts để các hiệu ứng biến mất cho đến lần tải lại tiếp theo",
   "cmd.init_edit": "init: Chỉnh sửa init.ts",
   "cmd.init_edit_desc": "Mở ~/.config/fresh/init.ts (tạo từ mẫu nếu chưa có)",
   "cmd.init_check": "init: Kiểm tra init.ts",

@@ -477,8 +477,6 @@
   "cmd.load_plugin_from_buffer_desc": "Carica il buffer corrente come plugin",
   "cmd.init_reload": "init: Ricarica init.ts",
   "cmd.init_reload_desc": "Ricarica ~/.config/fresh/init.ts tramite la pipeline dei plugin",
-  "cmd.init_revert": "init: Ripristina init.ts",
-  "cmd.init_revert_desc": "Scarica init.ts in modo che i suoi effetti scompaiano fino al prossimo ricaricamento",
   "cmd.init_edit": "init: Modifica init.ts",
   "cmd.init_edit_desc": "Apri ~/.config/fresh/init.ts (crea dal template se mancante)",
   "cmd.init_check": "init: Controlla init.ts",

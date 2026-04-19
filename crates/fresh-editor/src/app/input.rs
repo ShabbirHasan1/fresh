@@ -1276,34 +1276,6 @@ impl Editor {
                     ));
                 }
             }
-            Action::InitRevert => {
-                // Unload init.ts — drops its commands, handlers, events,
-                // and exported APIs. setSetting writes persist (fire-and-
-                // forget, same as every other editor).
-                #[cfg(feature = "plugins")]
-                {
-                    let name = crate::init_script::INIT_PLUGIN_NAME;
-                    match self.plugin_manager.unload_plugin(name) {
-                        Ok(()) => {
-                            self.set_status_message(
-                                "init.ts reverted — state is as if it had never run".into(),
-                            );
-                        }
-                        Err(e) => {
-                            // Not having an init.ts loaded is the common case
-                            // and should read as a no-op, not an error.
-                            tracing::debug!("init: revert: {e}");
-                            self.set_status_message("init.ts is not currently loaded".into());
-                        }
-                    }
-                }
-                #[cfg(not(feature = "plugins"))]
-                {
-                    self.set_status_message(
-                        "Plugins not available (compiled without plugin support)".into(),
-                    );
-                }
-            }
             Action::OpenTerminal => {
                 self.open_terminal();
             }

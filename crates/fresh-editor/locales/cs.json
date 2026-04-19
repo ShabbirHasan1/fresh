@@ -477,8 +477,6 @@
   "cmd.load_plugin_from_buffer_desc": "Načíst aktuální buffer jako plugin",
   "cmd.init_reload": "init: Znovu načíst init.ts",
   "cmd.init_reload_desc": "Znovu načíst ~/.config/fresh/init.ts přes plugin pipeline",
-  "cmd.init_revert": "init: Vrátit init.ts",
-  "cmd.init_revert_desc": "Uvolnit init.ts, aby jeho efekty zmizely do dalšího načtení",
   "cmd.init_edit": "init: Upravit init.ts",
   "cmd.init_edit_desc": "Otevřít ~/.config/fresh/init.ts (vytvoří ze šablony, pokud chybí)",
   "cmd.init_check": "init: Zkontrolovat init.ts",

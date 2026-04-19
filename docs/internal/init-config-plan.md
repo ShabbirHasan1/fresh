@@ -42,9 +42,6 @@ last write wins; writes persist until overwritten or editor restart.
 
 - `init: Reload` — re-runs init.ts via hot-reload; fires
   `plugins_loaded` afterwards.
-- `init: Revert` — unloads init.ts plugin (commands, handlers,
-  events, APIs gone; setSetting writes persist per fire-and-forget
-  model).
 
 ### M5 — Check command & FRESH_INTERACTIVE
 

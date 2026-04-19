@@ -44,7 +44,7 @@ const editor = getEditor();
 //   - Can't live in a shared config.json without lying to teammates
 //
 // API reference: ~/.config/fresh/types/fresh.d.ts (same as plugins)
-// Commands:  Ctrl+P -> "init: Reload", "init: Revert", "init: Check"
+// Commands:  Ctrl+P -> "init: Reload", "init: Check"
 // CLI:       fresh --cmd init check | fresh --safe | fresh --no-init
 
 // Example: apply a theme from terminal colour detection.

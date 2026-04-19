@@ -477,8 +477,6 @@
   "cmd.load_plugin_from_buffer_desc": "โหลดบัฟเฟอร์ปัจจุบันเป็นปลั๊กอิน",
   "cmd.init_reload": "init: โหลด init.ts ใหม่",
   "cmd.init_reload_desc": "โหลด ~/.config/fresh/init.ts ใหม่ผ่าน plugin pipeline",
-  "cmd.init_revert": "init: ย้อนคืน init.ts",
-  "cmd.init_revert_desc": "ยกเลิกการโหลด init.ts เพื่อให้ผลกระทบหายไปจนกว่าจะโหลดใหม่",
   "cmd.init_edit": "init: แก้ไข init.ts",
   "cmd.init_edit_desc": "เปิด ~/.config/fresh/init.ts (สร้างจากเทมเพลตหากไม่มี)",
   "cmd.init_check": "init: ตรวจสอบ init.ts",

@@ -3073,7 +3073,6 @@ pub fn action_to_events(
         | Action::EventDebug
         | Action::LoadPluginFromBuffer
         | Action::InitReload
-        | Action::InitRevert
         | Action::InitEdit
         | Action::InitCheck
         | Action::OpenKeybindingEditor
