@@ -1304,6 +1304,115 @@ fn test_settings_file_explorer_width_shows_percent_suffix() {
     harness.assert_screen_contains("30%");
 }
 
+/// Changing File Explorer Width through the Settings UI must take effect
+/// immediately — the running editor's rendered explorer panel resizes without
+/// a restart. Pre-fix, the Settings save path updated `config.file_explorer
+/// .width` but left `self.file_explorer_width` stale, so the change appeared
+/// to be silently ignored until next launch (and was then clobbered by the
+/// workspace's saved width anyway — so effectively never).
+#[test]
+fn test_settings_file_explorer_width_applies_live() {
+    use fresh::config::ExplorerWidth;
+    let mut harness = EditorTestHarness::new(100, 40).unwrap();
+
+    // Open the file explorer at the default 30% width so it's actually
+    // rendered and measurable before we touch settings.
+    harness
+        .send_key(KeyCode::Char('e'), KeyModifiers::CONTROL)
+        .unwrap();
+    harness.wait_for_file_explorer().unwrap();
+    harness.render().unwrap();
+    assert!(harness.editor().file_explorer_visible());
+
+    // Sanity: on a 100-col terminal, 30% = 30 cols.
+    let before = find_settings_explorer_border_col(&harness) + 1;
+    assert_eq!(
+        before, 30,
+        "baseline: default 30% should render 30 cols on a 100-col terminal"
+    );
+
+    harness.open_settings().unwrap();
+
+    // Navigate to File Explorer category (see
+    // `test_settings_file_explorer_width_shows_percent_suffix` for the same
+    // navigation pattern).
+    for _ in 0..4 {
+        harness.send_key(KeyCode::Down, KeyModifiers::NONE).unwrap();
+    }
+    harness.send_key(KeyCode::Tab, KeyModifiers::NONE).unwrap();
+    for _ in 0..5 {
+        harness.send_key(KeyCode::Down, KeyModifiers::NONE).unwrap();
+    }
+    harness.render().unwrap();
+    harness.assert_screen_contains("Width");
+
+    // Enter editing mode on the Width field, type the columns form "24",
+    // confirm, then save settings with Ctrl+S. The text input arms
+    // replace-on-type when editing starts, so the first printable key
+    // clears "30%" automatically — no separate select-all is needed.
+    harness
+        .send_key(KeyCode::Enter, KeyModifiers::NONE)
+        .unwrap();
+    for c in "24".chars() {
+        harness
+            .send_key(KeyCode::Char(c), KeyModifiers::NONE)
+            .unwrap();
+    }
+    harness
+        .send_key(KeyCode::Enter, KeyModifiers::NONE)
+        .unwrap();
+    harness
+        .send_key(KeyCode::Char('s'), KeyModifiers::CONTROL)
+        .unwrap();
+    harness.render().unwrap();
+
+    assert!(
+        !harness.editor().is_settings_open(),
+        "Ctrl+S should close the settings dialog after saving"
+    );
+
+    // The config record must now reflect the new value…
+    assert_eq!(
+        harness.config().file_explorer.width,
+        ExplorerWidth::Columns(24),
+        "Settings save path must write Columns(24) to config"
+    );
+
+    // …and the rendered explorer panel must reflect it too — live, without a
+    // restart.
+    let after = find_settings_explorer_border_col(&harness) + 1;
+    assert_eq!(
+        after, 24,
+        "explorer panel should re-render at 24 columns immediately after saving settings.\nScreen:\n{}",
+        harness.screen_to_string()
+    );
+}
+
+/// Helper: find the right border column of the file explorer on screen.
+/// (Local copy so this test file doesn't depend on `file_explorer.rs`.)
+fn find_settings_explorer_border_col(harness: &EditorTestHarness) -> u16 {
+    for row in 0..40u16 {
+        let text = harness.get_row_text(row);
+        for (i, ch) in text.chars().enumerate() {
+            if ch == '┐' {
+                return i as u16;
+            }
+        }
+    }
+    for row in (0..40u16).rev() {
+        let text = harness.get_row_text(row);
+        for (i, ch) in text.chars().enumerate() {
+            if ch == '┘' {
+                return i as u16;
+            }
+        }
+    }
+    panic!(
+        "Could not find file explorer border on screen.\nScreen:\n{}",
+        harness.screen_to_string()
+    );
+}
+
 /// Test number input editing mode - enter editing, type value, confirm
 #[test]
 fn test_number_input_enter_editing_mode() {

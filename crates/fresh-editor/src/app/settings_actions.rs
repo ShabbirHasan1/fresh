@@ -167,6 +167,11 @@ impl Editor {
         self.status_bar_visible = self.config.editor.show_status_bar;
         self.prompt_line_visible = self.config.editor.show_prompt_line;
 
+        // Re-sync the cached file-explorer width from config so a Settings UI
+        // change resizes the panel without a restart. (Drag updates the cache
+        // directly; config edits only update `self.config`.)
+        self.file_explorer_width = self.config.file_explorer.width;
+
         // On Windows, switch mouse tracking mode when mouse_hover_enabled changes.
         // Mode 1003 (all motion) is used for hover; mode 1002 (cell motion) otherwise.
         #[cfg(windows)]
