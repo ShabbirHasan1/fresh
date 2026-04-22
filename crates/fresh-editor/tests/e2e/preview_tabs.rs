@@ -359,3 +359,91 @@ fn preview_tab_renders_with_translated_suffix() {
         "rendered tab bar should contain the translated preview suffix; got:\n{row}"
     );
 }
+
+/// Keyboard up/down navigation in the file explorer should follow the
+/// same single-click semantics: the selected file opens in preview mode
+/// and subsequent arrow presses replace it (issue #1570).
+#[test]
+fn keyboard_navigation_previews_selected_file() {
+    let mut harness = setup_with_explorer(&["alpha.txt", "beta.txt"]);
+
+    // Selection starts on the root. Down moves to the first child.
+    harness
+        .send_key(KeyCode::Down, KeyModifiers::empty())
+        .unwrap();
+    harness.render().unwrap();
+
+    let row = tab_bar(&harness);
+    assert!(
+        row.contains("alpha.txt") && row.contains("(preview)"),
+        "down arrow should open the selected file in preview mode; got:\n{row}"
+    );
+
+    // Second Down moves to beta.txt; preview must replace alpha.txt.
+    harness
+        .send_key(KeyCode::Down, KeyModifiers::empty())
+        .unwrap();
+    harness.render().unwrap();
+
+    let row = tab_bar(&harness);
+    assert!(
+        row.contains("beta.txt") && row.contains("(preview)"),
+        "second down arrow should preview beta.txt; got:\n{row}"
+    );
+    assert!(
+        !row.contains("alpha.txt"),
+        "alpha.txt preview should have been replaced; got:\n{row}"
+    );
+
+    // Up returns to alpha.txt; preview replaces beta.txt.
+    harness
+        .send_key(KeyCode::Up, KeyModifiers::empty())
+        .unwrap();
+    harness.render().unwrap();
+
+    let row = tab_bar(&harness);
+    assert!(
+        row.contains("alpha.txt") && row.contains("(preview)"),
+        "up arrow should preview alpha.txt again; got:\n{row}"
+    );
+    assert!(
+        !row.contains("beta.txt"),
+        "beta.txt preview should have been replaced; got:\n{row}"
+    );
+}
+
+/// With preview_tabs disabled, keyboard navigation must NOT open any
+/// buffer — otherwise every arrow press would accumulate permanent
+/// tabs.
+#[test]
+fn keyboard_navigation_skips_preview_when_disabled() {
+    let mut harness = EditorTestHarness::with_temp_project(120, 40).unwrap();
+    let project = harness.project_dir().unwrap();
+    fs::write(project.join("alpha.txt"), "alpha.txt\n").unwrap();
+    fs::write(project.join("beta.txt"), "beta.txt\n").unwrap();
+
+    harness.editor_mut().config_mut().file_explorer.preview_tabs = false;
+
+    harness
+        .send_key(KeyCode::Char('e'), KeyModifiers::CONTROL)
+        .unwrap();
+    harness.wait_for_file_explorer().unwrap();
+    harness.wait_for_file_explorer_item("alpha.txt").unwrap();
+    harness.wait_for_file_explorer_item("beta.txt").unwrap();
+
+    let initial_tab_bar = tab_bar(&harness);
+
+    harness
+        .send_key(KeyCode::Down, KeyModifiers::empty())
+        .unwrap();
+    harness
+        .send_key(KeyCode::Down, KeyModifiers::empty())
+        .unwrap();
+    harness.render().unwrap();
+
+    let row = tab_bar(&harness);
+    assert_eq!(
+        row, initial_tab_bar,
+        "with preview_tabs disabled, keyboard nav must not alter the tab bar; got:\n{row}"
+    );
+}

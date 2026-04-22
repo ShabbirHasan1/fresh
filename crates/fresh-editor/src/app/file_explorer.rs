@@ -226,6 +226,7 @@ impl Editor {
             explorer.select_prev_match();
             explorer.update_scroll_for_selection();
         }
+        self.file_explorer_preview_selected();
     }
 
     pub fn file_explorer_navigate_down(&mut self) {
@@ -233,6 +234,7 @@ impl Editor {
             explorer.select_next_match();
             explorer.update_scroll_for_selection();
         }
+        self.file_explorer_preview_selected();
     }
 
     pub fn file_explorer_page_up(&mut self) {
@@ -240,12 +242,46 @@ impl Editor {
             explorer.select_page_up();
             explorer.update_scroll_for_selection();
         }
+        self.file_explorer_preview_selected();
     }
 
     pub fn file_explorer_page_down(&mut self) {
         if let Some(explorer) = &mut self.file_explorer {
             explorer.select_page_down();
             explorer.update_scroll_for_selection();
+        }
+        self.file_explorer_preview_selected();
+    }
+
+    /// Open the currently selected file in preview mode, mirroring the
+    /// single-click flow in `handle_file_explorer_click`. No-op if the
+    /// selection is a directory, preview-tabs are disabled, or the open
+    /// would surface an interactive prompt (e.g. large-file encoding
+    /// confirmation) — the user can still commit with Enter to get the
+    /// full error flow. Keeps focus on the file explorer so further
+    /// keyboard navigation continues to update the preview.
+    fn file_explorer_preview_selected(&mut self) {
+        // Avoid turning every arrow press into a permanent tab when the
+        // user has opted out of preview tabs.
+        if !self.config.file_explorer.preview_tabs {
+            return;
+        }
+
+        let path = match self
+            .file_explorer
+            .as_ref()
+            .and_then(|explorer| explorer.get_selected_entry())
+        {
+            Some(entry) if !entry.is_dir() => entry.path.clone(),
+            _ => return,
+        };
+
+        if let Err(e) = self.open_file_preview(&path) {
+            tracing::debug!(
+                "file_explorer_preview_selected: skipping preview for {:?}: {}",
+                path,
+                e
+            );
         }
     }
 

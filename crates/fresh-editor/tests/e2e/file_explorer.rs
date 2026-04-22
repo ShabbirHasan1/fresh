@@ -1094,18 +1094,18 @@ fn test_scroll_allows_cursor_to_top() {
     // The test: when we press Up, the cursor should move WITHIN the viewport
     // for (viewport_height - 1) times before the view scrolls.
 
-    // Track which files are visible to detect scrolling
+    // Track which files are visible to detect scrolling. Only scan rows
+    // that start with the explorer's left border so the tab bar and
+    // status bar (which reflect the current preview buffer and would
+    // change with every cursor move) don't leak into the viewport check.
     let get_visible_files = |screen: &str| -> Vec<String> {
         screen
             .lines()
+            .filter(|line| line.starts_with('│'))
             .filter_map(|line| {
-                // Look for lines with file names (fileXX.txt pattern)
-                if line.contains("file") && line.contains(".txt") {
-                    // Extract the file number
-                    for word in line.split_whitespace() {
-                        if word.starts_with("file") && word.ends_with(".txt") {
-                            return Some(word.to_string());
-                        }
+                for word in line.split_whitespace() {
+                    if word.starts_with("file") && word.ends_with(".txt") {
+                        return Some(word.to_string());
                     }
                 }
                 None
