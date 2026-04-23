@@ -768,6 +768,7 @@
   "explorer.created_dir": "Creato %{name}",
   "explorer.created_file": "Creato %{name}",
   "explorer.cut": "Contrassegnato per il taglio: %{name}",
+  "explorer.cut_cancelled": "Taglio annullato",
   "explorer.delete_cancelled": "Eliminazione annullata",
   "explorer.delete_confirm": "Eliminare %{type} '%{name}'? (y)es, (N)o: ",
   "explorer.error": "Errore: %{error}",

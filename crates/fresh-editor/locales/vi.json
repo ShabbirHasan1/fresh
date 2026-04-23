@@ -768,6 +768,7 @@
   "explorer.created_dir": "Đã tạo %{name}",
   "explorer.created_file": "Đã tạo %{name}",
   "explorer.cut": "Đã đánh dấu để cắt: %{name}",
+  "explorer.cut_cancelled": "Đã hủy cắt",
   "explorer.delete_cancelled": "Đã hủy xóa",
   "explorer.delete_confirm": "Xóa %{type} '%{name}'? (y) có, (N) không: ",
   "explorer.error": "Lỗi: %{error}",

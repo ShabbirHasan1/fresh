@@ -768,6 +768,7 @@
   "explorer.created_dir": "Dossier créé : %{name}",
   "explorer.created_file": "Fichier créé : %{name}",
   "explorer.cut": "Marqué pour couper : %{name}",
+  "explorer.cut_cancelled": "Coupe annulée",
   "explorer.delete_cancelled": "Suppression annulée",
   "explorer.delete_confirm": "Supprimer %{type} '%{name}' ? (o)ui, (N)on : ",
   "explorer.error": "Erreur : %{error}",

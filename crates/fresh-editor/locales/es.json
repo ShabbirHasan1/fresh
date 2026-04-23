@@ -768,6 +768,7 @@
   "explorer.created_dir": "Creado %{name}",
   "explorer.created_file": "Creado %{name}",
   "explorer.cut": "Marcado para cortar: %{name}",
+  "explorer.cut_cancelled": "Corte cancelado",
   "explorer.delete_cancelled": "Eliminación cancelada",
   "explorer.delete_confirm": "¿Eliminar %{type} '%{name}'? (s)í, (N)o: ",
   "explorer.error": "Error: %{error}",

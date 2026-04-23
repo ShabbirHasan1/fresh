@@ -768,6 +768,7 @@
   "explorer.created_dir": "สร้างไดเรกทอรีแล้ว: %{name}",
   "explorer.created_file": "สร้างไฟล์แล้ว: %{name}",
   "explorer.cut": "เลือกเพื่อตัด: %{name}",
+  "explorer.cut_cancelled": "ยกเลิกการตัด",
   "explorer.delete_cancelled": "ยกเลิกการลบ",
   "explorer.delete_confirm": "ลบ %{type} '%{name}' ใช่หรือไม่? (y)ใช่, (N)ไม่: ",
   "explorer.error": "ข้อผิดพลาด: %{error}",

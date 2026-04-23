@@ -768,6 +768,7 @@
   "explorer.created_dir": "Папка создана: %{name}",
   "explorer.created_file": "Файл создан: %{name}",
   "explorer.cut": "Помечено для вырезания: %{name}",
+  "explorer.cut_cancelled": "Вырезание отменено",
   "explorer.delete_cancelled": "Удаление отменено",
   "explorer.delete_confirm": "Удалить %{type} '%{name}'? (д)а, (Н)ет: ",
   "explorer.error": "Ошибка: %{error}",

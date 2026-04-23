@@ -768,6 +768,7 @@
   "explorer.created_dir": "Složka vytvořena: %{name}",
   "explorer.created_file": "Soubor vytvořen: %{name}",
   "explorer.cut": "Označeno k vyjmutí: %{name}",
+  "explorer.cut_cancelled": "Vyjmutí zrušeno",
   "explorer.delete_cancelled": "Smazání zrušeno",
   "explorer.delete_confirm": "Smazat %{type} '%{name}'? (a)no, (N)e: ",
   "explorer.error": "Chyba: %{error}",

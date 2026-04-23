@@ -768,6 +768,7 @@
   "explorer.created_dir": "フォルダを作成: %{name}",
   "explorer.created_file": "ファイルを作成: %{name}",
   "explorer.cut": "切り取り対象: %{name}",
+  "explorer.cut_cancelled": "切り取りをキャンセルしました",
   "explorer.delete_cancelled": "削除をキャンセル",
   "explorer.delete_confirm": "%{type} '%{name}' を削除しますか? (y)はい, (N)いいえ: ",
   "explorer.error": "エラー: %{error}",

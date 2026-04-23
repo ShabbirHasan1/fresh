@@ -768,6 +768,7 @@
   "explorer.created_dir": "폴더 생성됨: %{name}",
   "explorer.created_file": "파일 생성됨: %{name}",
   "explorer.cut": "잘라내기 대상: %{name}",
+  "explorer.cut_cancelled": "잘라내기 취소됨",
   "explorer.delete_cancelled": "삭제 취소됨",
   "explorer.delete_confirm": "%{type} '%{name}' 삭제? (y)예, (N)아니오: ",
   "explorer.error": "오류: %{error}",

@@ -768,6 +768,7 @@
   "explorer.created_dir": "Ordner erstellt: %{name}",
   "explorer.created_file": "Datei erstellt: %{name}",
   "explorer.cut": "Zum Ausschneiden markiert: %{name}",
+  "explorer.cut_cancelled": "Ausschneiden abgebrochen",
   "explorer.delete_cancelled": "Löschen abgebrochen",
   "explorer.delete_confirm": "%{type} '%{name}' löschen? (j)a, (N)ein: ",
   "explorer.error": "Fehler: %{error}",

@@ -768,6 +768,7 @@
   "explorer.created_dir": "Pasta criada: %{name}",
   "explorer.created_file": "Arquivo criado: %{name}",
   "explorer.cut": "Marcado para recortar: %{name}",
+  "explorer.cut_cancelled": "Recorte cancelado",
   "explorer.delete_cancelled": "Exclusão cancelada",
   "explorer.delete_confirm": "Excluir %{type} '%{name}'? (s)im, (N)ão: ",
   "explorer.error": "Erro: %{error}",

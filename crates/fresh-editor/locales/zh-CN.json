@@ -768,6 +768,7 @@
   "explorer.created_dir": "已创建文件夹：%{name}",
   "explorer.created_file": "已创建文件：%{name}",
   "explorer.cut": "已标记剪切: %{name}",
+  "explorer.cut_cancelled": "剪切已取消",
   "explorer.delete_cancelled": "删除已取消",
   "explorer.delete_confirm": "删除 %{type} '%{name}'？(y)是，(N)否：",
   "explorer.error": "错误：%{error}",

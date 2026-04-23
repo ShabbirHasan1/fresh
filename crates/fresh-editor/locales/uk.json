@@ -768,6 +768,7 @@
   "explorer.created_dir": "Теку створено: %{name}",
   "explorer.created_file": "Файл створено: %{name}",
   "explorer.cut": "Позначено для вирізання: %{name}",
+  "explorer.cut_cancelled": "Вирізання скасовано",
   "explorer.delete_cancelled": "Видалення скасовано",
   "explorer.delete_confirm": "Видалити %{type} '%{name}'? (т)ак, (Н)і: ",
   "explorer.error": "Помилка: %{error}",
