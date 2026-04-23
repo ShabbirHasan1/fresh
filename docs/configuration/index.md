@@ -246,7 +246,9 @@ In the Settings UI, each setting shows where its current value comes from:
 
 ## Status Bar
 
-The left and right sides of the status bar are configurable through the Settings UI. Each side uses a **DualList** picker: items live in an **Available** column or an **Included** column, and you move them back and forth to show or hide them. Use the arrow buttons next to the Included list to reorder. Elements include the filename, cursor position, encoding, LSP indicator, git branch, warning counts, palette hint, and a `{clock}` element that shows `HH:MM` with a blinking colon.
+The left and right sides of the status bar are configurable through the Settings UI. Each side uses a **DualList** picker: items live in an **Available** column or an **Included** column, and you move them back and forth to show or hide them. Use the arrow buttons next to the Included list to reorder. Elements include the filename, cursor position, encoding, LSP indicator, git branch, warning counts, palette hint, a `{clock}` element that shows `HH:MM` with a blinking colon, and a `{remote}` indicator that lights up when you're attached to an SSH remote or a devcontainer.
+
+The `{remote}` indicator is clickable — activate it to open a context-aware menu for the current authority (detach, show container logs, retry attach, etc.). It also reflects connection state: `Connecting`, `Connected`, or `FailedAttach`.
 
 ## Save Behavior
 

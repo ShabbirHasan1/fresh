@@ -20,7 +20,11 @@ Add column rulers at any position via "Add Ruler" from the command palette. Usef
 
 ## Current-Line Highlight
 
-The row the cursor is on is highlighted for quick visual tracking. Enabled by default; toggle via the command palette ("Toggle Current Line Highlight") or in the Settings UI.
+The row the cursor is on is highlighted for quick visual tracking. Enabled by default; toggle via the command palette ("Toggle Current Line Highlight") or in the Settings UI. A matching **Toggle Current Column Highlight** / `highlight_current_column` setting highlights the cursor's column too — useful for visually aligning code with rulers.
+
+## Post-EOF Background
+
+Rows past the end of the buffer render with a distinct background color (`post_eof_bg` theme key) so the "end of file" boundary is obvious even without `~` tildes. Works alongside `show_tilde`.
 
 ## Auto-Save
 

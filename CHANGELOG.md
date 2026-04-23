@@ -8,7 +8,27 @@
 
 * **Dashboard plugin**: Built-in TUI dashboard that replaces the usual "[No Name]" with weather info, git status + repo URL, a "vs master" row (commits ahead/behind), open GitHub PRs for the current repo, and disk usage for common mounts. Enable via `plugins.dashboard.enabled` in `config.json` or the Settings UI. Third-party plugins and `init.ts` can contribute their own rows via the `registerSection()` API.
 
-* **Devcontainer support**: Detects `.devcontainer/devcontainer.json` and offers Attach / Rebuild via the [devcontainer CLI](https://github.com/devcontainers/cli), which you need to install. Embedded terminal runs inside the devcontainer.
+* **Devcontainer support**: Detects `.devcontainer/devcontainer.json` and offers Attach / Rebuild / Detach via the [devcontainer CLI](https://github.com/devcontainers/cli), which you need to install. Embedded terminal, filesystem, and LSP servers all run inside the devcontainer. `Dev Container: Create Config` scaffolds a config for projects that don't have one. `Dev Container: Show Ports` merges configured `forwardPorts` with live `docker port` output; `Dev Container: Show Logs` captures the container's recent stdout/stderr. The build log streams into a workspace split, and failed attaches offer Retry/Show Logs/Detach through a recovery popup. `initializeCommand` runs on attach.
+
+* **`{remote}` status-bar indicator**: Clickable status-bar element that lights up when you're attached to an SSH remote or devcontainer, with a context-aware menu (detach, show logs, retry attach, …). Surfaces `Connecting` / `Connected` / `FailedAttach` states. Fresh's config v1→v2 migration injects `{remote}` into customized `status_bar.left`.
+
+* **Hot-exit restore split from session restore**: `editor.restore_previous_session` config and the `--no-restore` / `--restore` CLI flags now control workspace/tab restoration separately from hot-exit content — unsaved scratch buffers come back even when you opt out of full session restore (#1404).
+
+* **File explorer — cut/copy/paste + multi-selection**: `Ctrl+C` / `Ctrl+X` / `Ctrl+V` in the explorer with same-dir auto-rename, per-file conflict prompt on cross-dir paste, and `Shift+Up/Down` multi-select. Cut-pending items are dimmed until pasted.
+
+* **File explorer — keyboard preview**: Moving the cursor with Up/Down in the explorer previews the highlighted file in a preview tab (#1570), so you can scan files without leaving the keyboard.
+
+* **Quick Open / Go-to Line live preview**: Typing `:<N>` in the file finder (or in the standalone `:` mode) scrolls the cursor to the target line live as you type; Enter commits, Escape reverts, mouse movement or clicks also commit.
+
+* **Terminal shell override (#1637)**: New `terminal.shell` config option lets you pick a different shell for the integrated terminal without reassigning `$SHELL` (which affects `format_on_save` and other features).
+
+* **Suspend process (Unix)**: New `Suspend Process` action sends Fresh to the background like Ctrl+Z in a shell. Routed through the client in session mode so the server stays up.
+
+* **Current-column highlight**: New `highlight_current_column` / `Toggle Current Column Highlight` — highlights the cursor's column for alignment work.
+
+* **Post-EOF shading** (#779): Rows past end-of-file render with a distinct background so the boundary is obvious; works alongside `show_tilde`.
+
+* **Regex replacement escapes**: `\n`, `\t`, `\r`, and `\\` in the replacement string are now interpreted when regex mode is on.
 
 ### Improvements
 
@@ -32,7 +52,7 @@
   - "file://${HOME}/themes/x.json" — absolute path; ${HOME}, ${XDG_CONFIG_HOME} are expanded
   - "https://github.com/foo/themes#dark" — URL-packaged theme
 
-* **Plugin API additions**: `editor.overrideThemeColors(...)` for in-memory theme mutation, `editor.parseJsonc(...)` for host-side JSONC parsing, and plugin-created terminals now have an ephemeral lifetime (they close cleanly when the action that spawned them finishes). Plugin authors can also augment `FreshPluginRegistry` to make `editor.getPluginApi("name")` return a typed interface — no `as`-cast needed on the consumer side; augmentations are emitted to `~/.config/fresh/types/plugins.d.ts` at load time.
+* **Plugin API additions**: `editor.overrideThemeColors(...)` for in-memory theme mutation, `editor.parseJsonc(...)` for host-side JSONC parsing, and plugin-created terminals now have an ephemeral lifetime (they close cleanly when the action that spawned them finishes). Plugin authors can also augment `FreshPluginRegistry` to make `editor.getPluginApi("name")` return a typed interface — no `as`-cast needed on the consumer side; augmentations are emitted to `~/.config/fresh/types/plugins.d.ts` at load time. `spawnHostProcess` now returns a handle with `kill()` (and a matching `KillHostProcess` command). `BufferInfo.splits` surfaces which splits display a buffer, for "focus-if-visible" dedupe. `editor.setRemoteIndicatorState(...)` / `clearRemoteIndicatorState()` let remote plugins drive the status-bar `{remote}` element. Dashboard gains `dash.registerSection()` (with a returned remover) and `dash.clearAllSections()` for plugin extension.
 
 * **JSONC language**: `.jsonc` files and well-known JSONC-with-`.json`-suffix files (`devcontainer.json`, `tsconfig.json`, `.eslintrc.json`, `.babelrc`, VS Code settings files) now get a dedicated `jsonc` language with comment-tolerant highlighting and LSP routing through `vscode-json-language-server` with the correct `languageId`.
 
@@ -59,6 +79,18 @@
 * **Quieter LSP**: Suppress `MethodNotFound` errors from LSP servers (#1649) — servers that don't implement an optional method no longer spam the log.
 
 * **Plugin action popups survive buffer switches**: Popups stay visible when the active buffer changes, and concurrent popups queue LIFO so the newest shows first.
+
+* **Encoding detection on CJK files** (#1635): Files whose only non-ASCII bytes sat past the 8 KB sample window were mis-detected; the sample boundary is now treated as truncation so the full file is considered before the encoding is guessed.
+
+* **Review diff — no fold jitter**: Toggling a fold no longer re-centers the viewport.
+
+* **LSP — cleaner disables**: No spurious warning when opening a file for a language whose LSP is explicitly disabled in config. The indicator shows buffer-skip state (e.g. file too large) instead of a generic warning.
+
+* **Windows — preserve UNC paths**: `pathJoin` plugin API now preserves `\\?\` UNC prefixes on Windows.
+
+* **Hardware cursor no longer bleeds through popups**: The terminal hardware cursor is hidden when an overlay popup covers it.
+
+* **Focus — tab clicks reset explorer context** (#1540): Clicking a tab or buffer no longer leaves the FileExplorer key context active.
 
 ### Under the Hood
 

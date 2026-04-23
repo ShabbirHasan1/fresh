@@ -12,7 +12,11 @@ All LSP operations are available as palette commands (search for "LSP"). Use the
 
 ## Status Bar
 
-The status bar shows a single `LSP` indicator — colour-coded, with a spinner during startup and indexing. Activate it (click, or run **LSP: Server Status** from the command palette) to open a popup with per-server status, live progress, and per-server actions (restart, stop, view log). Servers that are configured but whose binary isn't on `PATH` are flagged so Fresh doesn't quietly spawn failing processes. You can also mute a language from the popup.
+The status bar shows a single `LSP` indicator — colour-coded, with a spinner during startup and indexing. Activate it (click, or run **LSP: Server Status** from the command palette) to open a popup with per-server status, live progress, and per-server actions (restart, stop, view log). Servers that are configured but whose binary isn't on `PATH` are flagged so Fresh doesn't quietly spawn failing processes. The popup also shows buffer-skip state when a file is too large for LSP, and the "not installed" copy is container-aware when you're attached to a devcontainer (it points at the container's PATH, not the host's). You can also mute a language from the popup.
+
+## Remote-Aware LSP
+
+Language servers spawn through the editor's current [Authority](../plugins/api/), so attaching to an SSH remote or a devcontainer runs the servers over there. `command_exists` probes and `ProcessLimits` (`max_memory_mb`, `max_cpu_percent`) are threaded through the same authority, so quotas apply whether the server is local or in a container.
 
 ## Hover and Diagnostics
 

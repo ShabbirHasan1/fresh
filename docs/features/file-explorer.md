@@ -9,10 +9,17 @@ Fresh includes a built-in file explorer.
 ## Opening Files
 
 - **Enter** opens the selected file and focuses the editor.
+- **Arrow Up/Down** also opens the highlighted file in a preview tab automatically as you move — so you can scan files without leaving the keyboard.
 - **Single-click** opens a file in an ephemeral *preview* tab — the next single-click on another file replaces it instead of piling up tabs. Any real commitment — editing the file, pressing Enter, double-clicking, clicking the tab itself, or a layout action like splitting — promotes the preview to a permanent tab.
 - **Double-click** opens the file in a permanent tab and focuses the editor.
 
 Preview tabs are enabled by default. Turn them off in the Settings UI if you prefer every click to open a permanent tab.
+
+## Cut / Copy / Paste and Multi-Selection
+
+- **`Ctrl+C` / `Ctrl+X` / `Ctrl+V`** — copy, cut, or paste the selection. Same-directory copy auto-appends ` copy` / ` copy 2` etc. Same-directory cut is a no-op. Paste into a different directory with a name conflict prompts per-file: (o)verwrite, (O) all, (s)kip, (S) all, (c)ancel.
+- **Cut-pending** items are visually dimmed until the paste finishes or is cancelled.
+- **`Shift+Up` / `Shift+Down`** extend a multi-select range from the current anchor; all clipboard operations (and delete) act on the whole selection.
 
 ## Width
 

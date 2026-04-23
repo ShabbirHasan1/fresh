@@ -45,4 +45,6 @@ editor.on("plugins_loaded", () => {
 
 The `ctx` parameter exposes `kv`, `text`, `newline`, and `error` primitives. Colors are symbolic (`"muted"`, `"accent"`, `"ok"`, `"warn"`, `"err"`, `"value"`), so sections pick up theme changes automatically. `onClick` is routed through the editor's mouse-click dispatcher and works even in terminals that strip OSC-8 hyperlinks.
 
+`registerSection` returns a function you can call to remove that one section later; `dash.clearAllSections()` drops every section a plugin has registered. Call these when your plugin unloads so hot-reload doesn't leave stale rows.
+
 See it in action: [What's New in 0.2.26 → Dashboard](/blog/fresh-0.2.26/#dashboard).

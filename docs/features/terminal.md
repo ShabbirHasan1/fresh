@@ -37,12 +37,27 @@ In scrollback mode, you can use standard editor navigation:
 *   **`Ctrl+End`**: Jump to the end
 *   **`Ctrl+F`**: Search through terminal output
 
+## Shell Override
+
+By default the integrated terminal runs `$SHELL` (or the platform default if `$SHELL` is empty). Override this with `terminal.shell` in config without changing `$SHELL` for the whole process — handy when you want a wrapper that forces an interactive shell, or a different shell inside a container:
+
+```json
+{
+  "terminal": {
+    "shell": { "command": "/usr/bin/bash", "args": ["--login", "-i"] }
+  }
+}
+```
+
+The override applies to host-shell terminals; plugin-managed wrappers (e.g. `docker exec` when attached to a devcontainer) keep their own spawn contract.
+
 ## Tips and Quirks
 
 *   **Workspace Persistence:** Terminal scrollback is preserved across editor restarts, but running processes are terminated.
 *   **Session Persistence (Experimental):** Use `fresh -a` to start in session mode, then detach with `Ctrl+Shift+D` to keep terminal processes running in the background. Reattach with `fresh -a`. See [Session Persistence](./session-persistence.md) for details.
 *   **Automatic Scroll:** When new output arrives while you're in scrollback mode, the terminal automatically returns to terminal mode to show the latest output. Disable this with the `terminal.jump_to_end_on_output` config option.
 *   **Resizing:** The terminal automatically resizes when you resize the editor or split panes.
+*   **Suspend (Unix):** Run **Suspend Process** from the palette to send the foreground Fresh process to the background (like Ctrl+Z in a shell). In session mode the suspend is routed through the client so the server stays up.
 
 ## Windows Support
 
