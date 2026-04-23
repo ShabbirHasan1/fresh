@@ -1266,27 +1266,41 @@ fn test_poll_resets_cursor_to_root_when_path_disappears() {
         "test precondition: cursor should be on doomed.txt"
     );
 
+    // The background poll records each expanded dir's mtime on its first
+    // sighting with no refresh; only subsequent polls react to mtime
+    // changes. If we delete the file before the initial mtime capture,
+    // the post-delete mtime becomes the "initial" value and no refresh
+    // ever fires — doomed.txt would stay in the tree forever. Drive
+    // several poll cycles (each process_async_messages can either spawn
+    // the background stat thread or receive its result) to guarantee
+    // the initial capture lands before we mutate the directory. A
+    // couple of short wall-clock sleeps give the spawned stat thread
+    // room to run; advance_time keeps logical time moving so the poll
+    // interval condition keeps re-firing.
+    for _ in 0..10 {
+        harness.editor_mut().process_async_messages();
+        std::thread::sleep(Duration::from_millis(20));
+        harness.advance_time(Duration::from_millis(60));
+    }
+
+    // Some filesystems (older HFS+, some network mounts) have 1s mtime
+    // resolution. Sleep long enough that the post-delete mtime is
+    // guaranteed to differ from the initial capture the poll just
+    // recorded, regardless of resolution. Without this, the poll would
+    // see an unchanged mtime on a coarse-resolution FS and never
+    // refresh.
+    std::thread::sleep(Duration::from_millis(1100));
+
     // Delete the file outside the editor. The parent dir's mtime changes,
     // so the background poll will refresh root and drop doomed.txt from
     // the tree.
     fs::remove_file(project_root.join("doomed.txt")).unwrap();
 
-    // Drive the poll to completion.
-    harness.advance_time(Duration::from_millis(200));
-    for _ in 0..20 {
-        harness.editor_mut().process_async_messages();
-        std::thread::sleep(Duration::from_millis(20));
-        harness.advance_time(Duration::from_millis(100));
-    }
-    harness.render().unwrap();
-
-    // doomed.txt must be gone from the rendered tree.
-    let after = harness.screen_to_string();
-    assert!(
-        !after.contains("doomed.txt"),
-        "poll should have dropped the deleted file. Screen:\n{}",
-        after
-    );
+    // Semantic wait: keep ticking until the tree no longer shows
+    // doomed.txt — the observable effect of the refresh.
+    harness
+        .wait_until(|h| !h.screen_to_string().contains("doomed.txt"))
+        .unwrap();
 
     // Cursor must now point at a live node — specifically the root (a
     // safe fallback), so it stays visible and navigation still works.
