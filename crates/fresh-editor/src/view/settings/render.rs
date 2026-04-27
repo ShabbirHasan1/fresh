@@ -106,6 +106,19 @@ fn byte_to_char_idx(s: &str, byte_offset: usize) -> usize {
         .count()
 }
 
+/// Truncate `s` to at most `max_chars` characters, appending `"..."` if it
+/// was actually shortened. Counts characters (not bytes) so non-ASCII
+/// inputs (CJK descriptions, emoji, etc.) don't byte-slice through a
+/// multi-byte UTF-8 sequence and panic — same class as #1718.
+fn truncate_chars_with_ellipsis(s: &str, max_chars: usize) -> String {
+    if s.chars().count() <= max_chars {
+        s.to_string()
+    } else {
+        let kept: String = s.chars().take(max_chars.saturating_sub(3)).collect();
+        format!("{}...", kept)
+    }
+}
+
 /// Render the settings modal
 pub fn render_settings(
     frame: &mut Frame,
@@ -1673,14 +1686,11 @@ fn render_map_partial(
             Style::default()
         };
 
-        // Get display value
+        // Get display value. `truncate_chars_with_ellipsis` counts
+        // characters (not bytes) so a localized / CJK preview value
+        // doesn't panic on truncation (same class as #1718).
         let value_preview = state.get_display_value(value);
-        let max_preview_len = 20;
-        let value_preview = if value_preview.len() > max_preview_len {
-            format!("{}...", &value_preview[..max_preview_len - 3])
-        } else {
-            value_preview
-        };
+        let value_preview = truncate_chars_with_ellipsis(&value_preview, 20);
 
         let display_key: String = key.chars().take(key_width as usize).collect();
         let mut spans = vec![
@@ -2682,17 +2692,14 @@ fn render_search_result_item(
         Rect::new(area.x, area.y + 1, area.width, 1),
     );
 
-    // Third line: Description (if any)
+    // Third line: Description (if any). Counts characters (not bytes)
+    // when checking and truncating: descriptions can be localized (e.g.
+    // CJK translations) and a byte-based slice could land inside a
+    // multi-byte UTF-8 sequence and panic — same class as #1718.
     if let Some(ref desc) = display_desc {
         let desc_style = Style::default().fg(theme.line_number_fg);
         let max_chars = (area.width as usize).saturating_sub(2);
-        let truncated_desc = if desc.chars().count() > max_chars {
-            let limit = (area.width as usize).saturating_sub(5);
-            let end = desc.floor_char_boundary(limit);
-            format!("  {}...", &desc[..end])
-        } else {
-            format!("  {}", desc)
-        };
+        let truncated_desc = format!("  {}", truncate_chars_with_ellipsis(desc, max_chars));
         frame.render_widget(
             Paragraph::new(truncated_desc).style(desc_style),
             Rect::new(area.x, area.y + 2, area.width, 1),
@@ -2803,17 +2810,17 @@ fn render_confirm_dialog(
     );
     y += 2;
 
-    // List changes
+    // List changes. Character-based truncation here (rather than byte
+    // truncation) keeps CJK / emoji change descriptions from byte-slicing
+    // through a multi-byte UTF-8 sequence and panicking — same class as
+    // #1718.
     let change_style = Style::default().fg(theme.popup_text_fg);
     for change in changes
         .iter()
         .take((dialog_height as usize).saturating_sub(7))
     {
-        let truncated = if change.len() > inner.width as usize - 2 {
-            format!("• {}...", &change[..inner.width as usize - 5])
-        } else {
-            format!("• {}", change)
-        };
+        let max_chars = (inner.width as usize).saturating_sub(2);
+        let truncated = format!("• {}", truncate_chars_with_ellipsis(change, max_chars));
         frame.render_widget(
             Paragraph::new(truncated).style(change_style),
             Rect::new(inner.x, y, inner.width, 1),
@@ -2924,17 +2931,17 @@ fn render_reset_dialog(frame: &mut Frame, parent_area: Rect, state: &SettingsSta
     );
     y += 2;
 
-    // List changes
+    // List changes. Character-based truncation here (rather than byte
+    // truncation) keeps CJK / emoji change descriptions from byte-slicing
+    // through a multi-byte UTF-8 sequence and panicking — same class as
+    // #1718.
     let change_style = Style::default().fg(theme.popup_text_fg);
     for change in changes
         .iter()
         .take((dialog_height as usize).saturating_sub(7))
     {
-        let truncated = if change.len() > inner.width as usize - 2 {
-            format!("• {}...", &change[..inner.width as usize - 5])
-        } else {
-            format!("• {}", change)
-        };
+        let max_chars = (inner.width as usize).saturating_sub(2);
+        let truncated = format!("• {}", truncate_chars_with_ellipsis(change, max_chars));
         frame.render_widget(
             Paragraph::new(truncated).style(change_style),
             Rect::new(inner.x, y, inner.width, 1),
@@ -3493,6 +3500,34 @@ fn render_help_overlay(frame: &mut Frame, parent_area: Rect, theme: &Theme) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn truncate_chars_with_ellipsis_ascii_fits() {
+        assert_eq!(truncate_chars_with_ellipsis("hi", 10), "hi");
+    }
+
+    #[test]
+    fn truncate_chars_with_ellipsis_ascii_truncates() {
+        assert_eq!(truncate_chars_with_ellipsis("hello world!", 8), "hello...");
+    }
+
+    #[test]
+    fn truncate_chars_with_ellipsis_multibyte_does_not_panic() {
+        // Regression: byte-slicing this string at `max - 3` would land
+        // inside the 3-byte UTF-8 sequence for `こ` and panic — same class
+        // as #1718.
+        let out = truncate_chars_with_ellipsis("こんにちは世界からのテスト", 8);
+        assert!(out.ends_with("..."));
+        // 5 kept chars + 3 ellipsis chars = 8 total chars.
+        assert_eq!(out.chars().count(), 8);
+    }
+
+    #[test]
+    fn truncate_chars_with_ellipsis_emoji_does_not_panic() {
+        let out = truncate_chars_with_ellipsis("📦📦📦📦📦📦📦📦", 5);
+        assert!(out.ends_with("..."));
+        assert_eq!(out.chars().count(), 5);
+    }
 
     // Basic compile test - actual rendering tests would need a test backend
     #[test]
