@@ -1340,7 +1340,7 @@ fn test_settings_file_explorer_width_applies_live() {
         harness.send_key(KeyCode::Down, KeyModifiers::NONE).unwrap();
     }
     harness.send_key(KeyCode::Tab, KeyModifiers::NONE).unwrap();
-    for _ in 0..5 {
+    for _ in 0..6 {
         harness.send_key(KeyCode::Down, KeyModifiers::NONE).unwrap();
     }
     harness.render().unwrap();
@@ -1350,6 +1350,8 @@ fn test_settings_file_explorer_width_applies_live() {
     // confirm, then save settings with Ctrl+S. The text input arms
     // replace-on-type when editing starts, so the first printable key
     // clears "30%" automatically — no separate select-all is needed.
+    // Note: Added FileExplorerSide field, so Width is now at position 6 (0-indexed)
+    // instead of 5 in the alphabetical listing.
     harness
         .send_key(KeyCode::Enter, KeyModifiers::NONE)
         .unwrap();
