@@ -61,10 +61,17 @@ pub fn render_map(
 
         // Value preview using display_field if available
         let value_preview = state.get_display_value(value);
-        // Truncate if too long
+        // Truncate if too long. Counts characters (not bytes) so that a
+        // preview value containing non-ASCII (e.g. quoted strings with
+        // emoji or CJK) doesn't byte-slice through a multi-byte UTF-8
+        // sequence and panic — same class as #1718.
         let max_preview_len = 30;
-        let value_preview = if value_preview.len() > max_preview_len {
-            format!("{}...", &value_preview[..max_preview_len - 3])
+        let value_preview = if value_preview.chars().count() > max_preview_len {
+            let kept: String = value_preview
+                .chars()
+                .take(max_preview_len.saturating_sub(3))
+                .collect();
+            format!("{}...", kept)
         } else {
             value_preview
         };
@@ -224,7 +231,11 @@ pub fn render_map(
     }
 }
 
-/// Format a JSON value as a short preview string
+/// Format a JSON value as a short preview string.
+///
+/// Counts characters (not bytes) when truncating so that a JSON string
+/// containing non-ASCII (e.g. CJK, emoji) doesn't byte-slice through a
+/// multi-byte UTF-8 sequence and panic — same class as #1718.
 pub(super) fn format_value_preview(value: &serde_json::Value, max_len: usize) -> String {
     let s = match value {
         serde_json::Value::Null => "null".to_string(),
@@ -234,9 +245,43 @@ pub(super) fn format_value_preview(value: &serde_json::Value, max_len: usize) ->
         serde_json::Value::Array(arr) => format!("[{} items]", arr.len()),
         serde_json::Value::Object(obj) => format!("{{{} fields}}", obj.len()),
     };
-    if s.len() > max_len {
-        format!("{}...", &s[..max_len - 3])
+    if s.chars().count() > max_len {
+        let kept: String = s.chars().take(max_len.saturating_sub(3)).collect();
+        format!("{}...", kept)
     } else {
         s
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::format_value_preview;
+    use serde_json::json;
+
+    #[test]
+    fn format_value_preview_ascii_truncates() {
+        let v = json!("hello world this is a long string");
+        let out = format_value_preview(&v, 10);
+        assert_eq!(out, "\"hello ...");
+    }
+
+    #[test]
+    fn format_value_preview_multibyte_does_not_panic() {
+        // Regression: byte-slicing a JSON string at `max_len - 3` would
+        // land inside the 3-byte UTF-8 sequence for `こ` and panic — same
+        // class as #1718.
+        let v = json!("こんにちは世界これはテストです");
+        let out = format_value_preview(&v, 10);
+        // Must not panic; output must be valid UTF-8.
+        assert!(out.ends_with("..."));
+        assert_eq!(out.chars().count(), 10);
+    }
+
+    #[test]
+    fn format_value_preview_emoji_does_not_panic() {
+        let v = json!("📦📦📦📦📦📦📦📦📦📦");
+        let out = format_value_preview(&v, 5);
+        assert!(out.ends_with("..."));
+        assert_eq!(out.chars().count(), 5);
     }
 }
