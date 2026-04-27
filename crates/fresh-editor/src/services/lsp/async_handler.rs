@@ -24,12 +24,13 @@ use lsp_types::{
     request::{Initialize, Request},
     ClientCapabilities, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
     DidOpenTextDocumentParams, DidSaveTextDocumentParams, InitializeParams, InitializeResult,
-    InitializedParams, PublishDiagnosticsParams, SemanticTokenModifier, SemanticTokenType,
-    SemanticTokensClientCapabilities, SemanticTokensClientCapabilitiesRequests,
-    SemanticTokensFullOptions, SemanticTokensParams, SemanticTokensResult,
-    SemanticTokensServerCapabilities, ServerCapabilities, TextDocumentContentChangeEvent,
-    TextDocumentIdentifier, TextDocumentItem, TokenFormat, Uri, VersionedTextDocumentIdentifier,
-    WindowClientCapabilities, WorkspaceFolder,
+    InitializedParams, PartialResultParams, Position, PublishDiagnosticsParams, Range,
+    SemanticTokenModifier, SemanticTokenType, SemanticTokensClientCapabilities,
+    SemanticTokensClientCapabilitiesRequests, SemanticTokensFullOptions, SemanticTokensParams,
+    SemanticTokensResult, SemanticTokensServerCapabilities, ServerCapabilities,
+    TextDocumentContentChangeEvent, TextDocumentIdentifier, TextDocumentItem,
+    TextDocumentPositionParams, TokenFormat, Uri, VersionedTextDocumentIdentifier,
+    WindowClientCapabilities, WorkDoneProgressParams, WorkspaceFolder,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -41,6 +42,8 @@ use std::time::Instant;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{ChildStdin, ChildStdout};
 use tokio::sync::{mpsc, oneshot};
+
+type PendingRequests = Arc<Mutex<HashMap<i64, oneshot::Sender<Result<Value, String>>>>>;
 
 /// Grace period after didOpen before sending didChange (in milliseconds)
 /// This gives the LSP server time to process didOpen before receiving changes
@@ -760,11 +763,10 @@ struct LspState {
 #[allow(clippy::let_underscore_must_use)]
 impl LspState {
     /// Replay pending commands that were queued before initialization
-    #[allow(clippy::type_complexity)]
     async fn replay_pending_commands(
         &mut self,
         commands: Vec<LspCommand>,
-        pending: &Arc<Mutex<HashMap<i64, oneshot::Sender<Result<Value, String>>>>>,
+        pending: &PendingRequests,
     ) {
         if commands.is_empty() {
             return;
@@ -905,24 +907,22 @@ impl LspState {
     }
 
     /// Send request using shared pending map
-    #[allow(clippy::type_complexity)]
     async fn send_request_sequential<P: Serialize, R: for<'de> Deserialize<'de>>(
         &mut self,
         method: &str,
         params: Option<P>,
-        pending: &Arc<Mutex<HashMap<i64, oneshot::Sender<Result<Value, String>>>>>,
+        pending: &PendingRequests,
     ) -> Result<R, String> {
         self.send_request_sequential_tracked(method, params, pending, None)
             .await
     }
 
     /// Send request using shared pending map with optional editor request tracking
-    #[allow(clippy::type_complexity)]
     async fn send_request_sequential_tracked<P: Serialize, R: for<'de> Deserialize<'de>>(
         &mut self,
         method: &str,
         params: Option<P>,
-        pending: &Arc<Mutex<HashMap<i64, oneshot::Sender<Result<Value, String>>>>>,
+        pending: &PendingRequests,
         editor_request_id: Option<u64>,
     ) -> Result<R, String> {
         let id = self.next_id;
@@ -969,12 +969,11 @@ impl LspState {
     }
 
     /// Handle initialize command
-    #[allow(clippy::type_complexity)]
     async fn handle_initialize_sequential(
         &mut self,
         root_uri: Option<Uri>,
         initialization_options: Option<Value>,
-        pending: &Arc<Mutex<HashMap<i64, oneshot::Sender<Result<Value, String>>>>>,
+        pending: &PendingRequests,
     ) -> Result<InitializeResult, String> {
         tracing::info!(
             "Initializing async LSP server with root_uri: {:?}, initialization_options: {:?}",
@@ -1046,13 +1045,12 @@ impl LspState {
     }
 
     /// Handle did_open command
-    #[allow(clippy::type_complexity)]
     async fn handle_did_open_sequential(
         &mut self,
         uri: Uri,
         text: String,
         language_id: String,
-        _pending: &Arc<Mutex<HashMap<i64, oneshot::Sender<Result<Value, String>>>>>,
+        _pending: &PendingRequests,
     ) -> Result<(), String> {
         let path = PathBuf::from(uri.path().as_str());
 
@@ -1092,12 +1090,11 @@ impl LspState {
     }
 
     /// Handle did_change command
-    #[allow(clippy::type_complexity)]
     async fn handle_did_change_sequential(
         &mut self,
         uri: Uri,
         content_changes: Vec<TextDocumentContentChangeEvent>,
-        _pending: &Arc<Mutex<HashMap<i64, oneshot::Sender<Result<Value, String>>>>>,
+        _pending: &PendingRequests,
     ) -> Result<(), String> {
         tracing::trace!("LSP: did_change for {}", uri.as_str());
 
@@ -1195,19 +1192,15 @@ impl LspState {
     }
 
     /// Handle completion request
-    #[allow(clippy::type_complexity)]
     async fn handle_completion(
         &mut self,
         request_id: u64,
         uri: Uri,
         line: u32,
         character: u32,
-        pending: &Arc<Mutex<HashMap<i64, oneshot::Sender<Result<Value, String>>>>>,
+        pending: &PendingRequests,
     ) -> Result<(), String> {
-        use lsp_types::{
-            CompletionParams, PartialResultParams, Position, TextDocumentIdentifier,
-            TextDocumentPositionParams, WorkDoneProgressParams,
-        };
+        use lsp_types::CompletionParams;
 
         tracing::trace!(
             "LSP: completion request at {}:{}:{}",
@@ -1266,19 +1259,15 @@ impl LspState {
     }
 
     /// Handle go-to-definition request
-    #[allow(clippy::type_complexity)]
     async fn handle_goto_definition(
         &mut self,
         request_id: u64,
         uri: Uri,
         line: u32,
         character: u32,
-        pending: &Arc<Mutex<HashMap<i64, oneshot::Sender<Result<Value, String>>>>>,
+        pending: &PendingRequests,
     ) -> Result<(), String> {
-        use lsp_types::{
-            GotoDefinitionParams, PartialResultParams, Position, TextDocumentIdentifier,
-            TextDocumentPositionParams, WorkDoneProgressParams,
-        };
+        use lsp_types::GotoDefinitionParams;
 
         tracing::trace!(
             "LSP: go-to-definition request at {}:{}:{}",
@@ -1346,7 +1335,6 @@ impl LspState {
     }
 
     /// Handle rename request
-    #[allow(clippy::type_complexity)]
     async fn handle_rename(
         &mut self,
         request_id: u64,
@@ -1354,12 +1342,9 @@ impl LspState {
         line: u32,
         character: u32,
         new_name: String,
-        pending: &Arc<Mutex<HashMap<i64, oneshot::Sender<Result<Value, String>>>>>,
+        pending: &PendingRequests,
     ) -> Result<(), String> {
-        use lsp_types::{
-            Position, RenameParams, TextDocumentIdentifier, TextDocumentPositionParams,
-            WorkDoneProgressParams,
-        };
+        use lsp_types::RenameParams;
 
         tracing::trace!(
             "LSP: rename request at {}:{}:{} to '{}'",
@@ -1417,19 +1402,15 @@ impl LspState {
     }
 
     /// Handle hover documentation request
-    #[allow(clippy::type_complexity)]
     async fn handle_hover(
         &mut self,
         request_id: u64,
         uri: Uri,
         line: u32,
         character: u32,
-        pending: &Arc<Mutex<HashMap<i64, oneshot::Sender<Result<Value, String>>>>>,
+        pending: &PendingRequests,
     ) -> Result<(), String> {
-        use lsp_types::{
-            HoverParams, Position, TextDocumentIdentifier, TextDocumentPositionParams,
-            WorkDoneProgressParams,
-        };
+        use lsp_types::HoverParams;
 
         tracing::trace!(
             "LSP: hover request at {}:{}:{}",
@@ -1538,19 +1519,15 @@ impl LspState {
     }
 
     /// Handle find references request
-    #[allow(clippy::type_complexity)]
     async fn handle_references(
         &mut self,
         request_id: u64,
         uri: Uri,
         line: u32,
         character: u32,
-        pending: &Arc<Mutex<HashMap<i64, oneshot::Sender<Result<Value, String>>>>>,
+        pending: &PendingRequests,
     ) -> Result<(), String> {
-        use lsp_types::{
-            PartialResultParams, Position, ReferenceContext, ReferenceParams,
-            TextDocumentIdentifier, WorkDoneProgressParams,
-        };
+        use lsp_types::{ReferenceContext, ReferenceParams};
 
         tracing::trace!(
             "LSP: find references request at {}:{}:{}",
@@ -1606,19 +1583,15 @@ impl LspState {
     }
 
     /// Handle signature help request
-    #[allow(clippy::type_complexity)]
     async fn handle_signature_help(
         &mut self,
         request_id: u64,
         uri: Uri,
         line: u32,
         character: u32,
-        pending: &Arc<Mutex<HashMap<i64, oneshot::Sender<Result<Value, String>>>>>,
+        pending: &PendingRequests,
     ) -> Result<(), String> {
-        use lsp_types::{
-            Position, SignatureHelpParams, TextDocumentIdentifier, TextDocumentPositionParams,
-            WorkDoneProgressParams,
-        };
+        use lsp_types::SignatureHelpParams;
 
         tracing::trace!(
             "LSP: signature help request at {}:{}:{}",
@@ -1681,7 +1654,6 @@ impl LspState {
     }
 
     /// Handle code actions request
-    #[allow(clippy::type_complexity)]
     #[allow(clippy::too_many_arguments)]
     async fn handle_code_actions(
         &mut self,
@@ -1692,12 +1664,9 @@ impl LspState {
         end_line: u32,
         end_char: u32,
         diagnostics: Vec<lsp_types::Diagnostic>,
-        pending: &Arc<Mutex<HashMap<i64, oneshot::Sender<Result<Value, String>>>>>,
+        pending: &PendingRequests,
     ) -> Result<(), String> {
-        use lsp_types::{
-            CodeActionContext, CodeActionParams, PartialResultParams, Position, Range,
-            TextDocumentIdentifier, WorkDoneProgressParams,
-        };
+        use lsp_types::{CodeActionContext, CodeActionParams};
 
         tracing::trace!(
             "LSP: code actions request at {}:{}:{}-{}:{}",
@@ -1765,12 +1734,11 @@ impl LspState {
     }
 
     /// Handle workspace/executeCommand request
-    #[allow(clippy::type_complexity)]
     async fn handle_execute_command(
         &mut self,
         command: String,
         arguments: Option<Vec<Value>>,
-        pending: &Arc<Mutex<HashMap<i64, oneshot::Sender<Result<Value, String>>>>>,
+        pending: &PendingRequests,
     ) -> Result<(), String> {
         let params = lsp_types::ExecuteCommandParams {
             command: command.clone(),
@@ -1794,12 +1762,11 @@ impl LspState {
     }
 
     /// Handle codeAction/resolve request
-    #[allow(clippy::type_complexity)]
     async fn handle_code_action_resolve(
         &mut self,
         request_id: u64,
         action: lsp_types::CodeAction,
-        pending: &Arc<Mutex<HashMap<i64, oneshot::Sender<Result<Value, String>>>>>,
+        pending: &PendingRequests,
     ) -> Result<(), String> {
         match self
             .send_request_sequential::<_, Value>("codeAction/resolve", Some(action), pending)
@@ -1826,12 +1793,11 @@ impl LspState {
     }
 
     /// Handle completionItem/resolve request
-    #[allow(clippy::type_complexity)]
     async fn handle_completion_resolve(
         &mut self,
         request_id: u64,
         item: lsp_types::CompletionItem,
-        pending: &Arc<Mutex<HashMap<i64, oneshot::Sender<Result<Value, String>>>>>,
+        pending: &PendingRequests,
     ) -> Result<(), String> {
         match self
             .send_request_sequential::<_, Value>("completionItem/resolve", Some(item), pending)
@@ -1854,19 +1820,15 @@ impl LspState {
     }
 
     /// Handle textDocument/formatting request
-    #[allow(clippy::type_complexity)]
     async fn handle_document_formatting(
         &mut self,
         request_id: u64,
         uri: Uri,
         tab_size: u32,
         insert_spaces: bool,
-        pending: &Arc<Mutex<HashMap<i64, oneshot::Sender<Result<Value, String>>>>>,
+        pending: &PendingRequests,
     ) -> Result<(), String> {
-        use lsp_types::{
-            DocumentFormattingParams, FormattingOptions, TextDocumentIdentifier,
-            WorkDoneProgressParams,
-        };
+        use lsp_types::{DocumentFormattingParams, FormattingOptions};
 
         let params = DocumentFormattingParams {
             text_document: TextDocumentIdentifier { uri: uri.clone() },
@@ -1902,10 +1864,8 @@ impl LspState {
         }
     }
 
-    /// Handle document diagnostic request (pull diagnostics)
     /// Handle textDocument/rangeFormatting request
     #[allow(clippy::too_many_arguments)]
-    #[allow(clippy::type_complexity)]
     async fn handle_document_range_formatting(
         &mut self,
         request_id: u64,
@@ -1916,12 +1876,9 @@ impl LspState {
         end_char: u32,
         tab_size: u32,
         insert_spaces: bool,
-        pending: &Arc<Mutex<HashMap<i64, oneshot::Sender<Result<Value, String>>>>>,
+        pending: &PendingRequests,
     ) -> Result<(), String> {
-        use lsp_types::{
-            DocumentRangeFormattingParams, FormattingOptions, Position, Range,
-            TextDocumentIdentifier, WorkDoneProgressParams,
-        };
+        use lsp_types::{DocumentRangeFormattingParams, FormattingOptions};
 
         let params = DocumentRangeFormattingParams {
             text_document: TextDocumentIdentifier { uri: uri.clone() },
@@ -1966,17 +1923,14 @@ impl LspState {
     }
 
     /// Handle textDocument/prepareRename request
-    #[allow(clippy::type_complexity)]
     async fn handle_prepare_rename(
         &mut self,
         request_id: u64,
         uri: Uri,
         line: u32,
         character: u32,
-        pending: &Arc<Mutex<HashMap<i64, oneshot::Sender<Result<Value, String>>>>>,
+        pending: &PendingRequests,
     ) -> Result<(), String> {
-        use lsp_types::{Position, TextDocumentIdentifier, TextDocumentPositionParams};
-
         let params = TextDocumentPositionParams {
             text_document: TextDocumentIdentifier { uri },
             position: Position::new(line, character),
@@ -2007,18 +1961,14 @@ impl LspState {
         }
     }
 
-    #[allow(clippy::type_complexity)]
     async fn handle_document_diagnostic(
         &mut self,
         request_id: u64,
         uri: Uri,
         previous_result_id: Option<String>,
-        pending: &Arc<Mutex<HashMap<i64, oneshot::Sender<Result<Value, String>>>>>,
+        pending: &PendingRequests,
     ) -> Result<(), String> {
-        use lsp_types::{
-            DocumentDiagnosticParams, PartialResultParams, TextDocumentIdentifier,
-            WorkDoneProgressParams,
-        };
+        use lsp_types::DocumentDiagnosticParams;
 
         // Check if server supports pull diagnostics (diagnosticProvider capability)
         if self
@@ -2134,7 +2084,6 @@ impl LspState {
     }
 
     /// Handle inlay hints request (LSP 3.17+)
-    #[allow(clippy::type_complexity)]
     #[allow(clippy::too_many_arguments)]
     async fn handle_inlay_hints(
         &mut self,
@@ -2144,11 +2093,9 @@ impl LspState {
         start_char: u32,
         end_line: u32,
         end_char: u32,
-        pending: &Arc<Mutex<HashMap<i64, oneshot::Sender<Result<Value, String>>>>>,
+        pending: &PendingRequests,
     ) -> Result<(), String> {
-        use lsp_types::{
-            InlayHintParams, Position, Range, TextDocumentIdentifier, WorkDoneProgressParams,
-        };
+        use lsp_types::InlayHintParams;
 
         tracing::trace!(
             "LSP: inlay hints request for {} ({}:{} - {}:{})",
@@ -2214,16 +2161,13 @@ impl LspState {
     }
 
     /// Handle folding range request
-    #[allow(clippy::type_complexity)]
     async fn handle_folding_ranges(
         &mut self,
         request_id: u64,
         uri: Uri,
-        pending: &Arc<Mutex<HashMap<i64, oneshot::Sender<Result<Value, String>>>>>,
+        pending: &PendingRequests,
     ) -> Result<(), String> {
-        use lsp_types::{
-            FoldingRangeParams, PartialResultParams, TextDocumentIdentifier, WorkDoneProgressParams,
-        };
+        use lsp_types::FoldingRangeParams;
 
         tracing::trace!("LSP: folding range request for {}", uri.as_str());
 
@@ -2271,17 +2215,13 @@ impl LspState {
         }
     }
 
-    #[allow(clippy::type_complexity)]
     async fn handle_semantic_tokens_full(
         &mut self,
         request_id: u64,
         uri: Uri,
-        pending: &Arc<Mutex<HashMap<i64, oneshot::Sender<Result<Value, String>>>>>,
+        pending: &PendingRequests,
     ) -> Result<(), String> {
-        use lsp_types::{
-            request::SemanticTokensFullRequest, PartialResultParams, TextDocumentIdentifier,
-            WorkDoneProgressParams,
-        };
+        use lsp_types::request::SemanticTokensFullRequest;
 
         tracing::trace!("LSP: semanticTokens/full request for {}", uri.as_str());
 
@@ -2320,18 +2260,16 @@ impl LspState {
         }
     }
 
-    #[allow(clippy::type_complexity)]
     async fn handle_semantic_tokens_full_delta(
         &mut self,
         request_id: u64,
         uri: Uri,
         previous_result_id: String,
-        pending: &Arc<Mutex<HashMap<i64, oneshot::Sender<Result<Value, String>>>>>,
+        pending: &PendingRequests,
     ) -> Result<(), String> {
         use lsp_types::{
-            request::SemanticTokensFullDeltaRequest, PartialResultParams,
-            SemanticTokensDeltaParams, SemanticTokensFullDeltaResult, TextDocumentIdentifier,
-            WorkDoneProgressParams,
+            request::SemanticTokensFullDeltaRequest, SemanticTokensDeltaParams,
+            SemanticTokensFullDeltaResult,
         };
 
         tracing::trace!(
@@ -2375,18 +2313,14 @@ impl LspState {
         }
     }
 
-    #[allow(clippy::type_complexity)]
     async fn handle_semantic_tokens_range(
         &mut self,
         request_id: u64,
         uri: Uri,
         range: lsp_types::Range,
-        pending: &Arc<Mutex<HashMap<i64, oneshot::Sender<Result<Value, String>>>>>,
+        pending: &PendingRequests,
     ) -> Result<(), String> {
-        use lsp_types::{
-            request::SemanticTokensRangeRequest, PartialResultParams, SemanticTokensRangeParams,
-            TextDocumentIdentifier, WorkDoneProgressParams,
-        };
+        use lsp_types::{request::SemanticTokensRangeRequest, SemanticTokensRangeParams};
 
         tracing::trace!("LSP: semanticTokens/range request for {}", uri.as_str());
 
@@ -2427,13 +2361,12 @@ impl LspState {
     }
 
     /// Handle a plugin-initiated request by forwarding it to the server
-    #[allow(clippy::type_complexity)]
     async fn handle_plugin_request(
         &mut self,
         request_id: u64,
         method: String,
         params: Option<Value>,
-        pending: &Arc<Mutex<HashMap<i64, oneshot::Sender<Result<Value, String>>>>>,
+        pending: &PendingRequests,
     ) {
         tracing::trace!(
             "Plugin request {} => method={} params={:?}",
@@ -2688,12 +2621,11 @@ impl LspTask {
     }
 
     /// Spawn the stdout reader task that continuously reads and dispatches LSP messages
-    #[allow(clippy::type_complexity)]
     #[allow(clippy::too_many_arguments)]
     #[allow(clippy::let_underscore_must_use)] // async_tx.send() is best-effort; receiver drop means editor shutdown
     fn spawn_stdout_reader(
         mut stdout: BufReader<ChildStdout>,
-        pending: Arc<Mutex<HashMap<i64, oneshot::Sender<Result<Value, String>>>>>,
+        pending: PendingRequests,
         async_tx: std_mpsc::Sender<AsyncMessage>,
         language: String,
         server_name: String,
@@ -3517,11 +3449,10 @@ async fn read_message_from_stdout(
 
 /// Standalone function to handle and dispatch messages (for reader task)
 #[allow(clippy::too_many_arguments)]
-#[allow(clippy::type_complexity)]
 #[allow(clippy::let_underscore_must_use)] // oneshot/mpsc send results are best-effort; receiver drop is not actionable
 async fn handle_message_dispatch(
     message: JsonRpcMessage,
-    pending: &Arc<Mutex<HashMap<i64, oneshot::Sender<Result<Value, String>>>>>,
+    pending: &PendingRequests,
     async_tx: &std_mpsc::Sender<AsyncMessage>,
     language: &str,
     server_name: &str,
