@@ -419,11 +419,7 @@ impl FileBrowserRenderer {
         } else {
             header_style
         };
-        let name_display = if name_header.len() < name_col_width {
-            format!("{:<width$}", name_header, width = name_col_width)
-        } else {
-            name_header[..name_col_width].to_string()
-        };
+        let name_display = fit_header_to_col_width(&name_header, name_col_width);
         spans.push(Span::styled(name_display, name_style));
 
         // Size column
@@ -653,6 +649,20 @@ impl FileBrowserRenderer {
     }
 }
 
+/// Pad or truncate a header string so it occupies exactly `col_width`
+/// character positions. Counts characters (not bytes) so headers
+/// containing the sort arrow `▲`/`▼` (3 UTF-8 bytes each) or localized
+/// labels from `t!()` don't byte-slice through a multi-byte sequence and
+/// panic — same class as #1718.
+fn fit_header_to_col_width(header: &str, col_width: usize) -> String {
+    let chars = header.chars().count();
+    if chars < col_width {
+        format!("{:<width$}", header, width = col_width)
+    } else {
+        header.chars().take(col_width).collect()
+    }
+}
+
 /// Layout information for mouse hit testing
 #[derive(Debug, Clone)]
 pub struct FileBrowserLayout {
@@ -828,5 +838,42 @@ impl FileBrowserLayout {
         let detect_encoding_end = detect_encoding_start + 28;
 
         x >= detect_encoding_start && x < detect_encoding_end
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::fit_header_to_col_width;
+
+    #[test]
+    fn fit_header_pads_when_short() {
+        assert_eq!(fit_header_to_col_width("Name", 8), "Name    ");
+    }
+
+    #[test]
+    fn fit_header_truncates_ascii() {
+        assert_eq!(fit_header_to_col_width("Filename▲", 4), "File");
+    }
+
+    #[test]
+    fn fit_header_truncates_with_sort_arrow_does_not_panic() {
+        // Regression: header ` Name ▲` is 9 bytes (`▲` = 3 bytes) but
+        // 7 characters. Under the old byte-based code, col_width=7 would
+        // byte-slice at index 7 — inside the 3-byte UTF-8 sequence for
+        // `▲` — and panic the editor (same class as #1718). Now the
+        // header is truncated by character count.
+        let out = fit_header_to_col_width(" Name ▲", 7);
+        assert_eq!(out, " Name ▲");
+        assert_eq!(out.chars().count(), 7);
+    }
+
+    #[test]
+    fn fit_header_truncates_localized_does_not_panic() {
+        // Localized header (e.g. Japanese) where every label char is
+        // 3 UTF-8 bytes. Old byte-based truncation at col_width=4 would
+        // panic mid-character; character-based truncation keeps 4 chars.
+        let out = fit_header_to_col_width(" 名前 ▲", 4);
+        assert!(out.is_char_boundary(out.len()));
+        assert_eq!(out.chars().count(), 4);
     }
 }
