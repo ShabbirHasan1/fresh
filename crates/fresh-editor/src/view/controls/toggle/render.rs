@@ -68,31 +68,41 @@ pub fn render_toggle_aligned(
         width = actual_label_width as usize
     );
 
+    // Chip-style toggle. Both states render at the same width so the
+    // surrounding layout doesn't shift when the value flips.
+    //   checked:   [ ✓ ACTIVE ]
+    //   unchecked: [          ]
+    const CHIP_INNER: &str = "          "; // 10 spaces, same width as " ✓ ACTIVE "
+    const CHIP_WIDTH: u16 = 12; // "[" + 10 + "]"
+
     let line = if state.checked {
         Line::from(vec![
             Span::styled(padded_label, Style::default().fg(label_color)),
             Span::styled(": ", Style::default().fg(label_color)),
-            Span::styled("[", Style::default().fg(bracket_color)),
+            Span::styled("[ ", Style::default().fg(bracket_color)),
             Span::styled("✓", Style::default().fg(_check_color)),
+            Span::styled(" ACTIVE ", Style::default().fg(_check_color)),
             Span::styled("]", Style::default().fg(bracket_color)),
         ])
     } else {
         Line::from(vec![
             Span::styled(padded_label, Style::default().fg(label_color)),
             Span::styled(": ", Style::default().fg(label_color)),
-            Span::styled("[ ]", Style::default().fg(bracket_color)),
+            Span::styled("[", Style::default().fg(bracket_color)),
+            Span::styled(CHIP_INNER, Style::default().fg(bracket_color)),
+            Span::styled("]", Style::default().fg(bracket_color)),
         ])
     };
 
     let paragraph = Paragraph::new(line);
     frame.render_widget(paragraph, area);
 
-    // Checkbox position after label
+    // Chip position after label
     let checkbox_start = area.x + actual_label_width + 2; // label + ": "
-    let checkbox_area = Rect::new(checkbox_start, area.y, 3.min(area.width), 1);
+    let checkbox_area = Rect::new(checkbox_start, area.y, CHIP_WIDTH.min(area.width), 1);
 
-    // Full area is label + ": " + checkbox
-    let full_width = (actual_label_width + 2 + 3).min(area.width);
+    // Full area is label + ": " + chip
+    let full_width = (actual_label_width + 2 + CHIP_WIDTH).min(area.width);
     let full_area = Rect::new(area.x, area.y, full_width, 1);
 
     ToggleLayout {

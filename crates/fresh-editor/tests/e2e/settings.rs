@@ -2327,11 +2327,11 @@ fn test_settings_toggle_persists_after_save_and_reopen() {
     harness.send_key(KeyCode::Down, KeyModifiers::NONE).unwrap();
     harness.render().unwrap();
 
-    // Verify we're on Check For Updates and it shows as unchecked [ ]
+    // Verify we're on Check For Updates and it shows as unchecked
     // Format is ">  Check For Updates" (3-char indicator area: focus, modified, space)
     let screen = harness.screen_to_string();
     assert!(
-        screen.contains(">  Check For Updates") && screen.contains(": [ ]"),
+        screen.contains(">  Check For Updates") && screen.contains(": [          ]"),
         "Check For Updates should be focused and unchecked. Screen:\n{}",
         screen
     );
@@ -2342,11 +2342,11 @@ fn test_settings_toggle_persists_after_save_and_reopen() {
         .unwrap();
     harness.render().unwrap();
 
-    // Verify it now shows as checked [✓]
+    // Verify it now shows as checked [ ✓ ACTIVE ]
     // After toggling, the item is modified so it shows ">● " (3-char indicator area)
     let screen = harness.screen_to_string();
     assert!(
-        screen.contains(">● Check For Updates") && screen.contains(": [✓]"),
+        screen.contains(">● Check For Updates") && screen.contains(": [ ✓ ACTIVE ]"),
         "Check For Updates should now be checked (with modified indicator). Screen:\n{}",
         screen
     );
@@ -2382,15 +2382,14 @@ fn test_settings_toggle_persists_after_save_and_reopen() {
     harness.send_key(KeyCode::Down, KeyModifiers::NONE).unwrap();
     harness.render().unwrap();
 
-    // This is the key assertion: the toggle should show the SAVED value [✓]
-    // not the ORIGINAL value [ ]
-    // Note: The item shows the correct [✓] value; the "●" indicator may or may not
-    // appear depending on layer detection
+    // This is the key assertion: the toggle should show the SAVED value
+    // (chip reads "[ ✓ ACTIVE ]") not the ORIGINAL unchecked state.
+    // Note: The "●" indicator may or may not appear depending on layer detection.
     let screen = harness.screen_to_string();
     assert!(
-        screen.contains("Check For Updates") && screen.contains(": [✓]"),
-        "BUG #474: After save and reopen, Check For Updates should still be checked [✓], \
-         but it shows the original value [ ]. Screen:\n{}",
+        screen.contains("Check For Updates") && screen.contains(": [ ✓ ACTIVE ]"),
+        "BUG #474: After save and reopen, Check For Updates should still be checked, \
+         but it shows the original unchecked state. Screen:\n{}",
         screen
     );
 
