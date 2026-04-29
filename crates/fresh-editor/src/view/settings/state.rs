@@ -381,8 +381,16 @@ impl SettingsState {
         let width = self.layout_width;
         if let Some(page) = self.pages.get(self.selected_category) {
             self.scroll_panel.update_content_height(&page.items, width);
+            // Drive the body scroll directly here — the public
+            // `ensure_visible()` is a no-op while focus lives in the
+            // categories panel, but tree Up/Down explicitly *should*
+            // scroll the body so the user can preview sections without
+            // tabbing into the body first.
+            let selected_item = self.selected_item;
+            let sub_focus = self.sub_focus;
+            self.scroll_panel
+                .ensure_focused_visible(&page.items, selected_item, sub_focus, width);
         }
-        self.ensure_visible();
         let new_rows = self.visible_tree();
         let new_cur = self.tree_cursor_index(&new_rows);
         self.categories_scroll
@@ -473,16 +481,24 @@ impl SettingsState {
         self.selected_category = cat_idx;
         self.selected_item = target_item;
         self.focus.set(FocusPanel::Settings);
-        self.scroll_panel.scroll.offset = 0;
         let width = self.layout_width;
         if let Some(page) = self.pages.get(self.selected_category) {
             self.scroll_panel.update_content_height(&page.items, width);
+            // Snap the body to the top of the section. `ensure_visible`
+            // would only scroll *just enough* to bring the target item
+            // into view, which puts it at the bottom of the viewport
+            // (and on tight viewports clips its body below the footer);
+            // jumping to a section instead means "show this section at
+            // the top".
+            let item_y = self
+                .scroll_panel
+                .item_y_offset(&page.items, target_item, width);
+            self.scroll_panel.scroll.offset = item_y;
         }
         self.sub_focus = None;
         self.init_map_focus(true);
         self.update_control_focus(true);
         self.auto_expand_current_category();
-        self.ensure_visible();
     }
 
     /// Flatten the categories list + currently expanded sections into the
