@@ -322,17 +322,17 @@ pub fn parse_schema(schema_json: &str) -> Result<Vec<SettingCategory>, serde_jso
                 subcategories: Vec::new(),
             });
         } else if let Some(ref inner_props) = resolved.properties {
-            // This is a category with nested settings
+            // This is a category with nested settings.
             let settings = parse_properties(inner_props, &path, &defs, &enum_values_map);
-            // Combine the field-level description (from the property's doc comment) with
-            // the resolved struct description, separated by a line break when both exist.
-            let description = match (&prop.description, &resolved.description) {
-                (Some(field_desc), Some(struct_desc)) if field_desc != struct_desc => {
-                    Some(format!("{}\n{}", field_desc, struct_desc))
-                }
-                (Some(d), _) | (_, Some(d)) => Some(d.clone()),
-                _ => None,
-            };
+            // Prefer the field-level doc comment (more specific to how the
+            // category is used) over the struct-level one (often generic
+            // boilerplate like "Editor configuration"). When both exist they
+            // tend to read as near-duplicates side by side, so we don't
+            // concatenate them.
+            let description = prop
+                .description
+                .clone()
+                .or_else(|| resolved.description.clone());
             categories.push(SettingCategory {
                 name: display_name,
                 path: path.clone(),
