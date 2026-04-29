@@ -593,17 +593,10 @@ fn render_settings_panel(
         None => return,
     };
 
-    // Render page title and description
+    // Render page description (the page name itself is shown in the sidebar
+    // and is typically restated in the description, so we omit it here).
     let mut y = area.y;
     let header_start_y = y;
-
-    // Page title
-    let title_style = Style::default()
-        .fg(theme.menu_active_fg)
-        .add_modifier(Modifier::BOLD);
-    let title = Line::from(Span::styled(&page.name, title_style));
-    frame.render_widget(Paragraph::new(title), Rect::new(area.x, y, area.width, 1));
-    y += 1;
 
     // Page description (supports multi-line descriptions separated by \n)
     if let Some(ref desc) = page.description {
