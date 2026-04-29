@@ -3,7 +3,9 @@
 //! Provides a modal dialog for editing complex map entries using the same
 //! SettingItem/SettingControl infrastructure as the main settings UI.
 
-use super::items::{build_item_from_value, control_to_value, SettingControl, SettingItem};
+use super::items::{
+    build_item_from_value, control_to_value, ItemBoxStyle, SettingControl, SettingItem,
+};
 use super::schema::{SettingSchema, SettingType};
 use crate::view::controls::{FocusState, TextInputState};
 use serde_json::Value;
@@ -84,7 +86,7 @@ impl EntryDialogState {
             is_null: false,
             section: None,
             is_section_start: false,
-            layout_width: 0,
+            style: ItemBoxStyle::default(),
             dual_list_sibling: None,
         };
         items.push(key_item);

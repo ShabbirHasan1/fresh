@@ -609,15 +609,18 @@ fn render_settings_panel(
     // Calculate available height for items
     let available_height = area.height.saturating_sub(header_height as u16);
 
-    // Update layout width so description heights are computed correctly
-    let focus_indicator_width: u16 = 3;
-    state.layout_width = area.width.saturating_sub(focus_indicator_width);
-    state.update_layout_widths();
+    // The body panel width is the full width of the area allocated to items.
+    // Items size themselves against this width directly via the ScrollItem
+    // trait — there's no longer a cached per-item layout_width to keep in
+    // sync.
+    state.layout_width = area.width;
 
     // Update scroll panel with current viewport and content
     let page = state.pages.get(state.selected_category).unwrap();
     state.scroll_panel.set_viewport(available_height);
-    state.scroll_panel.update_content_height(&page.items);
+    state
+        .scroll_panel
+        .update_content_height(&page.items, area.width);
 
     // Extract state needed for rendering (to avoid borrow issues with scroll_panel)
     use super::state::FocusPanel;
@@ -734,6 +737,11 @@ fn wrap_text(text: &str, width: usize) -> Vec<String> {
 
 /// Pure render function for a setting item (returns layout, doesn't modify external state)
 ///
+/// Driven by `item.layout_box(area.width, &item.style)` — every y-offset comes
+/// from the resulting `ItemBox`, so adjusting card chrome (border, padding,
+/// section header height) happens by changing `ItemBoxStyle`, not by editing
+/// renderer arithmetic.
+///
 /// # Arguments
 /// * `skip_top` - Number of rows to skip at top of item (for partial visibility when scrolling)
 /// * `label_width` - Optional label width for column alignment
@@ -748,260 +756,314 @@ fn render_setting_item_pure(
     theme: &Theme,
     label_width: Option<u16>,
 ) -> SettingItemLayoutInfo {
-    use super::items::SECTION_HEADER_HEIGHT;
+    let plan = item.layout_box(area.width, &item.style);
+    let style = item.style;
+    let viewport_end_logical = skip_top.saturating_add(area.height); // exclusive
 
-    // Handle section header if this item starts a new section
-    let (item_area, item_skip_top) = if item.is_section_start {
-        if let Some(ref section_name) = item.section {
-            // Calculate how much of the section header is visible
-            let header_visible_start = skip_top.min(SECTION_HEADER_HEIGHT);
-            let header_visible_height = SECTION_HEADER_HEIGHT.saturating_sub(skip_top);
-
-            // Render visible part of section header
-            if header_visible_height > 0 && area.height > 0 {
-                let header_y = area.y;
-                let _header_area_height = header_visible_height.min(area.height);
-
-                // First row: section title (bold). We use editor_fg rather
-                // than menu_active_fg because some custom themes set the
-                // latter to match popup_bg (it's only "active" when paired
-                // with a highlight bg), which makes the header invisible on
-                // the settings panel.
-                if header_visible_start == 0 {
-                    let header_style = Style::default()
-                        .fg(theme.editor_fg)
-                        .add_modifier(Modifier::BOLD);
-                    frame.render_widget(
-                        Paragraph::new(section_name.as_str()).style(header_style),
-                        Rect::new(area.x, header_y, area.width, 1),
-                    );
-                }
-
-                // Second row is a blank spacer (already blank, no rendering needed)
-            }
-
-            // Adjust area for the item content (after header)
-            let item_y_offset = header_visible_height.min(area.height);
-            let item_area = Rect::new(
-                area.x,
-                area.y + item_y_offset,
-                area.width,
-                area.height.saturating_sub(item_y_offset),
-            );
-            // Skip top for the item content is reduced by the header height
-            let item_skip_top = skip_top.saturating_sub(SECTION_HEADER_HEIGHT);
-            (item_area, item_skip_top)
-        } else {
-            (area, skip_top)
+    // Translate a logical band [logical_y, logical_y + rows) to a physical
+    // sub-rectangle of `area`, accounting for `skip_top` clipping. Returns
+    // None when the band is entirely outside the visible viewport.
+    let band_rect = |logical_y: u16, rows: u16| -> Option<Rect> {
+        if rows == 0 {
+            return None;
         }
-    } else {
-        (area, skip_top)
+        let band_end = logical_y.saturating_add(rows);
+        if band_end <= skip_top || logical_y >= viewport_end_logical {
+            return None;
+        }
+        let visible_top_logical = logical_y.max(skip_top);
+        let visible_bottom_logical = band_end.min(viewport_end_logical);
+        let physical_y = area.y + (visible_top_logical - skip_top);
+        let visible_h = visible_bottom_logical - visible_top_logical;
+        Some(Rect::new(area.x, physical_y, area.width, visible_h))
     };
 
-    // If no space left for item content, return empty layout
-    if item_area.height == 0 {
-        return SettingItemLayoutInfo::default();
+    // ── Section header band ────────────────────────────────────────────────
+    if let (Some(section_name), Some(header_rect)) = (
+        item.section.as_deref().filter(|_| item.is_section_start),
+        band_rect(0, plan.section_header_rows),
+    ) {
+        // Title is on logical row 0; row 1 is a blank gap. Only paint the
+        // title row when it's actually visible (i.e. skip_top hasn't trimmed
+        // past it).
+        if skip_top == 0 && header_rect.height > 0 {
+            let header_style = Style::default()
+                .fg(theme.editor_fg)
+                .add_modifier(Modifier::BOLD);
+            frame.render_widget(
+                Paragraph::new(section_name).style(header_style),
+                Rect::new(header_rect.x, header_rect.y, header_rect.width, 1),
+            );
+        }
     }
 
-    // Use adjusted area and skip_top for the rest of rendering
-    let area = item_area;
-    let skip_top = item_skip_top;
+    // ── Card box ───────────────────────────────────────────────────────────
+    // The card spans logical rows [card_top_y, total_rows). Render it with a
+    // single Block, choosing which edges to draw based on which logical rows
+    // are inside the visible viewport.
+    let card_logical_top = plan.card_top_y();
+    let card_logical_bottom = plan.total_rows();
+    if let Some(card_rect) = band_rect(
+        card_logical_top,
+        card_logical_bottom.saturating_sub(card_logical_top),
+    ) {
+        let mut borders = Borders::NONE;
+        if style.card_border_cols > 0 {
+            borders |= Borders::LEFT | Borders::RIGHT;
+        }
+        if style.card_border_rows > 0 {
+            // TOP edge is only visible when its logical row sits inside [skip_top, viewport_end).
+            if card_logical_top >= skip_top {
+                borders |= Borders::TOP;
+            }
+            // BOTTOM edge is the last logical row of the card.
+            let bottom_logical = card_logical_bottom.saturating_sub(1);
+            if bottom_logical >= skip_top && bottom_logical < viewport_end_logical {
+                borders |= Borders::BOTTOM;
+            }
+        }
+        if !borders.is_empty() {
+            let block = Block::default()
+                .borders(borders)
+                .border_type(BorderType::Rounded)
+                .border_style(Style::default().fg(theme.popup_border_fg));
+            frame.render_widget(block, card_rect);
+        }
+    }
 
+    // ── Content area (control + description) ───────────────────────────────
     let is_selected = ctx.settings_focused && idx == ctx.selected_item;
-
-    // Check if this item or any of its controls is being hovered
-    let is_item_hovered = match ctx.hover_hit {
-        Some(SettingsHit::Item(i)) => i == idx,
-        Some(SettingsHit::ControlToggle(i)) => i == idx,
-        Some(SettingsHit::ControlDecrement(i)) => i == idx,
-        Some(SettingsHit::ControlIncrement(i)) => i == idx,
-        Some(SettingsHit::ControlDropdown(i)) => i == idx,
-        Some(SettingsHit::ControlText(i)) => i == idx,
-        Some(SettingsHit::ControlTextListRow(i, _)) => i == idx,
-        Some(SettingsHit::ControlMapRow(i, _)) => i == idx,
-        Some(SettingsHit::ControlInherit(i)) => i == idx,
-        _ => false,
-    };
-
+    let is_item_hovered = matches!(
+        ctx.hover_hit,
+        Some(SettingsHit::Item(i))
+            | Some(SettingsHit::ControlToggle(i))
+            | Some(SettingsHit::ControlDecrement(i))
+            | Some(SettingsHit::ControlIncrement(i))
+            | Some(SettingsHit::ControlDropdown(i))
+            | Some(SettingsHit::ControlText(i))
+            | Some(SettingsHit::ControlTextListRow(i, _))
+            | Some(SettingsHit::ControlMapRow(i, _))
+            | Some(SettingsHit::ControlInherit(i))
+        if i == idx
+    );
     let is_focused_or_hovered = is_selected || is_item_hovered;
 
-    // Indicator area takes 3 chars: [>][●][ ] -> focus, modified, separator
-    // Examples: ">● ", ">  ", " ● ", "   "
-    let focus_indicator_width: u16 = 3;
-
-    // Calculate content height (descriptions always fully expanded)
-    let content_height = item.content_height();
-    // Adjust for skipped rows
-    let visible_content_height = content_height.saturating_sub(skip_top);
-
-    // Draw selection or hover highlight background (only for content rows, not spacing)
-    if is_focused_or_hovered {
-        // Use dedicated settings colors for selected items
-        let bg_style = if is_selected {
-            Style::default().bg(theme.settings_selected_bg)
-        } else {
-            Style::default().bg(theme.menu_hover_bg)
-        };
-        // For multi-row controls (Map, ObjectArray, TextList) only highlight
-        // the label row — per-entry highlighting is handled by the control itself
-        let is_multi_row_control = matches!(
-            item.control,
-            SettingControl::Map(_)
-                | SettingControl::ObjectArray(_)
-                | SettingControl::TextList(_)
-                | SettingControl::DualList(_)
-        );
-        let highlight_rows = if is_multi_row_control && skip_top == 0 {
-            1 // Only the label/name row
-        } else {
-            visible_content_height.min(area.height)
-        };
-        for row in 0..highlight_rows {
-            let row_area = Rect::new(area.x, area.y + row, area.width, 1);
-            frame.render_widget(Paragraph::new("").style(bg_style), row_area);
-        }
-    }
-
-    // Render focus indicator ">" at position 0 for selected items
-    if is_selected && skip_top == 0 {
-        let indicator_style = Style::default()
-            .fg(theme.settings_selected_fg)
-            .add_modifier(Modifier::BOLD);
-        frame.render_widget(
-            Paragraph::new(">").style(indicator_style),
-            Rect::new(area.x, area.y, 1, 1),
-        );
-    }
-
-    // Render modified indicator "●" at position 1 for items defined in the target layer
-    if item.modified && skip_top == 0 {
-        let modified_style = Style::default().fg(theme.settings_selected_fg);
-        frame.render_widget(
-            Paragraph::new("●").style(modified_style),
-            Rect::new(area.x + 1, area.y, 1, 1),
-        );
-    }
-
-    // Calculate control height and area (offset by focus indicator)
-    let control_height = item.control.control_height();
-    let visible_control_height = control_height.saturating_sub(skip_top);
-    let control_area = Rect::new(
-        area.x + focus_indicator_width,
-        area.y,
-        area.width.saturating_sub(focus_indicator_width),
-        visible_control_height.min(area.height),
-    );
-
-    // Render the control (dimmed if nullable and currently null/inherited)
-    let control_layout = render_control(
-        frame,
-        control_area,
-        &item.control,
-        &item.name,
-        skip_top,
-        theme,
-        label_width.map(|w| w.saturating_sub(focus_indicator_width)),
-        item.read_only,
-        item.is_null,
-    );
-
-    // Render nullable UI elements: (Inherited) badge or [Inherit] button
+    // Inner area is the card minus the side borders. Y-axis is the union of
+    // the control + description bands.
+    let content_logical_top = plan.control_y();
+    let content_logical_bottom = plan.bottom_border_y();
+    let mut control_layout = ControlLayoutInfo::default();
     let mut inherit_button_area: Option<Rect> = None;
-    if item.nullable && skip_top == 0 {
-        if item.is_null {
-            // Show "(Inherited)" badge after the control on the first row
-            let badge_text = t!("settings.inherited_badge").to_string();
-            let badge_style = Style::default()
-                .fg(theme.line_number_fg)
-                .add_modifier(Modifier::ITALIC);
-            // Place badge at end of control row
-            let badge_len = badge_text.len() as u16 + 1; // +1 for spacing
-            let badge_x = control_area
-                .x
-                .saturating_add(control_area.width)
-                .saturating_sub(badge_len);
-            if badge_x > control_area.x {
-                frame.render_widget(
-                    Paragraph::new(badge_text).style(badge_style),
-                    Rect::new(badge_x, control_area.y, badge_len, 1),
-                );
-            }
-        } else {
-            // Show [Inherit] button after the control on the first row
-            let btn_text = format!("[{}]", t!("settings.btn_inherit"));
-            let btn_len = btn_text.len() as u16 + 1; // +1 for spacing
-            let btn_x = control_area
-                .x
-                .saturating_add(control_area.width)
-                .saturating_sub(btn_len);
-            if btn_x > control_area.x {
-                let btn_area = Rect::new(btn_x, control_area.y, btn_len, 1);
-                let is_hovered =
-                    matches!(ctx.hover_hit, Some(SettingsHit::ControlInherit(i)) if i == idx);
-                let btn_style = if is_hovered {
-                    Style::default()
-                        .fg(theme.menu_hover_fg)
-                        .bg(theme.menu_hover_bg)
-                } else {
-                    Style::default().fg(theme.line_number_fg)
-                };
-                frame.render_widget(Paragraph::new(btn_text).style(btn_style), btn_area);
-                inherit_button_area = Some(btn_area);
+    if let Some(content_rect) = band_rect(
+        content_logical_top,
+        content_logical_bottom.saturating_sub(content_logical_top),
+    ) {
+        // Trim left/right by the card side borders.
+        let inner_x = content_rect.x.saturating_add(style.card_border_cols);
+        let inner_width = content_rect
+            .width
+            .saturating_sub(2 * style.card_border_cols);
+        let inner_area = Rect::new(inner_x, content_rect.y, inner_width, content_rect.height);
+
+        // Highlight background for focused/hovered items.
+        if is_focused_or_hovered && inner_width > 0 {
+            let bg_style = if is_selected {
+                Style::default().bg(theme.settings_selected_bg)
+            } else {
+                Style::default().bg(theme.menu_hover_bg)
+            };
+            // Multi-row controls only highlight the label row.
+            let is_multi_row_control = matches!(
+                item.control,
+                SettingControl::Map(_)
+                    | SettingControl::ObjectArray(_)
+                    | SettingControl::TextList(_)
+                    | SettingControl::DualList(_)
+            );
+            let label_visible = skip_top <= content_logical_top;
+            let highlight_rows = if is_multi_row_control && label_visible {
+                1
+            } else {
+                inner_area.height
+            };
+            for row in 0..highlight_rows {
+                let row_area = Rect::new(inner_area.x, inner_area.y + row, inner_area.width, 1);
+                frame.render_widget(Paragraph::new("").style(bg_style), row_area);
             }
         }
-    }
 
-    // Render description below the control (if visible and exists)
-    // Description is also offset by focus_indicator_width to align with control
-    let desc_start_row = control_height.saturating_sub(skip_top);
+        // skip_top relative to the start of the control band — used by
+        // multi-row controls and by the description renderer to know how
+        // many leading rows are off-screen.
+        let content_skip_top = skip_top.saturating_sub(content_logical_top);
 
-    // Get layer source label for this item (only show if not default)
-    // We use item.layer_source directly since it's now tracked per-item
-    let layer_label = match item.layer_source {
-        crate::config_io::ConfigLayer::System => None, // Don't show for defaults
-        crate::config_io::ConfigLayer::User => Some("user"),
-        crate::config_io::ConfigLayer::Project => Some("project"),
-        crate::config_io::ConfigLayer::Session => Some("session"),
-    };
+        // Focus indicator (`>`) at column 0 of inner area, modified marker
+        // (`●`) at column 1. Only paint them when the control's first row is
+        // visible (i.e. nothing has been clipped off the top of the content).
+        let label_row_visible = content_skip_top == 0 && inner_area.height > 0;
+        if is_selected && label_row_visible {
+            frame.render_widget(
+                Paragraph::new(">").style(
+                    Style::default()
+                        .fg(theme.settings_selected_fg)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Rect::new(inner_area.x, inner_area.y, 1, 1),
+            );
+        }
+        if item.modified && label_row_visible && inner_area.width >= 2 {
+            frame.render_widget(
+                Paragraph::new("●").style(Style::default().fg(theme.settings_selected_fg)),
+                Rect::new(inner_area.x + 1, inner_area.y, 1, 1),
+            );
+        }
 
-    if let Some(ref description) = item.description {
-        if desc_start_row < area.height {
-            let desc_x = area.x + focus_indicator_width;
-            let desc_y = area.y + desc_start_row;
-            let desc_width = area.width.saturating_sub(focus_indicator_width);
-            let desc_style = Style::default().fg(theme.line_number_fg);
-            let max_width = desc_width.saturating_sub(2) as usize;
+        // Control occupies its own band at the top of the content rect.
+        let control_logical_rows = plan.control_rows;
+        if let Some(control_rect) =
+            band_rect(content_logical_top, control_logical_rows).map(|r| {
+                let x = r.x.saturating_add(style.card_border_cols + style.focus_indicator_cols);
+                let w = r.width.saturating_sub(
+                    2 * style.card_border_cols + style.focus_indicator_cols,
+                );
+                Rect::new(x, r.y, w, r.height)
+            })
+        {
+            control_layout = render_control(
+                frame,
+                control_rect,
+                &item.control,
+                &item.name,
+                content_skip_top,
+                theme,
+                label_width.map(|w| {
+                    w.saturating_sub(style.card_border_cols + style.focus_indicator_cols)
+                }),
+                item.read_only,
+                item.is_null,
+            );
 
-            // Always wrap description to show full text
-            let wrapped_lines = wrap_text(description, max_width);
-            let available_rows = area.height.saturating_sub(desc_start_row) as usize;
-
-            // Append layer indicator to last wrapped line
-            let mut lines = wrapped_lines;
-            if let Some(layer) = layer_label {
-                if let Some(last) = lines.last_mut() {
-                    last.push_str(&format!(" ({})", layer));
+            // (Inherited) badge / [Inherit] button: rendered on the same row
+            // as the control's first line, at its right edge.
+            if item.nullable && content_skip_top == 0 && control_rect.width > 0 {
+                if item.is_null {
+                    let badge_text = t!("settings.inherited_badge").to_string();
+                    let badge_len = badge_text.len() as u16 + 1;
+                    let badge_x = control_rect
+                        .x
+                        .saturating_add(control_rect.width)
+                        .saturating_sub(badge_len);
+                    if badge_x > control_rect.x {
+                        frame.render_widget(
+                            Paragraph::new(badge_text).style(
+                                Style::default()
+                                    .fg(theme.line_number_fg)
+                                    .add_modifier(Modifier::ITALIC),
+                            ),
+                            Rect::new(badge_x, control_rect.y, badge_len, 1),
+                        );
+                    }
+                } else {
+                    let btn_text = format!("[{}]", t!("settings.btn_inherit"));
+                    let btn_len = btn_text.len() as u16 + 1;
+                    let btn_x = control_rect
+                        .x
+                        .saturating_add(control_rect.width)
+                        .saturating_sub(btn_len);
+                    if btn_x > control_rect.x {
+                        let btn_area = Rect::new(btn_x, control_rect.y, btn_len, 1);
+                        let is_hovered = matches!(
+                            ctx.hover_hit,
+                            Some(SettingsHit::ControlInherit(i)) if i == idx
+                        );
+                        let btn_style = if is_hovered {
+                            Style::default()
+                                .fg(theme.menu_hover_fg)
+                                .bg(theme.menu_hover_bg)
+                        } else {
+                            Style::default().fg(theme.line_number_fg)
+                        };
+                        frame.render_widget(
+                            Paragraph::new(btn_text).style(btn_style),
+                            btn_area,
+                        );
+                        inherit_button_area = Some(btn_area);
+                    }
                 }
             }
+        }
 
-            for (i, line) in lines.iter().take(available_rows).enumerate() {
+        // Description band: below the control. Wraps to the inner text width
+        // computed by the style, falling back to a layer label when there's
+        // no description but we still need to show the source layer.
+        let desc_logical_rows = plan.description_rows;
+        let layer_label = match item.layer_source {
+            crate::config_io::ConfigLayer::System => None,
+            crate::config_io::ConfigLayer::User => Some("user"),
+            crate::config_io::ConfigLayer::Project => Some("project"),
+            crate::config_io::ConfigLayer::Session => Some("session"),
+        };
+
+        if desc_logical_rows > 0 {
+            if let Some(desc_rect) =
+                band_rect(plan.description_y(), desc_logical_rows).map(|r| {
+                    let x = r.x.saturating_add(
+                        style.card_border_cols + style.focus_indicator_cols,
+                    );
+                    let w = r.width.saturating_sub(
+                        2 * style.card_border_cols + style.focus_indicator_cols,
+                    );
+                    Rect::new(x, r.y, w, r.height)
+                })
+            {
+                let desc_skip = skip_top.saturating_sub(plan.description_y());
+                let max_text_width = desc_rect
+                    .width
+                    .saturating_sub(style.description_right_padding_cols)
+                    as usize;
+                let mut lines = match item.description.as_deref() {
+                    Some(d) if !d.is_empty() => wrap_text(d, max_text_width),
+                    _ => Vec::new(),
+                };
+                if let Some(layer) = layer_label {
+                    if let Some(last) = lines.last_mut() {
+                        last.push_str(&format!(" ({})", layer));
+                    } else {
+                        lines.push(format!("({})", layer));
+                    }
+                }
+                let desc_style = Style::default().fg(theme.line_number_fg);
+                let take = desc_rect.height as usize;
+                for (i, line) in lines
+                    .iter()
+                    .skip(desc_skip as usize)
+                    .take(take)
+                    .enumerate()
+                {
+                    frame.render_widget(
+                        Paragraph::new(line.as_str()).style(desc_style),
+                        Rect::new(desc_rect.x, desc_rect.y + i as u16, desc_rect.width, 1),
+                    );
+                }
+            }
+        } else if let Some(layer) = layer_label {
+            // No description, just a layer label on the row immediately
+            // below the control.
+            if let Some(layer_rect) = band_rect(plan.description_y(), 1).map(|r| {
+                let x = r.x.saturating_add(
+                    style.card_border_cols + style.focus_indicator_cols,
+                );
+                let w = r.width.saturating_sub(
+                    2 * style.card_border_cols + style.focus_indicator_cols,
+                );
+                Rect::new(x, r.y, w, r.height)
+            }) {
                 frame.render_widget(
-                    Paragraph::new(line.as_str()).style(desc_style),
-                    Rect::new(desc_x, desc_y + i as u16, desc_width, 1),
+                    Paragraph::new(format!("({})", layer))
+                        .style(Style::default().fg(theme.line_number_fg)),
+                    layer_rect,
                 );
             }
-        }
-    } else if let Some(layer) = layer_label {
-        // No description, but show layer indicator for non-default values
-        if desc_start_row < area.height {
-            let desc_x = area.x + focus_indicator_width;
-            let desc_y = area.y + desc_start_row;
-            let desc_width = area.width.saturating_sub(focus_indicator_width);
-            let layer_style = Style::default().fg(theme.line_number_fg);
-            frame.render_widget(
-                Paragraph::new(format!("({})", layer)).style(layer_style),
-                Rect::new(desc_x, desc_y, desc_width, 1),
-            );
         }
     }
 

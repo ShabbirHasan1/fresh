@@ -366,7 +366,7 @@ pub fn matching_categories(pages: &[SettingsPage], query: &str) -> Vec<usize> {
 mod tests {
     use super::*;
     use crate::view::controls::ToggleState;
-    use crate::view::settings::items::SettingControl;
+    use crate::view::settings::items::{ItemBoxStyle, SettingControl};
 
     fn make_item(name: &str, description: Option<&str>, path: &str) -> SettingItem {
         SettingItem {
@@ -383,7 +383,7 @@ mod tests {
             is_null: false,
             section: None,
             is_section_start: false,
-            layout_width: 0,
+            style: ItemBoxStyle::default(),
             dual_list_sibling: None,
         }
     }
@@ -546,7 +546,7 @@ mod tests {
             is_null: false,
             section: None,
             is_section_start: false,
-            layout_width: 0,
+            style: ItemBoxStyle::default(),
             dual_list_sibling: None,
         }
     }
@@ -569,7 +569,7 @@ mod tests {
             is_null: false,
             section: None,
             is_section_start: false,
-            layout_width: 0,
+            style: ItemBoxStyle::default(),
             dual_list_sibling: None,
         }
     }

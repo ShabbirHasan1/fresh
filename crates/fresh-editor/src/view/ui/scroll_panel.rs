@@ -10,11 +10,13 @@
 //!
 //! # Usage Flow
 //!
-//! 1. **Define items** - Implement `ScrollItem` for your item type:
+//! 1. **Define items** - Implement `ScrollItem` for your item type. Sizing is
+//!    width-aware: callers pass the column count available to the item, which
+//!    lets each item compute its own height (e.g. text wrapping):
 //!    ```ignore
 //!    impl ScrollItem for MyItem {
-//!        fn height(&self) -> u16 { ... }
-//!        fn focus_regions(&self) -> Vec<FocusRegion> { ... } // optional
+//!        fn height(&self, width: u16) -> u16 { ... }
+//!        fn focus_regions(&self, width: u16) -> Vec<FocusRegion> { ... } // optional
 //!    }
 //!    ```
 //!
@@ -23,13 +25,13 @@
 //! 3. **On selection change** - Call `ensure_focused_visible()` to scroll the
 //!    focused item into view:
 //!    ```ignore
-//!    panel.ensure_focused_visible(&items, selected_index, sub_focus);
+//!    panel.ensure_focused_visible(&items, selected_index, sub_focus, width);
 //!    ```
 //!
 //! 4. **On render** - Update viewport, then call `render()` with a callback:
 //!    ```ignore
 //!    panel.set_viewport(available_height);
-//!    panel.update_content_height(&items);
+//!    panel.update_content_height(&items, available_width);
 //!    let layout = panel.render(frame, area, &items, |f, rect, item, idx| {
 //!        render_my_item(f, rect, item, idx)
 //!    }, theme);
@@ -63,14 +65,20 @@ pub struct FocusRegion {
     pub height: u16,
 }
 
-/// Trait for items that can be displayed in a scrollable panel
+/// Trait for items that can be displayed in a scrollable panel.
+///
+/// Width is bubbled down on every query so items can size themselves to the
+/// available columns (e.g. wrap a multi-line description). There is no cached
+/// width on the item: the panel always asks with the current `width`.
 pub trait ScrollItem {
-    /// Total height of this item in terminal rows
-    fn height(&self) -> u16;
+    /// Total height of this item in terminal rows when laid out at `width` columns.
+    fn height(&self, width: u16) -> u16;
 
-    /// Optional: sub-focus regions within this item
-    /// Used for items with internal navigation (e.g., TextList rows)
-    fn focus_regions(&self) -> Vec<FocusRegion> {
+    /// Optional: sub-focus regions within this item.
+    /// Used for items with internal navigation (e.g., TextList rows).
+    /// Y offsets are absolute within the item (i.e. row 0 is the top of the
+    /// area allocated to the item, including any chrome above the content).
+    fn focus_regions(&self, _width: u16) -> Vec<FocusRegion> {
         Vec::new()
     }
 }
@@ -234,36 +242,37 @@ impl ScrollablePanel {
         self.scroll.viewport as usize
     }
 
-    /// Calculate total content height from items
-    pub fn update_content_height<I: ScrollItem>(&mut self, items: &[I]) {
-        let height: u16 = items.iter().map(|i| i.height()).sum();
+    /// Calculate total content height from items at the given width.
+    pub fn update_content_height<I: ScrollItem>(&mut self, items: &[I], width: u16) {
+        let height: u16 = items.iter().map(|i| i.height(width)).sum();
         self.scroll.set_content_height(height);
     }
 
-    /// Get Y offset for an item by index
-    pub fn item_y_offset<I: ScrollItem>(&self, items: &[I], index: usize) -> u16 {
-        items[..index].iter().map(|i| i.height()).sum()
+    /// Get Y offset for an item by index at the given width.
+    pub fn item_y_offset<I: ScrollItem>(&self, items: &[I], index: usize, width: u16) -> u16 {
+        items[..index].iter().map(|i| i.height(width)).sum()
     }
 
-    /// Ensure focused item (and optional sub-region) is visible
+    /// Ensure focused item (and optional sub-region) is visible at the given width.
     pub fn ensure_focused_visible<I: ScrollItem>(
         &mut self,
         items: &[I],
         focused_index: usize,
         sub_focus: Option<usize>,
+        width: u16,
     ) {
         if focused_index >= items.len() {
             return;
         }
 
         // Calculate Y offset of focused item
-        let item_y = self.item_y_offset(items, focused_index);
+        let item_y = self.item_y_offset(items, focused_index, width);
         let item = &items[focused_index];
-        let item_h = item.height();
+        let item_h = item.height(width);
 
         // If sub-focus specified, use that region
         let (focus_y, focus_h) = if let Some(sub_id) = sub_focus {
-            let regions = item.focus_regions();
+            let regions = item.focus_regions(width);
             if let Some(region) = regions.iter().find(|r| r.id == sub_id) {
                 (item_y + region.y_offset, region.height)
             } else {
@@ -307,13 +316,14 @@ impl ScrollablePanel {
             area.width.saturating_sub(scrollbar_width),
             area.height,
         );
+        let item_width = content_area.width;
 
         let mut layouts = Vec::new();
         let mut content_y = 0u16; // Y in content coordinates
         let mut render_y = area.y; // Y on screen
 
         for (idx, item) in items.iter().enumerate() {
-            let item_h = item.height();
+            let item_h = item.height(item_width);
 
             // Skip items entirely before scroll offset
             if content_y + item_h <= self.scroll.offset {
@@ -384,9 +394,10 @@ impl ScrollablePanel {
         let mut layouts = Vec::new();
         let mut content_y = 0u16;
         let mut render_y = area.y;
+        let item_width = area.width;
 
         for (idx, item) in items.iter().enumerate() {
-            let item_h = item.height();
+            let item_h = item.height(item_width);
 
             if content_y + item_h <= self.scroll.offset {
                 content_y += item_h;
@@ -457,7 +468,7 @@ mod tests {
     }
 
     impl ScrollItem for TestItem {
-        fn height(&self) -> u16 {
+        fn height(&self, _width: u16) -> u16 {
             self.height
         }
     }
@@ -561,6 +572,9 @@ mod tests {
         assert_eq!(state.offset, 45);
     }
 
+    /// Test items are width-agnostic, so the width arg is ignored — pass any value.
+    const TEST_WIDTH: u16 = 80;
+
     #[test]
     fn test_panel_update_content_height() {
         let mut panel = ScrollablePanel::new();
@@ -570,7 +584,7 @@ mod tests {
             TestItem { height: 2 },
         ];
 
-        panel.update_content_height(&items);
+        panel.update_content_height(&items, TEST_WIDTH);
         assert_eq!(panel.scroll.content_height, 10);
     }
 
@@ -583,9 +597,9 @@ mod tests {
             TestItem { height: 2 },
         ];
 
-        assert_eq!(panel.item_y_offset(&items, 0), 0);
-        assert_eq!(panel.item_y_offset(&items, 1), 3);
-        assert_eq!(panel.item_y_offset(&items, 2), 8);
+        assert_eq!(panel.item_y_offset(&items, 0, TEST_WIDTH), 0);
+        assert_eq!(panel.item_y_offset(&items, 1, TEST_WIDTH), 3);
+        assert_eq!(panel.item_y_offset(&items, 2, TEST_WIDTH), 8);
     }
 
     #[test]
@@ -597,10 +611,10 @@ mod tests {
             TestItem { height: 3 },
             TestItem { height: 3 },
         ];
-        panel.update_content_height(&items);
+        panel.update_content_height(&items, TEST_WIDTH);
 
         // Focus on item 2 (y=6, h=3) - needs scroll
-        panel.ensure_focused_visible(&items, 2, None);
+        panel.ensure_focused_visible(&items, 2, None, TEST_WIDTH);
         // Item 2 ends at y=9, viewport=5, so offset should be 9-5=4
         assert_eq!(panel.scroll.offset, 4);
     }
@@ -611,11 +625,11 @@ mod tests {
     }
 
     impl ScrollItem for TestItemWithRegions {
-        fn height(&self) -> u16 {
+        fn height(&self, _width: u16) -> u16 {
             self.height
         }
 
-        fn focus_regions(&self) -> Vec<FocusRegion> {
+        fn focus_regions(&self, _width: u16) -> Vec<FocusRegion> {
             self.regions.clone()
         }
     }
@@ -643,10 +657,10 @@ mod tests {
                 },
             ],
         }];
-        panel.update_content_height(&items);
+        panel.update_content_height(&items, TEST_WIDTH);
 
         // Focus on sub-region 2 (y_offset=7 within item, so absolute y=7)
-        panel.ensure_focused_visible(&items, 0, Some(2));
+        panel.ensure_focused_visible(&items, 0, Some(2), TEST_WIDTH);
         // Region at y=7, h=1, viewport=5, so offset should be 7+1-5=3
         assert_eq!(panel.scroll.offset, 3);
     }

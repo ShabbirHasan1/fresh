@@ -282,8 +282,11 @@ pub struct SettingItem {
     pub section: Option<String>,
     /// Whether this item is the first in its section (for rendering section headers)
     pub is_section_start: bool,
-    /// Layout width for description wrapping (set during render)
-    pub layout_width: u16,
+    /// Visual style (card border thickness, padding, etc.) for this item.
+    /// Cached on the item so the `ScrollItem::height(width)` trait impl can
+    /// compute the correct height without taking a style parameter; flipped
+    /// in bulk by `SettingsState::set_item_style` when the user toggles UI mode.
+    pub style: ItemBoxStyle,
     /// Path to sibling dual-list setting (for cross-exclusion refresh)
     pub dual_list_sibling: Option<String>,
 }
@@ -416,49 +419,178 @@ impl SettingControl {
     }
 }
 
-/// Height of a section header (header line + gap)
-pub const SECTION_HEADER_HEIGHT: u16 = 2;
+// === Layout primitives ===
+//
+// Every magic number that used to be sprinkled through the render path lives
+// inside `ItemBoxStyle`. The struct is `Copy`, has a `Default` impl, and is
+// stored on each `SettingItem` — so toggling cards on/off, removing the
+// indicator gutter, or tightening the padding is a single state mutation
+// rather than a code change.
 
-impl SettingItem {
-    /// Calculate the total height needed for this item (control + description + spacing + section header if applicable)
-    /// Uses layout_width for description wrapping when available.
-    pub fn item_height(&self) -> u16 {
-        // Height = section header (if first in section) + control + description (if any) + spacing
-        let section_height = if self.is_section_start {
-            SECTION_HEADER_HEIGHT
-        } else {
-            0
-        };
-        let description_height = self.description_height(self.layout_width);
-        section_height + self.control.control_height() + description_height + 1
-    }
+/// Visual style for a setting item: tunes every dimension of the layout so
+/// chrome (card border, padding, section header, indicator gutter) can be
+/// toggled or tweaked from one place.
+///
+/// All values are in terminal cells (rows or columns). Setting a row/col count
+/// to `0` disables that piece of chrome; the rest of the layout still works.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ItemBoxStyle {
+    /// Rows occupied by a section header: title row + blank gap below it.
+    /// Set to `0` to suppress section headings entirely.
+    pub section_header_rows: u16,
+    /// Top/bottom border thickness of the per-item card (rows).
+    pub card_border_rows: u16,
+    /// Left/right border thickness of the per-item card (columns).
+    pub card_border_cols: u16,
+    /// Columns reserved on the left of the card's interior for the focus
+    /// indicator (`>`), the modified marker (`●`), and a single-space gutter.
+    pub focus_indicator_cols: u16,
+    /// Right-side padding inside the card so wrapped description text doesn't
+    /// butt up against the right border.
+    pub description_right_padding_cols: u16,
+}
 
-    /// Calculate description height wrapped to the given width.
-    /// If width is 0 (not yet set), falls back to 1 line.
-    pub fn description_height(&self, width: u16) -> u16 {
-        if let Some(ref desc) = self.description {
-            if desc.is_empty() {
-                return 0;
-            }
-            if width == 0 {
-                return 1;
-            }
-            // Calculate number of lines needed for wrapped description
-            let chars_per_line = width.saturating_sub(2) as usize; // Leave some margin
-            if chars_per_line == 0 {
-                return 1;
-            }
-            desc.len().div_ceil(chars_per_line) as u16
-        } else {
-            0
+impl ItemBoxStyle {
+    /// The default look used by the settings panel: 1-row top/bottom card
+    /// borders, 1-col side borders, 2-row section headers.
+    pub const fn cards() -> Self {
+        Self {
+            section_header_rows: 2,
+            card_border_rows: 1,
+            card_border_cols: 1,
+            focus_indicator_cols: 3,
+            description_right_padding_cols: 2,
         }
     }
 
-    /// Calculate the content height (control + description, excluding spacing)
-    /// Uses layout_width for description wrapping when available.
-    pub fn content_height(&self) -> u16 {
-        let description_height = self.description_height(self.layout_width);
-        self.control.control_height() + description_height
+    /// A flat look with no card border. Items still get 1-row gap chrome
+    /// (carried by the section header) and the indicator gutter.
+    pub const fn flat() -> Self {
+        Self {
+            section_header_rows: 2,
+            card_border_rows: 0,
+            card_border_cols: 0,
+            focus_indicator_cols: 3,
+            description_right_padding_cols: 2,
+        }
+    }
+
+    /// Width available for wrapped description text inside a card of the
+    /// given outer width (subtracting both borders, the focus gutter, and
+    /// the right padding).
+    pub fn inner_text_width(&self, card_outer_width: u16) -> u16 {
+        card_outer_width
+            .saturating_sub(2 * self.card_border_cols)
+            .saturating_sub(self.focus_indicator_cols)
+            .saturating_sub(self.description_right_padding_cols)
+    }
+}
+
+impl Default for ItemBoxStyle {
+    fn default() -> Self {
+        Self::cards()
+    }
+}
+
+/// Vertical layout descriptor for a single setting item.
+///
+/// Fields are named bands of rows; together they describe both the total
+/// height of the item and where each band lives along the y-axis. The render
+/// path uses these offsets directly instead of recomputing them inline.
+///
+/// All offsets are relative to the top of the area allocated to the item.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ItemBox {
+    /// Section header band above the card (0 if not a section start).
+    pub section_header_rows: u16,
+    /// Top edge of the card.
+    pub top_border_rows: u16,
+    /// The control widget (toggle, dropdown, multi-row list, …).
+    pub control_rows: u16,
+    /// The wrapped description text below the control.
+    pub description_rows: u16,
+    /// Bottom edge of the card.
+    pub bottom_border_rows: u16,
+}
+
+impl ItemBox {
+    pub fn total_rows(&self) -> u16 {
+        self.section_header_rows
+            + self.top_border_rows
+            + self.control_rows
+            + self.description_rows
+            + self.bottom_border_rows
+    }
+
+    /// Y of the card's top border.
+    pub fn card_top_y(&self) -> u16 {
+        self.section_header_rows
+    }
+
+    /// Y of the first content row (the control).
+    pub fn control_y(&self) -> u16 {
+        self.card_top_y() + self.top_border_rows
+    }
+
+    /// Y of the first description row.
+    pub fn description_y(&self) -> u16 {
+        self.control_y() + self.control_rows
+    }
+
+    /// Y of the bottom border.
+    pub fn bottom_border_y(&self) -> u16 {
+        self.description_y() + self.description_rows
+    }
+
+    /// Total card height (top border + content + bottom border).
+    pub fn card_height(&self) -> u16 {
+        self.top_border_rows
+            + self.control_rows
+            + self.description_rows
+            + self.bottom_border_rows
+    }
+
+    /// Card content rows (control + description, no borders).
+    pub fn content_rows(&self) -> u16 {
+        self.control_rows + self.description_rows
+    }
+}
+
+impl SettingItem {
+    /// Compute the visual layout of this item for a given outer width and
+    /// style. `width` is the full width allocated to the item (including the
+    /// card borders and the focus-indicator columns).
+    pub fn layout_box(&self, width: u16, style: &ItemBoxStyle) -> ItemBox {
+        ItemBox {
+            section_header_rows: if self.is_section_start {
+                style.section_header_rows
+            } else {
+                0
+            },
+            top_border_rows: style.card_border_rows,
+            control_rows: self.control.control_height(),
+            description_rows: self.description_rows_for(style.inner_text_width(width)),
+            bottom_border_rows: style.card_border_rows,
+        }
+    }
+
+    /// Rows needed for the description when wrapped to `inner_width` columns.
+    ///
+    /// The wrapping here is a byte-based approximation that overestimates
+    /// slightly compared to the word-wrap used at render time; that's fine —
+    /// the renderer clips to the available rows, never to fewer than the
+    /// number of wrapped lines it produces.
+    pub fn description_rows_for(&self, inner_width: u16) -> u16 {
+        let Some(desc) = self.description.as_deref() else {
+            return 0;
+        };
+        if desc.is_empty() {
+            return 0;
+        }
+        if inner_width == 0 {
+            return 1;
+        }
+        desc.len().div_ceil(inner_width as usize) as u16
     }
 }
 
@@ -507,11 +639,18 @@ pub fn clean_description(name: &str, description: Option<&str>) -> Option<String
 }
 
 impl ScrollItem for SettingItem {
-    fn height(&self) -> u16 {
-        self.item_height()
+    fn height(&self, width: u16) -> u16 {
+        self.layout_box(width, &self.style).total_rows()
     }
 
-    fn focus_regions(&self) -> Vec<FocusRegion> {
+    fn focus_regions(&self, width: u16) -> Vec<FocusRegion> {
+        // Sub-region offsets are absolute within the item: callers add them to
+        // the cumulative item-y, so anything above the control row (section
+        // header, top border) has to be included or the scroll target lands
+        // on chrome instead of content.
+        let plan = self.layout_box(width, &self.style);
+        let label_y = plan.control_y();
+
         match &self.control {
             // TextList: each row is a focus region
             SettingControl::TextList(state) => {
@@ -519,21 +658,21 @@ impl ScrollItem for SettingItem {
                 // Label row
                 regions.push(FocusRegion {
                     id: 0,
-                    y_offset: 0,
+                    y_offset: label_y,
                     height: 1,
                 });
                 // Each item row (id = 1 + row_index)
                 for i in 0..state.items.len() {
                     regions.push(FocusRegion {
                         id: 1 + i,
-                        y_offset: 1 + i as u16,
+                        y_offset: label_y + 1 + i as u16,
                         height: 1,
                     });
                 }
                 // Add-new row
                 regions.push(FocusRegion {
                     id: 1 + state.items.len(),
-                    y_offset: 1 + state.items.len() as u16,
+                    y_offset: label_y + 1 + state.items.len() as u16,
                     height: 1,
                 });
                 regions
@@ -544,7 +683,7 @@ impl ScrollItem for SettingItem {
                 // Label row
                 regions.push(FocusRegion {
                     id: 0,
-                    y_offset: 0,
+                    y_offset: label_y,
                     height: 1,
                 });
                 // Header row (not selectable, but takes space)
@@ -553,7 +692,7 @@ impl ScrollItem for SettingItem {
                 for i in 0..body {
                     regions.push(FocusRegion {
                         id: 1 + i,
-                        y_offset: 2 + i as u16, // after label + header
+                        y_offset: label_y + 2 + i as u16, // after label + header
                         height: 1,
                     });
                 }
@@ -562,7 +701,7 @@ impl ScrollItem for SettingItem {
             // Map: each entry row is a focus region
             SettingControl::Map(state) => {
                 let mut regions = Vec::new();
-                let mut y = 0u16;
+                let mut y = label_y;
 
                 // Label row
                 regions.push(FocusRegion {
@@ -611,31 +750,31 @@ impl ScrollItem for SettingItem {
                 // Label row
                 regions.push(FocusRegion {
                     id: 0,
-                    y_offset: 0,
+                    y_offset: label_y,
                     height: 1,
                 });
                 // Each binding (id = 1 + index)
                 for i in 0..state.bindings.len() {
                     regions.push(FocusRegion {
                         id: 1 + i,
-                        y_offset: 1 + i as u16,
+                        y_offset: label_y + 1 + i as u16,
                         height: 1,
                     });
                 }
                 // Add-new row
                 regions.push(FocusRegion {
                     id: 1 + state.bindings.len(),
-                    y_offset: 1 + state.bindings.len() as u16,
+                    y_offset: label_y + 1 + state.bindings.len() as u16,
                     height: 1,
                 });
                 regions
             }
-            // Other controls: single region covering the whole item
+            // Other controls: single region covering the card content.
             _ => {
                 vec![FocusRegion {
                     id: 0,
-                    y_offset: 0,
-                    height: self.item_height().saturating_sub(1), // Exclude spacing
+                    y_offset: label_y,
+                    height: plan.content_rows(),
                 }]
             }
         }
@@ -1028,7 +1167,7 @@ pub fn build_item(schema: &SettingSchema, ctx: &BuildContext) -> SettingItem {
         is_null,
         section: schema.section.clone(),
         is_section_start: false, // Set later in build_page after sorting
-        layout_width: 0,
+        style: ItemBoxStyle::default(),
         dual_list_sibling: schema.dual_list_sibling.clone(),
     }
 }
@@ -1261,7 +1400,7 @@ pub fn build_item_from_value(
         is_null,
         section: schema.section.clone(),
         is_section_start: false, // Not used in dialogs
-        layout_width: 0,
+        style: ItemBoxStyle::default(),
         dual_list_sibling: schema.dual_list_sibling.clone(),
     }
 }

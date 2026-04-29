@@ -117,9 +117,13 @@ pub struct SettingsState {
     /// When a user "resets" a setting, we remove it from the delta rather than
     /// setting it to the schema default.
     pub pending_deletions: std::collections::HashSet<String>,
-    /// Last known layout width for description wrapping.
-    /// Set during render and propagated to items for height calculations.
+    /// Last known layout width for the body panel. Set during render so input
+    /// handlers (which run between renders) can recompute scroll math without
+    /// access to the frame area.
     pub layout_width: u16,
+    /// Visual style applied to every item in this state. Toggle with
+    /// [`Self::set_item_style`] to swap between card / flat presentation.
+    pub item_style: super::items::ItemBoxStyle,
 }
 
 impl SettingsState {
@@ -169,6 +173,7 @@ impl SettingsState {
             layer_sources,
             pending_deletions: std::collections::HashSet::new(),
             layout_width: 0,
+            item_style: super::items::ItemBoxStyle::default(),
         })
     }
 
@@ -484,33 +489,43 @@ impl SettingsState {
         self.ensure_visible();
     }
 
-    /// Ensure the selected item is visible in the viewport
-    /// Update layout_width on all items in the current page.
-    /// Called before any scroll calculations so heights are correct.
-    pub fn update_layout_widths(&mut self) {
-        let width = self.layout_width;
-        if width > 0 {
-            if let Some(page) = self.pages.get_mut(self.selected_category) {
-                for item in &mut page.items {
-                    item.layout_width = width;
-                }
+    /// Toggle the visual style applied to every item.
+    ///
+    /// Style is cached per-item so the `ScrollItem::height(width)` trait impl
+    /// can compute the correct height without taking a style parameter; this
+    /// method propagates the change to every item across every page in one
+    /// pass. Recomputes the scroll panel content height too, since heights
+    /// just changed.
+    pub fn set_item_style(&mut self, style: super::items::ItemBoxStyle) {
+        if self.item_style == style {
+            return;
+        }
+        self.item_style = style;
+        for page in &mut self.pages {
+            for item in &mut page.items {
+                item.style = style;
             }
+        }
+        let width = self.layout_width;
+        if let Some(page) = self.pages.get(self.selected_category) {
+            self.scroll_panel
+                .update_content_height(&page.items, width);
         }
     }
 
+    /// Ensure the selected item is visible in the viewport.
     pub fn ensure_visible(&mut self) {
         if self.focus_panel() != FocusPanel::Settings {
             return;
         }
 
-        self.update_layout_widths();
-
         // Need to avoid borrowing self for both page and scroll_panel
         let selected_item = self.selected_item;
         let sub_focus = self.sub_focus;
+        let width = self.layout_width;
         if let Some(page) = self.pages.get(self.selected_category) {
             self.scroll_panel
-                .ensure_focused_visible(&page.items, selected_item, sub_focus);
+                .ensure_focused_visible(&page.items, selected_item, sub_focus, width);
         }
     }
 
@@ -954,9 +969,10 @@ impl SettingsState {
         // Reset scroll offset but preserve viewport for ensure_visible
         self.scroll_panel.scroll.offset = 0;
         // Update content height for the new category's items
-        self.update_layout_widths();
+        let width = self.layout_width;
         if let Some(page) = self.pages.get(self.selected_category) {
-            self.scroll_panel.update_content_height(&page.items);
+            self.scroll_panel
+                .update_content_height(&page.items, width);
         }
         self.sub_focus = None;
         self.init_map_focus(true);
@@ -1935,13 +1951,14 @@ impl SettingsState {
         // When dropdown opens, update content height and ensure it's visible
         if opened {
             // Update content height since item is now taller
-            self.update_layout_widths();
             let selected_item = self.selected_item;
+            let width = self.layout_width;
             if let Some(page) = self.pages.get(self.selected_category) {
-                self.scroll_panel.update_content_height(&page.items);
+                self.scroll_panel
+                    .update_content_height(&page.items, width);
                 // Ensure the dropdown item is visible with its new expanded height
                 self.scroll_panel
-                    .ensure_focused_visible(&page.items, selected_item, None);
+                    .ensure_focused_visible(&page.items, selected_item, None, width);
             }
         }
     }
