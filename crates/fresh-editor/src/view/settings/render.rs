@@ -762,10 +762,14 @@ fn render_setting_item_pure(
                 let header_y = area.y;
                 let _header_area_height = header_visible_height.min(area.height);
 
-                // First row: section title (bold, accent color, no trailing rule)
+                // First row: section title (bold). We use editor_fg rather
+                // than menu_active_fg because some custom themes set the
+                // latter to match popup_bg (it's only "active" when paired
+                // with a highlight bg), which makes the header invisible on
+                // the settings panel.
                 if header_visible_start == 0 {
                     let header_style = Style::default()
-                        .fg(theme.menu_active_fg)
+                        .fg(theme.editor_fg)
                         .add_modifier(Modifier::BOLD);
                     frame.render_widget(
                         Paragraph::new(section_name.as_str()).style(header_style),
