@@ -7,7 +7,16 @@ production bugs and surfacing two further behavioral asymmetries
 (Redo cursor; ExpandSelection on punctuation runs).
 **Branch:** `claude/e2e-test-migration-design-HxHlO`
 **Owner:** TBD
-**Scope:** `crates/fresh-editor/tests/e2e/*` (~220 files)
+**Scope:** `crates/fresh-editor/tests/e2e/*` (~227 files)
+
+**Forward plan (2025-Q3+):** see **Part II — Realignment toward full
+coverage** at the bottom of this doc (§11–§19). The original §6/§9
+expansion plan deferred ~50% of the suite (Class B viewport, modal
+UI, LSP, filesystem, rendering); Part II revises that and targets
+**every e2e file**, including rendering, on the basis that each
+migrated test now produces three artifacts (regression + proptest
+seed + shadow-model check) instead of one. Where Part I and Part II
+disagree on forward direction, Part II takes precedence.
 
 ## What's landed (cumulative)
 
@@ -115,13 +124,21 @@ that drives every keystroke would never have surfaced them.
 | 4 | `undo_redo` migration | Undo restores cursor to pre-write position, but Redo does *not* re-advance the cursor past re-inserted bytes | Pinned (asymmetry recorded as theorem) |
 | 5 | `selection` migration | ExpandSelection on a punctuation-then-word run selects `"**-"` in e2e but `"**-word"` in the semantic harness — likely a `word_characters` resolution gap | Pinned (semantic-harness behavior recorded) |
 
-**Still deferred:** the full `RenderSnapshot` design from §9.1 and
-the issue-#1147-style Class B rewrites that depend on it. Smaller
-remaining batches without framework needs: `multicursor.rs` edge
-cases, `vi_mode.rs` action subset, the
+**Still deferred (per the original plan):** the full `RenderSnapshot`
+design from §9.1 and the issue-#1147-style Class B rewrites that
+depend on it. Smaller remaining batches without framework needs:
+`multicursor.rs` edge cases, `vi_mode.rs` action subset, the
 `test_select_word_accented_characters` proptest-style migration.
 Each should land alongside the first theorem that demonstrably
 needs the corresponding extension.
+
+**Superseded by Part II.** The "deferred" set is no longer the
+boundary of the migration. Part II (§11–§19) lays out the
+twelve scenario types needed to represent every e2e file in the
+suite — including rendering, LSP, filesystem, mouse, and
+animations — and the implementation order for getting there. The
+text immediately above is preserved as the Part-I plan it was
+written under.
 
 ---
 
@@ -1066,3 +1083,710 @@ The rough triage suggests ≈ 45 % of the suite (Class A + Class B) is
 mechanically migratable to declarative theorems; another ~15 % (modal
 UI) needs a small additional vocabulary; the rest stays imperative
 because what they test *is* the rendering / GUI / external behavior.
+
+(Part II below revises this triage to "every file is migratable" —
+see §13 for the per-category mapping.)
+
+---
+
+# Part II — Realignment toward full coverage (2025-Q3+)
+
+## §11. Goal realignment
+
+The original plan framed the work as: "make tests declarative;
+harvest the design wins (no keymap coupling, no render coupling, no
+screen scraping); accept that ~30 % of the suite stays imperative
+because rendering, GUI, LSP, and filesystem can't be reduced to pure
+state."
+
+The realigned plan keeps every Part-I win and adds one observation:
+declarativity is the *means*. The *ends* are two specific kinds of
+leverage that fall out for free once tests are data:
+
+1. **Property-test leverage.** Every scenario doubles as a generator
+   seed and a shrinking target. The corpus teaches `proptest` what
+   action shapes are realistic; counterexamples shrink to a serializable
+   `Vec<Action>` that becomes a permanent regression file with no
+   source change.
+2. **Shadow-model leverage.** A shadow model is one `step` function
+   away from being a differential check against every scenario in
+   the corpus. Adding a shadow doesn't require per-shadow
+   scaffolding; the runner feeds each scenario through both editor
+   and shadow and asserts equal observables.
+
+Both wins are concrete day-one wins, not future possibilities. Track
+A already showed (1) — uniform-noise `proptest` found two latent
+panics in 70s. The bespoke shadow models in `tests/shadow_model_*.rs`
+already exist but operate in their own loops with their own
+observable contracts; (2) folds them into the same data path so a
+new shadow is one trait-impl away.
+
+The realignment changes one practical decision: **target every e2e
+file**, including the categories the original plan deferred or
+carved out, because each migration now produces three artifacts
+(regression + proptest seed + shadow check) instead of one. The
+ratio inverts the cost/benefit on Class B and on the
+modal/LSP/FS/rendering categories.
+
+A second observation, sharpened in §15: rendering does not have to
+sit outside the framework. The pipeline `EditorState → RenderSnapshot
+→ StyledFrame → AnsiStream` is four pure-ish layers; each layer has
+a scenario type; tests target the *highest* layer they care about.
+This subsumes today's split between `tests/e2e/` (renders) and
+`tests/semantic/` (doesn't render) into a single layered family.
+
+## §12. Per-test leverage
+
+Why each migrated test is worth ≥ 3× a non-migrated one:
+
+| Artifact | Today (imperative e2e) | After migration |
+|---|---|---|
+| Regression check | yes | yes |
+| Proptest seed (corpus-guided generation) | no | free |
+| Shadow-model differential check | no | free |
+| Shrinkable counterexample on failure | no | free (`proptest` shrinks `Vec<Action>`) |
+| Serializable for regression file / CI artifact | no | free (`Action`, `TheoremFailure` already `Serialize`) |
+| Replayable across editor versions / branches | no | free |
+| Mutation-test target | no | free |
+| Cross-feature property check | no | free (the corpus *is* the property's domain) |
+| CI dashboard signal (typed failure) | panic-string parse | typed JSON |
+
+The same `Scenario` value drives every row. The *write* cost stays
+roughly constant; the *read* count multiplies. This is what flips
+the migration ROI on the previously-deferred categories: a
+`PersistenceScenario` for `hot_exit_recovery_lsp_sync.rs` doesn't
+just replace one e2e — it joins the proptest harness, the shadow
+fs model, and the regression-file pipeline simultaneously.
+
+## §13. Scenario taxonomy — covering every e2e
+
+The framework expands from one struct (`BufferTheorem`) to a family
+of scenarios indexed by primary observable. Each e2e file maps to
+exactly one scenario type; secondary observables ride along as
+context fields. Files that legitimately exercise two subsystems
+(e.g., `lsp_code_action_modal.rs`) carry both subsystems in their
+`ScenarioContext` and assert on the union of observables — see §14
+for how composition works.
+
+### 13.1 Twelve scenario types
+
+| Type | Primary observable | Files (~) | Status |
+|---|---|---|---|
+| `BufferScenario` | text + cursors + selection | 25 done / 50 total | landed (§5, Track-B) |
+| `LayoutScenario` | `RenderSnapshot` (viewport, gutter, hw cursor) | 1 done / 32 total | minimal landed; needs §9.1 expansion |
+| `ModalScenario` | prompt/palette/picker/menu state | 0 / 43 | not started |
+| `WorkspaceScenario` | splits, tabs, dock layout, buffer list | 0 / 19 | not started |
+| `PersistenceScenario` | `VirtualFs` + session/recovery state | 0 / 23 | not started |
+| `LspScenario` | scripted LSP exchange + buffer | 0 / 29 | not started |
+| `StyleScenario` | `StyledFrame` (cell role × theme) | 0 / 12 | not started |
+| `InputScenario` | mouse/composition events as data | 0 / 7 | not started |
+| `TemporalScenario` | timed sequence of frames (`MockClock`) | 0 / 3 | not started |
+| `TerminalIoScenario` | ANSI bytes via vt100 round-trip | 0 / 7 | not started |
+| `PluginScenario` | plugin-driven actions + plugin script | 0 / 5 | not started |
+| `GuiScenario` | wgpu/winit observables | 0 / 1 | not started; lowest priority |
+
+Total ≈ 231 (some files are dual-category; unique e2e file count is
+227 per `ls tests/e2e | wc -l`).
+
+### 13.2 Per-category mapping
+
+Each row below names representative files. Full file lists belong
+in the per-phase implementation tickets, not here.
+
+**`BufferScenario` (~50)** — pure text/cursor/selection. Already
+landed: `case_conversion`, `sort_lines`, `indent_dedent`,
+`smart_home`, `duplicate_line`, `toggle_comment`, `unicode_cursor`,
+`undo_redo`, `selection`, `auto_pairs`, `save_state`, `emacs_actions`.
+Pending: `basic`, `movement`, `paste`, `shift_backspace`,
+`triple_click`, `block_selection`, `multibyte_characters`,
+`smart_editing`, `tab_indent_selection`, `select_to_paragraph`,
+`document_model`, `goto_matching_bracket`, `multicursor`,
+`undo_redo_marker_roundtrip`, `undo_bulk_edit_after_save`,
+`issue_1288_word_select_whitespace`, `issue_1566_arrow_selection`,
+`issue_1697_ctrl_d_after_search`, `search_selection_on_punctuation`,
+`overlay_extend_to_line_end`, `search_navigation_after_move`.
+
+**`LayoutScenario` (~32)** — viewport scroll, soft-wrap, gutter,
+hardware cursor row/col. The unblocking dependency is
+`RenderSnapshot` per §9.1. Files: `issue_1147_wrapped_line_nav`,
+`scroll_clearing`, `scroll_wrapped_reach_last_line`, `scrolling`,
+`line_wrap_*` (5 files), `line_number_bugs`,
+`search_center_on_scroll`, `search_*_stall_after_wrap`,
+`hanging_wrap_indent`, `horizontal_scrollbar`,
+`issue_1502_word_wrap_squished`, `issue_1574_*_scroll`,
+`virtual_line*`, `popup_wrap_indent`, `margin`, `vertical_rulers`,
+`memory_scroll_leak`, `side_by_side_diff_*`, `markdown_compose*`,
+`redraw_screen`, `tab_scrolling`, `folding`,
+`issue_1571_fold_indicator_lag`, `issue_1568_session_fold_restore`,
+`issue_779_after_eof_shade`, `issue_1790_compose_wrap_highlight`,
+`test_scrollbar_keybinds_cursor`.
+
+**`ModalScenario` (~43)** — adds a `ModalState` observable and
+modal-aware actions (`OpenPrompt(kind)`, `FilterPrompt(s)`,
+`ConfirmPrompt`, `CancelPrompt`, `MenuSelect(item)`). Files:
+`command_palette`, `file_browser`, `file_explorer`,
+`action_popup_global`, `prompt`, `prompt_editing`, `popup_selection`,
+`menu_bar`, `menu_*_bleed`, `explorer_*`, `live_grep`, `search`,
+`search_replace`, `lsp_code_action_modal`, `lsp_completion_*`,
+`dabbrev_completion`, `status_bar_message_click`,
+`update_notification`, `sudo_save_prompt`,
+`save_nonexistent_directory`, `settings`, `settings_*` (multiple),
+`keybinding_editor`, `unicode_prompt_bugs`,
+`issue_1718_settings_search_utf8_panic`, `preview_lsp_popup_focus`,
+`cursor_under_popup`, `toggle_bars`.
+
+**`WorkspaceScenario` (~19)** — adds `WorkspaceState { splits, tabs,
+docks, buffer_list }` to the context and observable. Splits and
+tabs are addressable as `SplitId`/`TabId`. Files: `buffer_groups`,
+`buffer_lifecycle`, `buffer_settings_commands`, `multi_file_opening`,
+`preview_tabs`, `split_focus_tab_click`, `split_tabs`, `split_view`,
+`split_view_expectations`, `split_view_markdown_compose`,
+`tab_config`, `tab_drag`, `copy_buffer_path`,
+`issue_1540_tab_click_focus`, `position_history*` (4 files).
+
+**`PersistenceScenario` (~23)** — adds `VirtualFs` to the context
+(an in-memory FS the editor reads/writes through a fake adapter)
+and `FsState` as observable. Files: `auto_revert`, `encoding`,
+`external_file_save_as_tab`, `file_permissions`, `hot_exit_*`,
+`large_file_*`, `on_save_actions`, `recovery`,
+`save_as_language_detection`, `server_session_lifecycle`,
+`session_hot_exit`, `slow_filesystem`, `stdin_input`, `symlinks`,
+`unnamed_buffer_persistence`, `workspace`, `open_folder`,
+`lifecycle`, `bash_profile_editing`, `binary_file`,
+`save_nonexistent_directory` (dual with Modal),
+`undo_bulk_edit_after_save` (dual with Buffer).
+
+**`LspScenario` (~29)** — adds `LspScript`, an ordered list of
+expected client-to-server messages and pre-written
+server-to-client responses. The fake server matches messages by
+shape, replies on cue, and records traffic for assertion. Files:
+`lsp` and 26 `lsp_*` files; `language_features_e2e`;
+`universal_lsp`; `inline_diagnostics`; `issue_1572_inlay_hint_drift`;
+`issue_1573_format_buffer`. Note that `hot_exit_recovery_lsp_sync`
+is dual (Persistence + LSP).
+
+**`StyleScenario` (~12)** — pulls a `StyledFrame` via the §15
+`RenderSnapshot → StyledFrame` projection (theme + role table) and
+asserts on cell roles + colors via `Inspect::{Cell, Row, Column,
+Region, FullFrame}`. Subsumes today's `theme_screenshots`-style
+golden tests with a diffable JSON form. Files: `theme`,
+`theme_screenshots`, `blog_showcases`, `cursor_style_rendering`,
+`crlf_rendering`, `syntax_highlighting_coverage`,
+`syntax_highlighting_embedded_offset`, `syntax_language_case`,
+`glob_language_detection`, `config_language_selector`,
+`csharp_language_coherence`, `warning_indicators`,
+`issue_1554_scrollbar_theme_color`, `issue_1577_unicode_width`,
+`issue_1598_shebang_detection`, `issue_779_after_eof_shade`.
+
+**`InputScenario` (~7)** — extends the `Action` alphabet with
+`InputEvent::{Mouse(MouseEvent), Compose(ComposeSeq), KeyChord(...)}`.
+Mouse coordinates project to (line, byte) via the current
+`RenderSnapshot`. Files: `mouse`, `capslock_shortcuts`, `altgr_shift`,
+`csi_u_session_input`, `issue_1620_split_terminal_click_panic`,
+`locale`, `tab_drag` (dual with Workspace).
+
+**`TemporalScenario` (~3)** — adds a `MockClock` and an
+`InputEvent::AdvanceClock(Duration)` action. Expectation is a
+`Vec<RenderSnapshot>` taken after each clock tick. Files:
+`animation`, `flash`, `status_bar_config` (timing aspects).
+
+**`TerminalIoScenario` (~7)** — projects `StyledFrame` through the
+real escape-sequence emitter, then through `vt100` back to a
+typed grid; asserts on the round-trip grid. This catches escape
+emission bugs without committing to specific byte sequences. Files:
+`ansi_cursor`, `terminal`, `terminal_close`, `terminal_resize`,
+`terminal_split_focus_live`, `rendering`, `redraw_screen` (dual).
+The harness already does most of this through `render_real` /
+`render_real_incremental`; the realignment formalizes it into a
+scenario type.
+
+**`PluginScenario` (~5)** — adds a `PluginScript` (the JS plugin
+source as a string + the messages it's expected to emit). Plugin
+actions are dispatched through the existing `process_async_messages`
+path; the runner asserts on the plugin's effect on `BufferState` and
+on the message log. Files: anything under `tests/e2e/plugins/`.
+
+**`GuiScenario` (~1)** — `gui.rs`. The wgpu/winit front-end shares
+the `Editor` core but has its own input layer (raw mouse, text-input
+IME) and its own output layer (rasterized cells). Most editor-level
+behavior in `gui.rs` is already covered by `BufferScenario` /
+`LayoutScenario`; what remains is a thin layer of GUI-specific
+asserts (font fallback, sub-pixel positioning). Lowest priority;
+may stay imperative.
+
+### 13.3 Cross-cutting observables
+
+Some files exercise more than one subsystem. Examples:
+
+| File | Categories | How it composes |
+|---|---|---|
+| `lsp_code_action_modal.rs` | `LspScenario` + `ModalScenario` | context carries `LspScript`; expectation includes `ModalState` |
+| `hot_exit_recovery_lsp_sync.rs` | `PersistenceScenario` + `LspScenario` | context carries `VirtualFs` + `LspScript` |
+| `tab_drag.rs` | `WorkspaceScenario` + `InputScenario` | context carries `WorkspaceState`; actions include `Mouse::Drag` |
+| `issue_1554_scrollbar_theme_color.rs` | `LayoutScenario` + `StyleScenario` | observable is `(RenderSnapshot, StyledFrame)` |
+
+Composition is direct, not "convert to one type or the other." See
+§14 for the runner's type-level handling.
+
+## §14. Composable scenario architecture
+
+The Part-I runner shape (`assert_buffer_theorem(t: BufferTheorem)`)
+generalizes to:
+
+```rust
+pub struct Scenario<Obs: Observable> {
+    pub description: String,            // String, not &'static str (data form)
+    pub context:     ScenarioContext,
+    pub actions:     Vec<InputEvent>,   // superset of Action
+    pub expectation: Obs,
+}
+
+pub struct ScenarioContext {
+    pub buffer:    BufferContext,                  // initial_text, behavior, language, terminal
+    pub workspace: Option<WorkspaceContext>,
+    pub fs:        Option<VirtualFs>,
+    pub lsp:       Option<LspScript>,
+    pub plugins:   Option<PluginScript>,
+    pub theme:     Option<Theme>,
+    pub clock:     Option<MockClock>,
+}
+
+/// Anything the runner can extract from a live editor and assert on.
+pub trait Observable: Serialize + DeserializeOwned + PartialEq {
+    fn extract(api: &mut dyn EditorTestApi) -> Self;
+}
+
+pub fn check_scenario<Obs: Observable>(s: Scenario<Obs>)
+    -> Result<(), TheoremFailure>;
+```
+
+`InputEvent` is the new top-level alphabet:
+
+```rust
+pub enum InputEvent {
+    Action(Action),                  // existing 600-variant editor alphabet
+    Mouse(MouseEvent),               // Click(x,y), Drag(start,end), Wheel(dx,dy)
+    Compose(ComposeSeq),             // dead keys / IME
+    OpenPrompt(PromptKind),          // for ModalScenario
+    FilterPrompt(String),
+    ConfirmPrompt,
+    CancelPrompt,
+    AdvanceClock(Duration),          // for TemporalScenario
+    LspMessage(LspIncoming),         // server → client injection
+    FsExternalEdit(PathBuf, String), // for auto_revert tests
+    Wait(WaitCondition),             // semantic wait, never wall-clock sleep
+}
+```
+
+The seven new variants beyond `Action` are the price of full
+coverage. Each one is a typed event the runner knows how to
+dispatch deterministically. Crucially, **no variant is a `KeyCode`**
+— even mouse events project through the layout, not through
+`crossterm`.
+
+Each scenario type from §13.1 is a type alias / specialization:
+
+```rust
+pub type BufferScenario       = Scenario<BufferState>;
+pub type LayoutScenario       = Scenario<RenderSnapshot>;
+pub type ModalScenario        = Scenario<(BufferState, ModalState)>;
+pub type WorkspaceScenario    = Scenario<(BufferState, WorkspaceState)>;
+pub type PersistenceScenario  = Scenario<(BufferState, FsState)>;
+pub type LspScenario          = Scenario<(BufferState, LspTraffic)>;
+pub type StyleScenario        = Scenario<StyledFrame>;
+pub type InputScenario        = Scenario<RenderSnapshot>;     // mouse asserts on cursor row/col
+pub type TemporalScenario     = Scenario<Vec<RenderSnapshot>>;
+pub type TerminalIoScenario   = Scenario<RoundTripGrid>;
+pub type PluginScenario       = Scenario<(BufferState, PluginLog)>;
+pub type GuiScenario          = Scenario<GuiSnapshot>;
+```
+
+The runner is a single entry point parameterized by `Obs`; the
+specializations exist for ergonomic constructors and for
+proptest-strategy specialization, not because the runner branches.
+
+`Observable` is the interface shadow models also implement (§16).
+
+## §15. Rendering inside the framework
+
+This supersedes §8. The original §8 carved rendering out as "stays
+imperative, forever" because the editor's render pass collapses
+several conceptual stages into one `terminal.draw` call. The
+realigned plan factors that pass into named layers and gives each
+layer its own scenario type. Tests target the *highest* layer they
+care about and stop there.
+
+### 15.1 The four rendering layers
+
+```
+        EditorState
+             │  layout(width, height)
+             ▼
+       RenderSnapshot       ← Class B  (LayoutScenario, theme-free)
+             │  style(Theme, RoleTable)
+             ▼
+        StyledFrame         ← Class C  (StyleScenario, role-tagged cells)
+             │  emit(Capabilities, EmitState)
+             ▼
+        AnsiStream          ← (rarely tested directly)
+             │  vt100 round-trip
+             ▼
+       RoundTripGrid        ← Class D  (TerminalIoScenario)
+```
+
+Each arrow is a function. None of these layers exists as a named
+public type today; building them is the bulk of the rendering-side
+work. Proposed locations:
+
+| Type | Where | Approx LOC |
+|---|---|---|
+| `RenderSnapshot` | `crates/fresh-editor/src/test_api.rs` (new) | 300 |
+| `StyledFrame` | same | 80 |
+| `RoundTripGrid` | same | 60 |
+| Layer functions | `src/view/render_layers.rs` (refactored from existing render code) | ~500 net |
+
+The refactor does **not** rewrite the renderer. It splits the
+existing `render()` body into three named functions:
+
+```rust
+fn layout(state: &EditorState, dim: TerminalDim) -> RenderSnapshot;
+fn style(snapshot: &RenderSnapshot, theme: &Theme, roles: &RoleTable) -> StyledFrame;
+fn emit(frame: &StyledFrame, caps: &Capabilities) -> AnsiStream;
+```
+
+Today's `render()` is the composition. Production stays unchanged
+(it still composes them in one call); tests call them
+individually.
+
+### 15.2 What each scenario type catches
+
+| Type | Catches | Doesn't catch |
+|---|---|---|
+| `LayoutScenario` | viewport reconciliation, wrap math, gutter widths, hw cursor row/col, popup placement, scrollbar geometry | colors, glyph choice, escape correctness |
+| `StyleScenario` | theme contrast, role-to-color mapping, modifier flags, syntax-highlight color regressions | terminal-emulator quirks |
+| `TerminalIoScenario` | escape emission bugs, optimization regressions (e.g., redundant SGR resets), incremental redraw correctness | terminal-side bugs (xterm vs kitty) |
+| `TemporalScenario` | animation frame correctness, fade/flash duration, blink phase, scroll smoothing | wall-clock drift |
+| `GuiScenario` | font fallback, sub-pixel positioning, IME interaction | wgpu driver bugs |
+
+Together these cover everything Part-I §8.3 listed as "stays
+imperative, forever" except for actual terminal-emulator and
+GPU-driver bugs. Those are correctly outside the editor's
+responsibility.
+
+### 15.3 Visual regression as a `StyleScenario`
+
+Today's `tests/e2e/theme_screenshots.rs` saves PNG-ish snapshots and
+compares byte-for-byte. Diff failures are uninspectable.
+
+Realigned: a `StyleScenario` with `Inspect::FullFrame` and
+`expected: StyledFrame` loaded from a JSON snapshot file. Diffs are
+structural (cell `(x,y)` changed role from `Selection` to `Normal`,
+fg `#abc` to `#def`). Snapshot regeneration is a CLI flag on the
+test runner. Today's PNG pipeline can be deleted.
+
+### 15.4 Animations as `TemporalScenario`
+
+```rust
+TemporalScenario {
+    description: "Flash banner fades over 250ms".into(),
+    context: ScenarioContext {
+        buffer: BufferContext::default(),
+        clock: Some(MockClock::epoch()),
+        ..Default::default()
+    },
+    actions: vec![
+        InputEvent::Action(Action::ShowFlash("saved".into())),
+        InputEvent::AdvanceClock(Duration::from_millis(50)),
+        InputEvent::AdvanceClock(Duration::from_millis(50)),
+        InputEvent::AdvanceClock(Duration::from_millis(150)),
+    ],
+    expectation: vec![
+        snapshot_t0_with_banner,
+        snapshot_t50_partially_faded,
+        snapshot_t100_more_faded,
+        snapshot_t250_no_banner,
+    ],
+}
+```
+
+Requires a single hook: `Editor` reads time through a
+`Clock` trait, default-impl uses the system clock, test-impl uses
+`MockClock`. ~30 LOC of production change, gated like the existing
+test API.
+
+### 15.5 Layered shadows
+
+Each layer admits its own shadow:
+
+| Layer | Shadow | Catches |
+|---|---|---|
+| `step` | reference editor (already discussed) | logic bugs |
+| `layout` | naive wrap algorithm in pure Rust | wrap regressions, viewport drift |
+| `style` | role-table-driven projection | theme regressions, role-to-color mismatches |
+| `emit` | minimal escape emitter | redundant escapes, incorrect cursor positioning |
+
+Each shadow runs on every applicable scenario in the corpus. The
+naive wrap shadow alone would have caught `issue_1502` and likely
+several `line_wrap_*` regressions before they shipped — uniform
+proptest never finds them because the failing inputs are specific
+(double-width chars at exactly column `width-1`); the shadow finds
+them on the first scenario that hits them.
+
+## §16. Shadow model framework
+
+One trait, multiple impls, every scenario auto-checked.
+
+```rust
+pub trait ShadowModel {
+    /// Subset of `EditorTestApi` this shadow can simulate. The
+    /// runner skips scenarios whose context references subsystems
+    /// the shadow doesn't claim to handle.
+    fn supports(&self) -> ShadowCapabilities;
+
+    fn dispatch(&mut self, event: &InputEvent);
+
+    fn extract<O: Observable>(&self) -> O;
+}
+
+pub struct ShadowCapabilities {
+    pub buffer:    bool,
+    pub workspace: bool,
+    pub fs:        bool,
+    pub lsp:       bool,
+    pub layout:    bool,   // can produce RenderSnapshot
+    pub style:     bool,   // can produce StyledFrame
+}
+```
+
+The differential test:
+
+```rust
+#[test]
+fn corpus_agrees_with_buffer_shadow() {
+    let shadow = BufferShadow::new();
+    for scenario in corpus::iter().filter(|s| BufferShadow::handles(s)) {
+        check_scenario_against_shadow(&scenario, &shadow)
+            .expect("shadow disagreement");
+    }
+}
+```
+
+Adding a new shadow:
+
+1. Implement `ShadowModel` for the alternate semantics (or
+   alternate algorithm).
+2. Declare which scenario types it supports via `ShadowCapabilities`.
+3. The corpus-wide differential test picks it up automatically.
+
+Shadows live in `tests/common/shadows/`:
+
+| Shadow | Supports | Purpose |
+|---|---|---|
+| `BufferShadow` | buffer | reference for editor-as-state-machine; catches actions.rs / state.rs class bugs |
+| `LayoutShadow` | buffer, layout | naive wrap algorithm; catches §15.5 wrap-table regressions |
+| `StyleShadow` | layout, style | role-driven projection from RenderSnapshot to StyledFrame |
+| `RopeShadow` | buffer | text stored in `Vec<u8>` not the production rope; catches rope-implementation bugs |
+| `MultiCursorShadow` | buffer | naive cursor merge; cross-checks the production merge |
+| `UndoShadow` | buffer | snapshot-stack undo; cross-checks the action-trace undo |
+
+Today's `tests/shadow_model_*.rs` files are a starting point — they
+become `ShadowModel` impls and are deleted from the bespoke
+test files (the corpus loop subsumes them).
+
+## §17. Implementation roadmap (revised)
+
+Phase numbers continue from Part-I. Each phase includes the
+framework extension *and* the e2e files migrated under it, so
+landing a phase is observable in the test count.
+
+### Phase E — data-model lockdown (small, mechanical)
+
+Prerequisite for everything else. Ships as one PR.
+
+- Derive `Serialize`/`Deserialize` on `BufferTheorem`, `TraceTheorem`,
+  `LayoutTheorem`.
+- Replace `&'static str` with `String` (or `Cow<'static, str>`) on
+  the three theorem structs.
+- Lift `BehaviorFlags`, filename, `TerminalSize` into the struct.
+  Delete the runner overloads (`assert_buffer_theorem_with_*`).
+- Promote `EvaluatedState` (`property.rs:23`) to the canonical
+  `BufferState` type.
+- Add a `ShadowModel` trait skeleton + `BufferShadow` impl that
+  delegates to the live editor (no-op differential).
+- CI job: dump the corpus to JSON, fail on schema-breaking diffs.
+
+Acceptance: every existing semantic test continues to pass; corpus
+JSON exists; `BufferShadow` runs the corpus and reports zero
+disagreements (it's the same editor; the harness is what's being
+validated).
+
+### Phase F — RenderSnapshot + LayoutScenario expansion
+
+- Land `RenderSnapshot` per §9.1 / §15.
+- Refactor `render()` into `layout` / `style` / `emit` (additive;
+  production keeps composing them).
+- Build `LayoutShadow` (naive wrap, ~200 LOC).
+- Migrate the 32 Class B files.
+
+Acceptance: 32 LayoutScenarios in `tests/semantic/layout/`, the
+naive-wrap differential passes.
+
+### Phase G — ModalScenario
+
+- Add `ModalState` observable to `EditorTestApi`.
+- Add `OpenPrompt`/`FilterPrompt`/`ConfirmPrompt`/`CancelPrompt` /
+  `MenuSelect` to `InputEvent`.
+- Migrate the 43 modal files.
+
+Acceptance: 43 ModalScenarios; the existing palette/picker/settings
+e2e files retired (or kept thin as redundant terminal-side proofs
+per §7).
+
+### Phase H — WorkspaceScenario
+
+- Add `WorkspaceState` observable.
+- Address splits/tabs/docks via `SplitId`/`TabId` handles.
+- Migrate 19 files.
+
+### Phase I — PersistenceScenario + VirtualFs
+
+- Build `VirtualFs` (in-memory, with adapter into the existing
+  filesystem trait).
+- Add `FsExternalEdit` to `InputEvent` (for `auto_revert` etc.).
+- Migrate 23 files.
+
+### Phase J — LspScenario
+
+- Build `LspScript` + fake LSP server adapter.
+- Add `LspMessage` to `InputEvent`.
+- Migrate 29 files.
+
+### Phase K — StyleScenario + visual regression migration
+
+- Land `StyledFrame` + `style()` projection.
+- `StyleShadow` (alternate role-to-color).
+- Replace `tests/e2e/theme_screenshots.rs` byte-snapshot tests with
+  `StyleScenario` JSON snapshots.
+- Migrate 12 style-coupled files.
+
+### Phase L — InputScenario + mouse projection
+
+- Add `MouseEvent` projection through `RenderSnapshot` (cell → byte).
+- Add `Compose`, `KeyChord` to `InputEvent`.
+- Migrate 7 files.
+
+### Phase M — TemporalScenario + MockClock
+
+- Inject `Clock` trait (~30 LOC production change).
+- Add `AdvanceClock` to `InputEvent`.
+- Migrate 3 files.
+
+### Phase N — TerminalIoScenario + RoundTripGrid
+
+- Formalize the existing `render_real` / `vt100` flow into a
+  `TerminalIoScenario`.
+- `EmitShadow` (alternate escape generator).
+- Migrate 7 files.
+
+### Phase O — PluginScenario
+
+- `PluginScript` carries plugin source + expected message log.
+- Migrate 5 files.
+
+### Phase P — GuiScenario (best-effort)
+
+- Decide whether `gui.rs` justifies its own scenario type or
+  whether its editor-level content is already covered by §H/§G/§F
+  and the GUI-specific bits stay imperative. Defer until last.
+
+### Cross-phase: corpus-guided proptest
+
+Once the corpus exists (Phase E), build a proptest strategy that
+samples scenario prefixes from the corpus and generates random
+tails. Run as a soak job in CI. Counterexamples write
+`tests/semantic/regressions/` JSON files. This thread runs in
+parallel with the migration phases and starts paying off
+immediately — it doesn't block any phase.
+
+### Sequencing
+
+Phase E is on the critical path. Phases F–O are independent and
+can run in parallel by different owners, ordered by ROI:
+
+1. F (LayoutScenario) — biggest test count after BufferScenario
+2. G (ModalScenario) — biggest absolute count
+3. K (StyleScenario) — kills the PNG pipeline; high signal on theme bugs
+4. J (LspScenario) — most flake-prone today
+5. I (PersistenceScenario)
+6. H (WorkspaceScenario)
+7. N (TerminalIoScenario)
+8. L (InputScenario)
+9. M (TemporalScenario)
+10. O (PluginScenario)
+11. P (GuiScenario, if pursued)
+
+Estimated effort: each phase is 2–4 weeks for one engineer once
+Phase E lands; total ≈ 6 person-months for the framework + 3 for
+migrations, parallelizable.
+
+## §18. Updated risks & non-goals
+
+### Risks specific to the realignment
+
+- **Scenario context becomes a god object.** Mitigation:
+  `ScenarioContext` fields are `Option<...>` so a buffer-only
+  scenario carries only `BufferContext`. JSON schema enforces
+  presence iff the runner needs it.
+- **Fake LSP / VirtualFs drift from real subsystems.** Mitigation:
+  the existing imperative e2e files for those subsystems stay
+  for one release after each phase ships. Differential testing
+  between fake and real catches drift before retirement.
+- **`InputEvent` enum grows unmaintainable.** Mitigation: keep
+  `Action` separate; only add new variants when a scenario type
+  legitimately needs them. The seven non-`Action` variants in
+  §14 are believed to be the ceiling, not a starting point.
+- **Snapshot churn on `RenderSnapshot` schema changes.**
+  Mitigation: snapshot files are `serde_json` with `#[serde(default)]`
+  on additive fields; schema changes are reviewed as data-model
+  changes, not as test churn.
+- **Corpus-guided proptest finds bugs that aren't in the migrated
+  scenario but block CI.** Mitigation: the soak job is non-blocking;
+  found bugs become regression JSON files and a separate gating
+  test.
+
+### Non-goals (revised, slimmer)
+
+- **Theorem-prover export.** Considered and rejected; data form is
+  for proptest + shadow leverage, not Lean. Removing this constraint
+  drops several requirements (formal `step` semantics, encoded
+  unicode tables, etc.).
+- **Replacing the rope buffer with a verified one.** Out of scope;
+  the rope is the production subject.
+- **GPU/driver-level GUI tests.** wgpu rendering quality is wgpu's
+  problem.
+- **Terminal-emulator-level tests** (xterm vs kitty vs alacritty).
+  We test the editor's *output*, not its consumers.
+
+## §19. Acceptance criteria for the realignment
+
+The realignment is "done" when:
+
+- [ ] `tests/e2e/` either contains zero files or contains only the
+      handful kept as redundant terminal-side proofs (per §7) and
+      the GUI-specific subset (per §13.1, GuiScenario).
+- [ ] `tests/semantic/` contains all twelve scenario types with at
+      least one example per type.
+- [ ] The corpus dumps to a JSON directory in CI artifacts on every
+      run.
+- [ ] At least three shadow models are wired into the
+      corpus-differential CI job.
+- [ ] Corpus-guided proptest runs as a soak job; counterexamples
+      produce regression JSON files automatically.
+- [ ] `theme_screenshots.rs` PNG pipeline is deleted.
+- [ ] The rendering-test split between `tests/e2e/` (renders) and
+      `tests/semantic/` (doesn't) no longer exists; rendering is
+      tested via §15's layered scenarios within the same framework.
+- [ ] Documentation: `CONTRIBUTING.md` rule #2 is rewritten to
+      describe the scenario-type taxonomy as the primary test idiom,
+      with terminal-side e2es as an explicit redundant proof
+      where needed.
