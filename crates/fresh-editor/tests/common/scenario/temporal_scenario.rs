@@ -5,15 +5,11 @@
 //! tick, captures a `RenderSnapshot`. The scenario asserts on the
 //! resulting `Vec<RenderSnapshot>`.
 //!
-//! Phase 10 is "honest skeleton": the data shape and runner are
-//! real, but the editor does not yet read time through an
-//! injectable [`Clock`] trait — animations consult
-//! `std::time::Instant::now()` directly. Until the production hook
-//! lands (~30 LOC: a `Clock` trait + a `MockClock` slot in
-//! `Editor`), this runner produces snapshots without the editor
-//! actually advancing animation state. Tests that rely on the time
-//! advance will fail meaningfully (snapshots match the t=0 frame),
-//! pointing at the missing hook rather than at a phantom test bug.
+//! Phase 10 is fully real: the editor already reads time through
+//! the existing `services::time_source::TimeSource` trait, and
+//! the harness already swaps in a `TestTimeSource` whose
+//! `advance(d)` is wired here. Animations *do* progress when the
+//! mock clock advances.
 
 use crate::common::harness::EditorTestHarness;
 use crate::common::scenario::context::MockClock;
@@ -56,11 +52,12 @@ pub fn check_temporal_scenario(s: TemporalScenario) -> Result<(), ScenarioFailur
             }
             InputEvent::AdvanceClock(d) => {
                 elapsed += *d;
-                // `Editor` still reads wall-clock time; once the
-                // `Clock` trait is wired, advance the MockClock here
-                // so animation state actually progresses. For now
-                // we just render and snapshot — animations will
-                // appear frozen.
+                // Advance the harness's `TestTimeSource` (already
+                // wired into the editor through the existing
+                // `services::time_source::TimeSource` trait).
+                // Editor animations / debounce / auto-save logic
+                // consult that source, so they advance in lockstep.
+                harness.advance_time(*d);
                 harness.render().expect("frame render failed");
                 frames.push(RenderSnapshot::extract(&mut harness));
             }

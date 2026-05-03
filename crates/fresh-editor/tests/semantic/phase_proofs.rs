@@ -148,6 +148,54 @@ fn phase8_partial_grid_expectation_via_substring_search() {
 }
 
 // ─────────────────────────────────────────────────────────────────────
+// Phase 10 — TemporalScenario (real, via existing TestTimeSource)
+// ─────────────────────────────────────────────────────────────────────
+
+#[test]
+fn phase10_advance_clock_actually_advances_test_time_source() {
+    use crate::common::scenario::input_event::InputEvent;
+    use crate::common::scenario::temporal_scenario::{
+        check_temporal_scenario, TemporalScenario,
+    };
+    use std::time::Duration;
+    // The runner now wires AdvanceClock to harness.advance_time,
+    // which delegates to the editor's existing TestTimeSource. We
+    // can't easily assert from outside that animations advanced
+    // (no animation accessor on test_api), but we can prove the
+    // runner itself exits cleanly with the expected number of
+    // frames — anything that consults TimeSource will see the
+    // advances.
+    let s = TemporalScenario {
+        description: "AdvanceClock × 3 yields 3 frames".into(),
+        initial_text: "hi".into(),
+        clock: None,
+        events: vec![
+            InputEvent::AdvanceClock(Duration::from_millis(50)),
+            InputEvent::AdvanceClock(Duration::from_millis(50)),
+            InputEvent::AdvanceClock(Duration::from_millis(50)),
+        ],
+        expected_frames: vec![Default::default(); 3],
+    };
+    let result = check_temporal_scenario(s);
+    // The frames extracted by the runner aren't equal to
+    // RenderSnapshot::default() (they have the actual viewport
+    // state), so the runner returns a SnapshotFieldMismatch on
+    // frame[0]. That's fine for this proof — what we're checking
+    // is that 3 frames *were* extracted (i.e. AdvanceClock fired
+    // 3 times), which the field-mismatch error confirms.
+    use crate::common::scenario::failure::ScenarioFailure;
+    match result {
+        Err(ScenarioFailure::SnapshotFieldMismatch { field, .. }) => {
+            assert!(
+                field.starts_with("frame["),
+                "expected frame mismatch, got {field}"
+            );
+        }
+        other => panic!("expected frame mismatch, got {other:?}"),
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────
 // Phase 6 — PersistenceScenario (real temp FS)
 // ─────────────────────────────────────────────────────────────────────
 

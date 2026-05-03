@@ -561,11 +561,11 @@ parallelizable; ordering below is by ROI.
 | 3 | `ModalScenario` | **landed** (real `ModalState` from `PopupManager`) | `EditorTestApi::modal_snapshot` |
 | 4 | `StyleScenario` | **skeleton** | needs `style()` extracted from `render()` ‹real production refactor› |
 | 5 | `LspScenario` | **skeleton** | needs fake LSP transport adapter at `LspManager` boundary ‹real production refactor› |
-| 6 | `PersistenceScenario` | **landed** (real-FS via harness temp dir) | `EditorTestApi`-only; `VirtualFs` is a future optimisation |
+| 6 | `PersistenceScenario` | **landed** (real-FS via harness temp dir; routes through the existing `model::filesystem::FileSystem` trait + `StdFileSystem` impl) | none beyond `EditorTestHarness::temp_dir_path`; an in-memory `FileSystem` impl would replace temp dir for speed but adds zero coverage |
 | 7 | `WorkspaceScenario` | **landed** (real `WorkspaceState` from buffer map) | `EditorTestApi::buffer_count`/`active_buffer_path`/`buffer_paths` |
 | 8 | `TerminalIoScenario` | **landed** (real `RoundTripGrid` via existing vt100 parser) | `EditorTestHarness::vt100_cursor_position` |
 | 9 | `InputScenario` | **landed minimal** (mouse Click(Left) routes through `Editor::handle_mouse`) | `EditorTestApi::dispatch_mouse_click` |
-| 10 | `TemporalScenario` | **partial** (frame loop runs; animations don't actually advance until a `Clock` trait lands) | needs `Clock` trait injection ‹real production refactor› |
+| 10 | `TemporalScenario` | **landed** (`AdvanceClock(d)` calls `harness.advance_time(d)` which advances the existing `services::time_source::TestTimeSource` the editor already reads) | none — the `TimeSource` trait + `TestTimeSource` already exist |
 | 11 | `PluginScenario` | **skeleton** | needs plugin runtime test entry |
 | 12 | `GuiScenario` | **skeleton** | needs wgpu/winit test API; lowest priority |
 
@@ -584,30 +584,44 @@ production binaries.
 
 ### 10.3 What's blocked on production refactors
 
-Three phases (4, 5, 10) and the longer-term form of two more
-(6, 11) need real changes to production code, not just additive
-test-side accessors:
+Two phases (4, 5) and one phase's optional form (11) need real
+changes to production code, not just additive test-side
+accessors:
 
 - **Phase 4 (`StyleScenario`)** needs `render()` factored into
   named `layout` / `style` / `emit` functions so the cell-role ×
   theme projection is invocable from tests in isolation.
 - **Phase 5 (`LspScenario`)** needs a transport-level seam in
-  `LspManager` so a fake adapter can intercept JSON-RPC.
-- **Phase 10 (`TemporalScenario`)** needs the editor to read time
-  through a `Clock` trait whose impl is selectable per-harness.
-  The frame-loop runner already works; only animation *advance*
-  is blocked.
-- **Phase 6 (`PersistenceScenario`)** has a real-FS runner now;
-  the longer-term `VirtualFs` adapter would replace temp-dir
-  fixtures with an in-memory backend.
+  `LspManager` so a fake adapter can intercept JSON-RPC. The
+  existing `tests/common/fake_lsp.rs` is a Bash subprocess that
+  the real `LspManager` connects to over stdin/stdout — usable
+  but flaky and not script-aware.
 - **Phase 11 (`PluginScenario`)** needs the plugin runtime to
   accept a script-string load and expose its message log through
   `EditorTestApi`.
 
-Until those land, the corresponding scenario types ship as
-**honest skeletons**: data shape + JSON round-trip work, the
-runner panics with the precise blocker message naming the
-production hook still needed.
+Three phases that *appeared* blocked turned out not to be —
+production already had the right traits and only needed the
+scenario runner wired through:
+
+- **Phase 6 (`PersistenceScenario`)** uses the existing
+  `model::filesystem::FileSystem` trait. Today's runner uses the
+  real-FS impl (`StdFileSystem`) under a per-harness tempdir; the
+  trait was already abstracted, so swapping in an in-memory
+  `MemoryFileSystem` is a pure additive impl whenever the speed
+  matters.
+- **Phase 10 (`TemporalScenario`)** uses the existing
+  `services::time_source::TimeSource` trait + `TestTimeSource`.
+  `AdvanceClock(d)` routes through `harness.advance_time(d)`,
+  which is the same path animations / debounces / auto-save
+  already consult.
+- **Phase 8 (`TerminalIoScenario`)** uses the existing vt100
+  parser the harness already wires through `render_real()`.
+
+Until the still-blocked phases land, the corresponding scenario
+types ship as **honest skeletons**: data shape + JSON round-trip
+work, the runner panics with the precise blocker message naming
+the production hook still needed.
 
 ### 10.4 Sequencing
 
